@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dr. Marcus Chen | Crypto Trading Expert</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Sidebar -->
+        <aside class="sidebar">
+            <div class="profile-section">
+                <div class="avatar">
+                    <span class="avatar-initials">MC</span>
+                    <span class="status-indicator"></span>
+                </div>
+                <h1 class="profile-name">Dr. Marcus Chen</h1>
+                <p class="profile-title">Crypto Trading Expert</p>
+                <div class="credentials">
+                    <span class="credential-badge">PhD MIT</span>
+                    <span class="credential-badge">15+ Years</span>
+                </div>
+            </div>
+
+            <div class="expertise-section">
+                <h3 class="section-title">Expertise</h3>
+                <ul class="expertise-list">
+                    <li><span class="icon">&#9672;</span> Market Microstructure</li>
+                    <li><span class="icon">&#9672;</span> On-Chain Analytics</li>
+                    <li><span class="icon">&#9672;</span> DeFi Protocols</li>
+                    <li><span class="icon">&#9672;</span> Technical Analysis</li>
+                    <li><span class="icon">&#9672;</span> Behavioral Finance</li>
+                </ul>
+            </div>
+
+            <div class="market-widgets">
+                <h3 class="section-title">Market Pulse</h3>
+                <div class="market-card">
+                    <div class="market-item">
+                        <span class="coin">BTC</span>
+                        <span class="price" id="btc-price">$--,---</span>
+                        <span class="change positive" id="btc-change">+0.00%</span>
+                    </div>
+                    <div class="market-item">
+                        <span class="coin">ETH</span>
+                        <span class="price" id="eth-price">$-,---</span>
+                        <span class="change positive" id="eth-change">+0.00%</span>
+                    </div>
+                    <div class="market-item">
+                        <span class="coin">SOL</span>
+                        <span class="price" id="sol-price">$---</span>
+                        <span class="change negative" id="sol-change">-0.00%</span>
+                    </div>
+                </div>
+                <div class="fear-greed">
+                    <span class="label">Fear & Greed Index</span>
+                    <div class="gauge">
+                        <div class="gauge-fill" id="fear-greed-fill"></div>
+                    </div>
+                    <span class="gauge-value" id="fear-greed-value">--</span>
+                </div>
+            </div>
+
+            <div class="disclaimer">
+                <p>Not financial advice. Crypto is volatile. Always DYOR.</p>
+            </div>
+        </aside>
+
+        <!-- Main Chat Area -->
+        <main class="chat-container">
+            <header class="chat-header">
+                <div class="header-left">
+                    <button class="menu-toggle" id="menu-toggle">
+                        <span></span>
+                        <span></span>
+                        <span></span>
+                    </button>
+                    <h2>Analysis Terminal</h2>
+                </div>
+                <div class="header-right">
+                    <div class="connection-status">
+                        <span class="status-dot"></span>
+                        <span>Live</span>
+                    </div>
+                </div>
+            </header>
+
+            <div class="chat-messages" id="chat-messages">
+                <div class="message assistant">
+                    <div class="message-avatar">MC</div>
+                    <div class="message-content">
+                        <div class="message-header">
+                            <span class="message-author">Dr. Marcus Chen</span>
+                            <span class="message-time">Now</span>
+                        </div>
+                        <div class="message-text">
+                            <p>Welcome to my analysis terminal. I'm Dr. Marcus Chen—PhD in Financial Engineering, former hedge fund manager, and full-time crypto analyst with over 8 years in this space.</p>
+                            <p>What most retail traders miss is the <strong>confluence of signals</strong>. I don't just look at price—I synthesize on-chain data, derivatives positioning, social sentiment, and macro factors to identify asymmetric opportunities.</p>
+                            <p>Ask me about any cryptocurrency, and I'll give you the institutional-grade analysis that separates professionals from amateurs. What asset are you looking at?</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="chat-input-container">
+                <div class="quick-actions">
+                    <button class="quick-btn" data-query="What's your take on Bitcoin right now?">BTC Analysis</button>
+                    <button class="quick-btn" data-query="Should I buy Ethereum at current levels?">ETH Outlook</button>
+                    <button class="quick-btn" data-query="What altcoins are showing strength?">Altcoin Alpha</button>
+                    <button class="quick-btn" data-query="What's the smart money doing?">Smart Money</button>
+                </div>
+                <form class="chat-input-form" id="chat-form">
+                    <div class="input-wrapper">
+                        <input
+                            type="text"
+                            id="chat-input"
+                            placeholder="Ask about any crypto asset, market conditions, or trading strategy..."
+                            autocomplete="off"
+                        >
+                        <button type="submit" class="send-btn" id="send-btn">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M22 2L11 13M22 2L15 22L11 13M11 13L2 9L22 2"/>
+                            </svg>
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </main>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
