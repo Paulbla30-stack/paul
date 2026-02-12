@@ -1,0 +1,43 @@
+#!/bin/sh
+# OpenClaw Agent Launcher
+# =======================
+# Wrapper script that launches the OpenClaw Python agent
+# with proper environment setup.
+
+set -e
+
+OPENCLAW_DIR="/usr/lib/openclaw"
+CONFIG="/etc/openclaw/config.yaml"
+LOG="/var/log/openclaw.log"
+
+export PYTHONPATH="$OPENCLAW_DIR"
+
+# Detect environment
+if [ -n "$OPENCLAW_DEBUG" ] && [ "$OPENCLAW_DEBUG" = "1" ]; then
+    DEBUG_FLAG="--debug"
+else
+    DEBUG_FLAG=""
+fi
+
+if [ -n "$OPENCLAW_SCANONLY" ] && [ "$OPENCLAW_SCANONLY" = "1" ]; then
+    SCAN_FLAG="--scan-only"
+else
+    SCAN_FLAG=""
+fi
+
+# Check for Python
+if command -v python3 >/dev/null 2>&1; then
+    PYTHON=python3
+elif command -v python >/dev/null 2>&1; then
+    PYTHON=python
+else
+    echo "[!] ERROR: Python not found. Cannot start OpenClaw agent."
+    exit 1
+fi
+
+echo "[*] Starting OpenClaw Agent..."
+echo "[*] Python: $($PYTHON --version 2>&1)"
+echo "[*] Config: $CONFIG"
+echo ""
+
+exec $PYTHON -m openclaw.main --config "$CONFIG" $DEBUG_FLAG $SCAN_FLAG "$@" 2>&1 | tee -a "$LOG"
