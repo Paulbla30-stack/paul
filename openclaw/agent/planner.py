@@ -27,6 +27,13 @@ class TaskType(Enum):
     MAINTENANCE = "maintenance"
     OBSERVATION = "observation"
     GOAL_STEP = "goal_step"
+    CLOUD_PROBE = "cloud_probe"
+
+
+# Boot-task profiles: what the agent should look at first depends on
+# where it is running.  "bare-metal" is the bootable ISO with a screen
+# and keyboard; "cloud" is a headless EC2 instance.
+PROFILES = ("bare-metal", "cloud")
 
 
 @dataclass(order=True)
@@ -61,8 +68,9 @@ class TaskPlanner:
     executed first (0 = highest priority).
     """
 
-    def __init__(self, memory):
+    def __init__(self, memory, profile: str = "bare-metal"):
         self.memory = memory
+        self.profile = profile if profile in PROFILES else "bare-metal"
         self.pending_tasks: list[Task] = []  # heapq
         self.goals: list[dict] = []
         self._boot_tasks_generated = False
@@ -174,7 +182,41 @@ class TaskPlanner:
 
     def _generate_boot_tasks(self):
         """Generate initial tasks when the agent first starts."""
-        boot_tasks = [
+        if self.profile == "cloud":
+            boot_tasks = self._cloud_boot_tasks()
+        else:
+            boot_tasks = self._bare_metal_boot_tasks()
+        for task in boot_tasks:
+            self.add_task(task)
+
+    def _cloud_boot_tasks(self) -> list:
+        """Headless instance: identify the cloud environment, then audit."""
+        return [
+            Task(
+                priority=0,
+                description="Identify cloud instance (IMDS)",
+                task_type=TaskType.CLOUD_PROBE,
+            ),
+            Task(
+                priority=1,
+                description="Check system memory status",
+                task_type=TaskType.SYSTEM_CHECK,
+            ),
+            Task(
+                priority=1,
+                description="Enumerate storage devices",
+                task_type=TaskType.HARDWARE_PROBE,
+            ),
+            Task(
+                priority=2,
+                description="Run boot security scan",
+                task_type=TaskType.SECURITY_SCAN,
+            ),
+        ]
+
+    def _bare_metal_boot_tasks(self) -> list:
+        """Bootable ISO: enumerate the physical hardware first."""
+        return [
             Task(
                 priority=0,
                 description="Enumerate hardware devices",
@@ -206,5 +248,3 @@ class TaskPlanner:
                 task_type=TaskType.SECURITY_SCAN,
             ),
         ]
-        for task in boot_tasks:
-            self.add_task(task)

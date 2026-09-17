@@ -40,4 +40,10 @@ echo "[*] Python: $($PYTHON --version 2>&1)"
 echo "[*] Config: $CONFIG"
 echo ""
 
+# Under systemd stdout already goes to the journal (and the serial console
+# on the AMI), so skip the tee; on the ISO keep a file copy of the output.
+if [ -n "$JOURNAL_STREAM" ] || [ "$OPENCLAW_NO_TEE" = "1" ]; then
+    exec $PYTHON -m openclaw.main --config "$CONFIG" $DEBUG_FLAG $SCAN_FLAG "$@"
+fi
+
 exec $PYTHON -m openclaw.main --config "$CONFIG" $DEBUG_FLAG $SCAN_FLAG "$@" 2>&1 | tee -a "$LOG"

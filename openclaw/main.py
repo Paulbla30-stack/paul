@@ -8,6 +8,7 @@ autonomous agentic loop.
 
 import os
 import sys
+import json
 import signal
 import logging
 import argparse
@@ -43,6 +44,35 @@ def parse_args():
         "--no-hardware", action="store_true",
         help="Skip hardware initialization (for testing)"
     )
+    parser.add_argument(
+        "--extra-config", action="append", default=[], metavar="PATH",
+        help="Additional YAML overlay(s) merged after --config "
+             "(e.g. /etc/openclaw/cloud.yaml written at boot)"
+    )
+    parser.add_argument(
+        "--headless", action="store_true",
+        help="Run the agent loop without the console UI (servers, AMIs)"
+    )
+    parser.add_argument(
+        "--cycle-interval", type=float, default=None, metavar="SECONDS",
+        help="Seconds between idle cycles in headless mode"
+    )
+    parser.add_argument(
+        "--max-cycles", type=int, default=None,
+        help="Stop after N cycles in headless mode (0 = run forever)"
+    )
+    parser.add_argument(
+        "--status-port", type=int, default=None,
+        help="Loopback port for the headless status endpoint (0 = disabled)"
+    )
+    parser.add_argument(
+        "--status-file", default=None,
+        help="Where headless mode writes its JSON status snapshot"
+    )
+    parser.add_argument(
+        "--status", action="store_true",
+        help="Print the status of a running headless agent and exit"
+    )
     return parser.parse_args()
 
 
@@ -52,14 +82,20 @@ def setup_logging(debug=False):
     return logging.getLogger("openclaw")
 
 
-def load_config(path):
-    """Load configuration from YAML file or return defaults."""
+def load_config(path, extra_paths=()):
+    """Load configuration from YAML file(s) or return defaults.
+
+    ``extra_paths`` are overlays merged in order after ``path``; a missing
+    overlay is skipped silently so the same command line works on the ISO
+    and on a cloud instance.
+    """
     config = {
         "agent": {
             "name": "OpenClaw",
             "max_tasks": 100,
             "memory_limit_mb": 512,
             "auto_plan": True,
+            "profile": "bare-metal",
         },
         "hardware": {
             "display": {"enabled": True, "framebuffer": "/dev/fb0"},
@@ -72,20 +108,21 @@ def load_config(path):
             "enforce_hardening": False,
             "report_path": "/var/log/openclaw-security.log",
         },
+        "cloud": {
+            "enabled": False,
+            "provider": "none",
+            "headless": False,
+            "cycle_interval": 10,
+            "max_cycles": 0,
+            "status_port": 8471,
+            "status_host": "127.0.0.1",
+            "status_file": "/run/openclaw/status.json",
+        },
+        "goals": [],
     }
 
-    if os.path.exists(path):
-        try:
-            import yaml
-            with open(path, "r") as f:
-                user_config = yaml.safe_load(f)
-            if user_config:
-                _deep_merge(config, user_config)
-        except ImportError:
-            # YAML not available, try simple parsing
-            pass
-        except Exception:
-            pass
+    for cfg_path in (path, *extra_paths):
+        _merge_config_file(config, cfg_path)
 
     # Override from environment
     if os.environ.get("OPENCLAW_FULLACCESS") == "1":
@@ -98,8 +135,36 @@ def load_config(path):
                 hw["enabled"] = False
     if os.environ.get("OPENCLAW_DEBUG") == "1":
         config["agent"]["debug"] = True
+    if os.environ.get("OPENCLAW_HEADLESS") == "1":
+        config["cloud"]["headless"] = True
 
     return config
+
+
+def _merge_config_file(config, path):
+    """Merge one YAML/JSON file into config; missing or bad files are skipped."""
+    if not path or not os.path.exists(path):
+        return False
+    try:
+        with open(path, "r") as f:
+            text = f.read()
+    except OSError:
+        return False
+    user_config = None
+    try:
+        import yaml
+        user_config = yaml.safe_load(text)
+    except ImportError:
+        try:
+            user_config = json.loads(text)
+        except ValueError:
+            user_config = None
+    except Exception:
+        user_config = None
+    if isinstance(user_config, dict):
+        _deep_merge(config, user_config)
+        return True
+    return False
 
 
 def _deep_merge(base, override):
@@ -127,6 +192,7 @@ class OpenClawSystem:
         self.scanner = None
         self.agent = None
         self.ui = None
+        self.runner = None
 
     def initialize_hardware(self):
         """Initialize all hardware access layers."""
@@ -169,10 +235,8 @@ class OpenClawSystem:
         )
         return report
 
-    def start_agent(self):
-        """Start the agentic core loop."""
-        self.log.info("Starting OpenClaw Agent Core...")
-
+    def build_agent(self):
+        """Construct the AgentCore and seed it with configured goals."""
         hardware = {
             "display": self.display,
             "input": self.input_mgr,
@@ -185,16 +249,51 @@ class OpenClawSystem:
             hardware=hardware,
             logger=self.log,
         )
-        self.ui = ConsoleUI(self.agent)
+        for goal in self.config.get("goals") or []:
+            if isinstance(goal, str):
+                self.agent.add_goal(goal)
+            elif isinstance(goal, dict) and goal.get("description"):
+                self.agent.add_goal(goal["description"],
+                                    int(goal.get("priority", 5)))
+        cloud = self.config.get("cloud", {})
+        if cloud.get("instance"):
+            self.agent.memory.store(category="cloud_instance",
+                                    data=cloud["instance"])
+        return self.agent
+
+    def start_agent(self, headless=None):
+        """Start the agentic core loop (console UI or headless)."""
+        self.log.info("Starting OpenClaw Agent Core...")
+        self.build_agent()
+
+        cloud = self.config.get("cloud", {})
+        if headless is None:
+            headless = bool(cloud.get("headless"))
 
         self.running = True
-        self.ui.run()
+        if headless:
+            from openclaw.cloud.headless import HeadlessRunner
+            port = cloud.get("status_port")
+            self.runner = HeadlessRunner(
+                self.agent, self.log,
+                interval=cloud.get("cycle_interval", 10),
+                max_cycles=cloud.get("max_cycles", 0),
+                status_port=(int(port) if port else None),
+                status_host=cloud.get("status_host", "127.0.0.1"),
+                status_file=cloud.get("status_file"),
+            )
+            self.runner.run()
+        else:
+            self.ui = ConsoleUI(self.agent)
+            self.ui.run()
 
     def shutdown(self):
         """Clean shutdown of all components."""
         self.log.info("Shutting down OpenClaw...")
         self.running = False
 
+        if self.runner:
+            self.runner.stop()
         if self.agent:
             self.agent.shutdown()
         if self.display:
@@ -209,14 +308,79 @@ class OpenClawSystem:
         self.log.info("Shutdown complete.")
 
 
+def query_status(config):
+    """Fetch the status of a running headless agent (endpoint, then file)."""
+    cloud = config.get("cloud", {})
+    port = cloud.get("status_port")
+    if port:
+        import urllib.request
+        url = f"http://{cloud.get('status_host', '127.0.0.1')}:{port}/status"
+        try:
+            with urllib.request.urlopen(url, timeout=2) as resp:
+                return json.loads(resp.read().decode()), url
+        except Exception:
+            pass
+    status_file = cloud.get("status_file")
+    if status_file and os.path.exists(status_file):
+        try:
+            with open(status_file) as f:
+                return json.load(f), status_file
+        except (OSError, ValueError):
+            pass
+    return None, None
+
+
+def print_status(status, source):
+    print(f"OpenClaw agent status (from {source})")
+    print(f"  Name:            {status.get('name')}")
+    print(f"  Profile:         {status.get('profile')}")
+    print(f"  Running:         {status.get('running')}")
+    print(f"  Cycles:          {status.get('cycle_count')}")
+    print(f"  Pending tasks:   {status.get('pending_tasks')}")
+    print(f"  Completed tasks: {status.get('completed_tasks')}")
+    print(f"  Memory entries:  {status.get('memory_entries')}")
+    runner = status.get("runner") or {}
+    if runner:
+        print(f"  Uptime:          {runner.get('uptime_seconds')}s")
+        print(f"  Last action:     {runner.get('last_action')}")
+    current = status.get("current_task")
+    if current:
+        print(f"  Current task:    {current.get('description')}")
+
+
+def apply_cli_overrides(config, args):
+    """Command-line flags win over every config file."""
+    cloud = config["cloud"]
+    if args.headless:
+        cloud["headless"] = True
+    if args.cycle_interval is not None:
+        cloud["cycle_interval"] = args.cycle_interval
+    if args.max_cycles is not None:
+        cloud["max_cycles"] = args.max_cycles
+    if args.status_port is not None:
+        cloud["status_port"] = args.status_port or None
+    if args.status_file is not None:
+        cloud["status_file"] = args.status_file or None
+    return config
+
+
 def main():
     args = parse_args()
     debug = args.debug or os.environ.get("OPENCLAW_DEBUG") == "1"
     logger = setup_logging(debug)
 
-    logger.info("OpenClaw Agent v%s starting...", "1.0.0")
+    config = load_config(args.config, args.extra_config)
+    apply_cli_overrides(config, args)
 
-    config = load_config(args.config)
+    if args.status:
+        status, source = query_status(config)
+        if status is None:
+            print("OpenClaw agent is not running (no status endpoint or file).")
+            sys.exit(3)
+        print_status(status, source)
+        return
+
+    logger.info("OpenClaw Agent v%s starting...", "1.0.0")
     system = OpenClawSystem(config, logger)
 
     # Handle signals for clean shutdown
@@ -253,7 +417,7 @@ def main():
 
     # Start the agent
     try:
-        system.start_agent()
+        system.start_agent(headless=config["cloud"].get("headless"))
     except KeyboardInterrupt:
         pass
     finally:

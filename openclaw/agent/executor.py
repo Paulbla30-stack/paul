@@ -35,6 +35,7 @@ class TaskExecutor:
             TaskType.MAINTENANCE: self._handle_maintenance,
             TaskType.OBSERVATION: self._handle_observation,
             TaskType.GOAL_STEP: self._handle_goal_step,
+            TaskType.CLOUD_PROBE: self._handle_cloud_probe,
         }
 
     def execute(self, task: Task) -> dict:
@@ -201,6 +202,18 @@ class TaskExecutor:
                 except Exception:
                     state[name] = "error"
         return {"success": True, "output": state}
+
+    def _handle_cloud_probe(self, task: Task) -> dict:
+        """Ask the cloud metadata service who and where we are."""
+        from openclaw.cloud.imds import IMDSClient
+        imds = IMDSClient()
+        info = imds.summary()
+        if not info:
+            info = {"provider": "none", "available": False}
+        else:
+            info["available"] = True
+        self.memory.store(category="cloud_probe", data=info)
+        return {"success": True, "output": info}
 
     def _handle_goal_step(self, task: Task) -> dict:
         """Execute a step toward a goal."""

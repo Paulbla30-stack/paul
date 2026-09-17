@@ -1,0 +1,20 @@
+[Unit]
+Description=OpenClaw cloud bootstrap (IMDS + user data -> /etc/openclaw/cloud.yaml)
+Documentation=https://github.com/Paulbla30-stack/paul
+After=network-online.target cloud-init.service
+Wants=network-online.target
+Before=openclaw.service
+ConditionPathExists=/usr/lib/openclaw/openclaw/cloud/bootstrap.py
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+Environment=PYTHONPATH=/usr/lib/openclaw
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/usr/bin/python3 -m openclaw.cloud.bootstrap --output /etc/openclaw/cloud.yaml
+TimeoutStartSec=90
+StandardOutput=journal+console
+StandardError=journal+console
+
+[Install]
+WantedBy=multi-user.target

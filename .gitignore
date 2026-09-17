@@ -5,3 +5,13 @@ build/
 *.iso
 *.img
 .env
+
+# Packer / Terraform
+aws/packer/*.auto.pkrvars.hcl
+packer_cache/
+crash.log
+aws/terraform/.terraform/
+aws/terraform/.terraform.lock.hcl
+aws/terraform/*.tfstate
+aws/terraform/*.tfstate.*
+aws/terraform/*.tfvars

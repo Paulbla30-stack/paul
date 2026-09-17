@@ -1,0 +1,43 @@
+# OpenClaw Agent Configuration - AWS AMI profile
+# ==============================================
+# Installed as /etc/openclaw/config.yaml on the AMI.  Instance-specific
+# values (identity, user-data overrides, goals) land in
+# /etc/openclaw/cloud.yaml, written by openclaw-bootstrap.service at boot
+# and merged on top of this file.
+
+agent:
+  name: "OpenClaw"
+  profile: "cloud"          # boot tasks: IMDS probe, memory, storage, scan
+  max_tasks: 100
+  memory_limit_mb: 512
+  auto_plan: true
+
+hardware:
+  # EC2 instances have no framebuffer or physical input devices.
+  display:
+    enabled: false
+  input:
+    enabled: false
+  memory:
+    enabled: true
+    max_map_mb: 256
+  storage:
+    enabled: true
+    readonly: false          # set true for a read-only auditing agent
+
+security:
+  scan_on_boot: true
+  enforce_hardening: false
+  report_path: "/var/log/openclaw-security.log"
+
+cloud:
+  enabled: true
+  provider: "aws"
+  headless: true             # no console; run the loop as a service
+  cycle_interval: 30         # seconds between idle cycles
+  max_cycles: 0              # 0 = run forever
+  status_host: "127.0.0.1"   # loopback only; use SSM/SSH to reach it
+  status_port: 8471
+  status_file: "/run/openclaw/status.json"
+
+goals: []                    # add goals via user data or the openclaw:goal tag

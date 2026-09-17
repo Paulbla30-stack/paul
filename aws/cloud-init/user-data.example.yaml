@@ -1,0 +1,33 @@
+#cloud-config
+# Example EC2 user data for an OpenClaw agent-first instance.
+#
+# openclaw-bootstrap.service reads this block through IMDS at every boot
+# and writes /etc/openclaw/cloud.yaml, which the agent merges on top of
+# /etc/openclaw/config.yaml.  Everything under `openclaw:` is optional.
+#
+# Goals may also be given without user data by tagging the instance with
+#   openclaw:goal = "<text>"     and/or     openclaw:name = "<agent name>"
+# (enable "Allow tags in instance metadata" on the instance).
+
+openclaw:
+  agent:
+    name: paul-life-agent
+
+  goals:
+    - description: Keep the root filesystem under 80% used
+      priority: 2
+    - description: Report security posture every cycle
+      priority: 5
+    - Watch memory pressure and log when above 90%
+
+  cloud:
+    cycle_interval: 30        # seconds between idle cycles
+    status_port: 8471         # loopback status endpoint (0 disables)
+
+  security:
+    scan_on_boot: true
+    enforce_hardening: false
+
+# Regular cloud-init keys still work alongside the openclaw block:
+# packages:
+#   - htop

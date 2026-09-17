@@ -2,7 +2,8 @@
 # =====================================
 
 SHELL := /bin/bash
-.PHONY: all iso rootfs clean test scan qemu lint help
+.PHONY: all iso rootfs clean test scan qemu lint help \
+        headless status ami-bundle ami-init ami-validate ami ami-fmt tf-init tf-validate
 
 # Directories
 BUILD_DIR    := build
@@ -20,6 +21,18 @@ PIP          := pip3
 # ISO tools
 GRUB_MKRESCUE := grub-mkrescue
 XORRISO       := xorriso
+
+# AWS AMI (Packer)
+PACKER        := packer
+TERRAFORM     := terraform
+PACKER_DIR    := aws/packer
+AWS_REGION    ?= eu-west-2
+AMI_ARCH      ?= x86_64
+AMI_BASE      ?= al2023
+AMI_INSTANCE  ?= t3.small
+AMI_BUNDLE    := $(BUILD_DIR)/openclaw-src.tar.gz
+PACKER_VARS   := -var region=$(AWS_REGION) -var arch=$(AMI_ARCH) \
+                 -var base=$(AMI_BASE) -var instance_type=$(AMI_INSTANCE)
 
 # Kernel (use host kernel for now, override for custom)
 KERNEL       ?= /boot/vmlinuz-$(shell uname -r)
@@ -112,6 +125,46 @@ qemu: iso ## Boot ISO in QEMU for testing
 		-vga virtio \
 		-usb -device usb-tablet \
 		-boot d
+
+# ---- Headless / cloud mode ----
+
+headless: ## Run the agent headless locally for a few cycles (no hardware)
+	PYTHONPATH=. $(PYTHON) -m openclaw.main --no-hardware --headless \
+		--config rootfs/etc/openclaw/config-aws.yaml \
+		--max-cycles $(or $(CYCLES),5) --cycle-interval 1 \
+		--status-port 8471 --status-file $(BUILD_DIR)/status.json
+
+status: ## Query a running headless agent
+	PYTHONPATH=. $(PYTHON) -m openclaw.main --status \
+		--config rootfs/etc/openclaw/config-aws.yaml \
+		--status-file $(BUILD_DIR)/status.json
+
+# ---- AWS AMI ----
+
+ami-bundle: $(BUILD_DIR) ## Tar the committed tree for upload to the build instance
+	@echo "[*] Bundling source (git archive HEAD)..."
+	git archive --format=tar.gz -o $(AMI_BUNDLE) HEAD
+	@echo "[+] Bundle: $(AMI_BUNDLE)"
+
+ami-init: ## Install the Packer amazon plugin
+	$(PACKER) init $(PACKER_DIR)
+
+ami-fmt: ## Format the Packer template
+	$(PACKER) fmt $(PACKER_DIR)
+
+ami-validate: ami-bundle ## Validate the Packer template
+	$(PACKER) validate $(PACKER_VARS) $(PACKER_DIR)
+
+ami: ami-validate ## Build the OpenClaw agent-first AMI in $(AWS_REGION)
+	@echo "[*] Building AMI ($(AMI_BASE), $(AMI_ARCH)) in $(AWS_REGION)..."
+	$(PACKER) build $(PACKER_VARS) $(PACKER_DIR)
+	@echo "[+] AMI manifest: $(BUILD_DIR)/ami-manifest.json"
+
+tf-init: ## terraform init for the launch example
+	$(TERRAFORM) -chdir=aws/terraform init
+
+tf-validate: tf-init ## terraform validate for the launch example
+	$(TERRAFORM) -chdir=aws/terraform validate
 
 # ---- Cleanup ----
 

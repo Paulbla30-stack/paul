@@ -31,10 +31,11 @@ class AgentCore:
         self.log = logger.getChild("agent")
         self.name = config.get("name", "OpenClaw")
         self.max_tasks = config.get("max_tasks", 100)
+        self.profile = config.get("profile", "bare-metal")
 
         # Sub-components
         self.memory = AgentMemory(max_entries=1000)
-        self.planner = TaskPlanner(self.memory)
+        self.planner = TaskPlanner(self.memory, profile=self.profile)
         self.executor = TaskExecutor(hardware, self.memory, self.log)
 
         # State
@@ -167,6 +168,7 @@ class AgentCore:
         """Return the current agent status."""
         return {
             "name": self.name,
+            "profile": self.profile,
             "running": self.running,
             "cycle_count": self.cycle_count,
             "current_task": (self.current_task.to_dict()
