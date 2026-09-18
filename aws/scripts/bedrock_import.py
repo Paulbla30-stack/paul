@@ -32,17 +32,24 @@ FETCH_SCRIPT = r"""#!/bin/bash
 set -euo pipefail
 REPO="$1"; DEST="$2"; TOKEN_SECRET="${3:-}"; REGION="$4"
 dnf -y install python3.11 python3.11-pip awscli-2 >/dev/null 2>&1 || dnf -y install python3.11 python3.11-pip >/dev/null
-python3.11 -m pip install --quiet --no-cache-dir "huggingface_hub[cli,hf_transfer]"
+python3.11 -m pip install --quiet --no-cache-dir "huggingface_hub>=0.30"
 mkdir -p /data/model
 if [ -n "$TOKEN_SECRET" ]; then
   export HF_TOKEN="$(aws secretsmanager get-secret-value --region "$REGION" --secret-id "$TOKEN_SECRET" --query SecretString --output text)"
 fi
-export HF_HUB_ENABLE_HF_TRANSFER=1
 echo "[fetch] downloading $REPO"
-python3.11 -m huggingface_hub.commands.huggingface_cli download "$REPO" \
-  --include "*.safetensors" "*.json" "*.txt" "*.model" "*.tiktoken" "*.jinja" \
-  --exclude "*consolidated*" "original/*" \
-  --local-dir /data/model
+# The Python API is stable across huggingface_hub 0.x and 1.x; the CLI is not.
+REPO="$REPO" python3.11 - <<'PY'
+import os
+from huggingface_hub import snapshot_download
+path = snapshot_download(
+    os.environ["REPO"], local_dir="/data/model",
+    allow_patterns=["*.safetensors", "*.json", "*.txt", "*.model", "*.tiktoken", "*.jinja"],
+    ignore_patterns=["*consolidated*", "original/*"],
+    max_workers=8,
+)
+print("[fetch] downloaded to", path)
+PY
 echo "[fetch] files:"; ls -la /data/model | head -40
 du -sh /data/model
 echo "[fetch] syncing to $DEST"
