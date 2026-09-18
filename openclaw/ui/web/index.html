@@ -159,7 +159,9 @@
   // ---- auth ----
   function headers(extra) { return Object.assign({ "Authorization": "Bearer " + token }, extra || {}); }
   async function api(path, opts) {
-    const r = await fetch(path, Object.assign({ headers: headers((opts && opts.headers) || {}) }, opts || {}));
+    const init = Object.assign({}, opts || {});
+    init.headers = headers(init.headers || {});   // never let caller headers drop the token
+    const r = await fetch(path, init);
     if (r.status === 401) { showLogin("Token rejected"); throw new Error("unauthorised"); }
     const text = await r.text();
     let data; try { data = JSON.parse(text); } catch (e) { data = { raw: text }; }
