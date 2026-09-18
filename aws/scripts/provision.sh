@@ -70,11 +70,13 @@ if ! $PY -c 'import yaml' 2>/dev/null; then
         || $PY -m pip install --no-cache-dir --break-system-packages pyyaml
 fi
 
-# The LLM planner uses the official Anthropic SDK.
-log "Installing the anthropic SDK"
-$PY -m pip install --no-cache-dir --upgrade "anthropic>=1.6" \
-    || $PY -m pip install --no-cache-dir --upgrade --break-system-packages "anthropic>=1.6"
-$PY -c 'import anthropic; print("[provision] anthropic", anthropic.__version__)'
+# The LLM planner uses the official Anthropic SDK (llm.provider: anthropic)
+# or boto3 for Amazon Bedrock (llm.provider: bedrock). Install both so the
+# provider is a config choice at launch time.
+log "Installing the anthropic SDK and boto3"
+$PY -m pip install --no-cache-dir --upgrade "anthropic>=1.6" "boto3>=1.34" \
+    || $PY -m pip install --no-cache-dir --upgrade --break-system-packages "anthropic>=1.6" "boto3>=1.34"
+$PY -c 'import anthropic, boto3; print("[provision] anthropic", anthropic.__version__, "boto3", boto3.__version__)'
 command -v aws >/dev/null 2>&1 && log "aws cli: $(aws --version 2>&1 | head -1)" \
     || log "WARNING: aws cli missing; llm.api_key_ssm_parameter will not work"
 

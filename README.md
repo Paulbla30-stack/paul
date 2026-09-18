@@ -118,6 +118,10 @@ PYTHONPATH=. python3 -m openclaw.main --no-hardware --llm   # console: think / a
 
 Key points:
 
+- **Provider**: `llm.provider: anthropic` (Claude via the Claude API) or
+  `bedrock` (any Amazon Bedrock model, including your own imported weights,
+  using the instance role and no API key). Both share the same loop, context
+  and shell policy; see `aws/README.md` for the Bedrock setup.
 - **Model**: `claude-opus-5` by default (`llm.model`, `--model`, `OPENCLAW_MODEL`).
   Adaptive thinking is on (`llm.thinking: adaptive` or `disabled`); `llm.effort`
   (default `medium`) sets how hard it thinks. `xhigh` and `max` need

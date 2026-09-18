@@ -139,8 +139,10 @@ def load_config(path, extra_paths=()):
         "goals": [],
         "llm": {
             "enabled": False,
-            "provider": "anthropic",
-            "model": "claude-opus-5",
+            "provider": "anthropic",       # anthropic | bedrock
+            "model": "claude-opus-5",      # bedrock: a model id, inference profile or imported-model ARN
+            "region": None,                # bedrock: defaults to the instance region / AWS_REGION
+            "bedrock": {"temperature": 0.2, "json_retries": 1, "not_ready_backoff": 45},
             "effort": "medium",
             "thinking": "adaptive",
             "max_tokens": 4096,
@@ -290,20 +292,21 @@ class OpenClawSystem:
         if not llm_cfg.get("enabled"):
             self.log.info("LLM brain disabled (llm.enabled=false); rule planner only")
             return None
+        cloud = self.config.get("cloud") or {}
+        region = (cloud.get("instance") or {}).get("region") if isinstance(cloud.get("instance"), dict) else None
         try:
-            from openclaw.brain.llm import ClaudeBrain
-        except Exception as e:  # pragma: no cover - import guard
+            from openclaw.brain.llm import build_brain
+            brain = build_brain(llm_cfg, self.log, region=region,
+                                cycle_interval=(cloud.get("cycle_interval")
+                                                if cloud.get("headless") else None))
+        except Exception as e:
             self.log.warning("LLM brain unavailable: %s", e)
             return None
-        cloud = self.config.get("cloud") or {}
-        brain = ClaudeBrain(llm_cfg, self.log,
-                            cycle_interval=(cloud.get("cycle_interval")
-                                            if cloud.get("headless") else None))
         if brain.client is None:
             self.log.warning("LLM brain configured but not usable; rule planner only")
             return None
-        self.log.info("LLM brain ready: model=%s effort=%s key=%s shell=%s",
-                      brain.model, brain.effort, brain.key_source,
+        self.log.info("LLM brain ready: provider=%s model=%s effort=%s auth=%s shell=%s",
+                      brain.provider, brain.model, brain.effort, brain.key_source,
                       "on" if (llm_cfg.get("shell") or {}).get("enabled") else "off")
         return brain
 
@@ -427,7 +430,8 @@ def print_status(status, source):
     if brain:
         state = "available" if brain.get("available") else (brain.get("disabled_reason")
                                                             or "backing off")
-        print(f"  Brain:           {brain.get('model')} ({state}), "
+        provider = f"{brain['provider']}:" if brain.get("provider") else ""
+        print(f"  Brain:           {provider}{brain.get('model')} ({state}), "
               f"{brain.get('calls_last_hour')}/{brain.get('max_calls_per_hour')} calls this hour")
         if not brain.get("available") and brain.get("unavailable_reason"):
             print(f"  Brain reason:    {brain['unavailable_reason']}")

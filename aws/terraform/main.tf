@@ -97,8 +97,30 @@ locals {
   )
 }
 
+# Bedrock: let the instance role invoke catalog models, inference profiles
+# and imported models. Scope var.bedrock_model_arns down once you know the
+# exact model or imported-model ARN.
+resource "aws_iam_role_policy" "bedrock" {
+  count = var.llm_provider == "bedrock" ? 1 : 0
+  name  = "openclaw-bedrock"
+  role  = aws_iam_role.openclaw.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect = "Allow"
+      Action = [
+        "bedrock:InvokeModel",
+        "bedrock:InvokeModelWithResponseStream",
+        "bedrock:Converse",
+        "bedrock:ConverseStream",
+      ]
+      Resource = var.bedrock_model_arns
+    }]
+  })
+}
+
 resource "aws_iam_role_policy" "llm_key" {
-  count = length(local.llm_key_statements) > 0 ? 1 : 0
+  count = length(local.llm_key_statements) > 0 && var.llm_provider == "anthropic" ? 1 : 0
   name  = "openclaw-llm-key"
   role  = aws_iam_role.openclaw.id
   policy = jsonencode({
@@ -175,7 +197,7 @@ resource "aws_instance" "openclaw" {
       "openclaw:name" = var.name
     },
     var.agent_goal != "" ? { "openclaw:goal" = var.agent_goal } : {},
-    var.anthropic_api_key_secret != "" ? { "openclaw:llm-key-secret" = var.anthropic_api_key_secret } : {},
-    var.anthropic_api_key_ssm_parameter != "" ? { "openclaw:llm-key-parameter" = var.anthropic_api_key_ssm_parameter } : {},
+    var.llm_provider == "anthropic" && var.anthropic_api_key_secret != "" ? { "openclaw:llm-key-secret" = var.anthropic_api_key_secret } : {},
+    var.llm_provider == "anthropic" && var.anthropic_api_key_ssm_parameter != "" ? { "openclaw:llm-key-parameter" = var.anthropic_api_key_ssm_parameter } : {},
   )
 }

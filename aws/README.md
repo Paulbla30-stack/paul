@@ -135,6 +135,49 @@ goal channels (user data, the `openclaw:goal` tag, `POST /goal`) should be
 treated as root-equivalent: anyone with `ec2:CreateTags` on the instance can
 hand it work.
 
+### Using Amazon Bedrock, or your own model
+
+Set `llm.provider: bedrock` and the brain calls Amazon Bedrock with the
+instance role instead of the Claude API. No API key, no secret to store.
+`llm.model` is any of:
+
+| Kind | Example |
+|------|---------|
+| Catalog model | `meta.llama3-3-70b-instruct-v1:0`, `openai.gpt-oss-120b-1:0` |
+| Inference profile | `eu.meta.llama3-3-70b-instruct-v1:0` or its ARN |
+| Your own imported model | `arn:aws:bedrock:eu-west-2:123456789012:imported-model/abc123` |
+
+Launch with `terraform apply -var llm_provider=bedrock` (which grants the
+Bedrock invoke actions and skips the key grant) and put the block from the
+user data example in place of the `anthropic` one. Enable model access for
+the catalog model once in the Bedrock console for your region.
+
+To serve **your own model**, use Bedrock Custom Model Import: Llama, Mistral
+or gpt-oss architecture weights in Hugging Face safetensors format,
+uploaded to S3 and imported once (currently us-east-1 and us-west-2):
+
+```bash
+aws s3 sync ./my-model/ s3://my-bucket/my-model/
+aws bedrock create-model-import-job --job-name openclaw-brain \
+    --imported-model-name openclaw-brain \
+    --role-arn arn:aws:iam::123456789012:role/BedrockImportRole \
+    --model-data-source '{"s3DataSource":{"s3Uri":"s3://my-bucket/my-model/"}}'
+aws bedrock get-imported-model --model-identifier openclaw-brain --query modelArn
+```
+
+Put that ARN in `llm.model`. Imported models are unloaded when idle and the
+first call after a pause returns `ModelNotReadyException` while it loads;
+the brain treats that as a short backoff (`llm.bedrock.not_ready_backoff`)
+and the rule planner covers the gap. Use an instruction-tuned checkpoint:
+the planner asks for a JSON decision and a base model that has not been
+instruction-tuned will not reliably produce one.
+
+Open models do not have Claude's structured outputs, adaptive thinking or
+refusal fallbacks, so the brain asks for JSON in the prompt, extracts and
+validates it, and re-asks once with the parse error (`llm.bedrock.json_retries`).
+Expect planning quality to track the model: a 70B-class instruct model is
+fine with `llm.shell.enabled: true`; with a small model, keep shell off.
+
 ### Interpreter on Amazon Linux 2023
 
 The Anthropic SDK needs Python 3.10 or newer and AL2023's system `python3` is
@@ -168,6 +211,6 @@ regenerated and should not be edited by hand.
 | Boot tasks         | Hardware enumeration first        | IMDS identity first, then memory, storage, scan |
 | Configuration      | `config.yaml` + kernel cmdline    | `config.yaml` + `cloud.yaml` from user data and tags |
 | Status             | Console commands                  | `openclaw --status`, HTTP on loopback  |
-| LLM brain          | Off unless `llm.enabled` is set   | On; key from SSM Parameter Store        |
+| LLM brain          | Off unless `llm.enabled` is set   | On; Claude with a key from Secrets Manager, or any Bedrock model with the instance role |
 
 Both profiles run the same `openclaw` package; the ISO build is untouched.

@@ -36,10 +36,19 @@ openclaw:
   # read user data can read it.)
   llm:
     enabled: true
+    provider: anthropic
     model: claude-opus-5
     effort: medium
     api_key_secret: openclaw/anthropic-api-key      # Secrets Manager name or ARN
     # api_key_ssm_parameter: /openclaw/anthropic-api-key   # or SSM Parameter Store
+
+  # Or run an open-weight model, or your own, on Amazon Bedrock. No key
+  # needed: the instance role calls Bedrock directly (see aws/terraform).
+  # llm:
+  #   enabled: true
+  #   provider: bedrock
+  #   model: meta.llama3-3-70b-instruct-v1:0
+  #   # model: arn:aws:bedrock:eu-west-2:123456789012:imported-model/abc123   # Custom Model Import
     max_calls_per_hour: 60
     shell:
       enabled: true          # brain may run deny-list-guarded commands

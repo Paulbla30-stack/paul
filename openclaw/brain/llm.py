@@ -230,14 +230,31 @@ def uses_adaptive_thinking(model: str) -> bool:
     return any(model.startswith(p) for p in ADAPTIVE_MODEL_PREFIXES)
 
 
-class ClaudeBrain:
-    """LLM planner. Construct once; call ``plan()`` each cycle."""
+@dataclass
+class Completion:
+    """Provider-neutral result of one model call."""
+    text: str = ""
+    stop_reason: str = "end_turn"       # end_turn | max_tokens | refusal
+    usage: dict = field(default_factory=dict)
+    refusal_category: Optional[str] = None
+
+
+class BaseBrain:
+    """LLM planner. Construct once; call ``plan()`` each cycle.
+
+    Subclasses implement ``_make_client``, ``_complete`` and
+    ``_handle_error`` for a particular provider; everything else (context,
+    budget, backoff, decision parsing) is shared.
+    """
+
+    provider = "base"
+    default_model = DEFAULT_MODEL
 
     def __init__(self, config: Optional[dict], logger: logging.Logger, client=None,
                  cycle_interval: Optional[float] = None):
         self.config = dict(config or {})
         self.log = logger.getChild("brain")
-        self.model = self.config.get("model") or DEFAULT_MODEL
+        self.model = self.config.get("model") or self.default_model
         self.max_tokens = int(self.config.get("max_tokens") or 4096)
         self.effort = self._normalise_effort(self.config.get("effort") or "medium")
         self.thinking = self._normalise_thinking(self.config.get("thinking", "adaptive"))
@@ -283,7 +300,7 @@ class ClaudeBrain:
 
     def _normalise_thinking(self, value) -> str:
         """Return 'adaptive', 'disabled' or 'omit'."""
-        if not uses_adaptive_thinking(self.model):
+        if self.provider != "anthropic" or not uses_adaptive_thinking(self.model):
             return "omit"  # model takes neither adaptive thinking nor effort
         if value in (False, 0) or str(value).lower() in ("disabled", "off", "false", "none"):
             if self.effort in ("xhigh", "max"):
@@ -294,39 +311,6 @@ class ClaudeBrain:
         if str(value).lower() != "adaptive":
             self.log.warning("Unknown llm.thinking %r; using adaptive", value)
         return "adaptive"
-
-    def _make_client(self):
-        if anthropic is None:
-            self._disabled_reason = "anthropic SDK not installed (pip install anthropic)"
-            self.log.warning("LLM brain disabled: %s", self._disabled_reason)
-            return None
-        key, source = resolve_api_key(self.config)
-        kwargs = {
-            "max_retries": int(self.config.get("max_retries", 2)),
-            "timeout": float(self.config.get("timeout", 120)),
-        }
-        if self.config.get("base_url"):
-            kwargs["base_url"] = self.config["base_url"]
-        try:
-            if key:
-                self.key_source = source
-                return anthropic.Anthropic(api_key=key, **kwargs)
-            # No explicit key: let the SDK resolve ANTHROPIC_AUTH_TOKEN or an
-            # `ant auth login` profile (useful on a developer machine). The
-            # SDK constructs happily with nothing at all and only fails on
-            # the first request, so check what it actually resolved.
-            client = anthropic.Anthropic(**kwargs)
-            if not any(getattr(client, attr, None)
-                       for attr in ("api_key", "auth_token", "credentials")):
-                self._disabled_reason = f"no credentials: {source}"
-                self.log.warning("LLM brain disabled: %s", self._disabled_reason)
-                return None
-            self.key_source = "sdk-default"
-            return client
-        except Exception as e:  # missing credentials or bad config
-            self._disabled_reason = f"{source}; SDK could not build a client ({e})"
-            self.log.warning("LLM brain disabled: %s", self._disabled_reason)
-            return None
 
     def available(self) -> bool:
         """True when a call could be made right now."""
@@ -502,6 +486,206 @@ class ClaudeBrain:
 
     # ---- requests -----------------------------------------------------------
 
+    # ---- provider hooks -------------------------------------------------------
+
+    def _make_client(self):  # pragma: no cover - abstract
+        raise NotImplementedError
+
+    def _complete(self, system: str, user_text: str, structured: bool,
+                  cache: bool = True) -> Completion:  # pragma: no cover - abstract
+        """One model call. Raise on transport/API errors; return a Completion."""
+        raise NotImplementedError
+
+    def _handle_error(self, e: Exception):  # pragma: no cover - abstract
+        self._backoff(60, f"unexpected error: {e.__class__.__name__}: {e}")
+
+    # ---- shared call path -------------------------------------------------------
+
+    def _call(self, system: str, user_text: str, structured: bool,
+              cache: bool = True) -> Optional[Completion]:
+        """Make one model call; returns the Completion or None (after logging)."""
+        if self.client is None or self._disabled_reason or time.time() < self._backoff_until:
+            return None
+        if not self._take_budget():
+            return None
+        self.stats["calls"] += 1
+        self.last_call_at = time.time()
+        try:
+            completion = self._complete(system, user_text, structured, cache)
+        except Exception as e:  # classified by the provider
+            self.stats["errors"] += 1
+            self._consecutive_errors += 1
+            self._handle_error(e)
+            return None
+
+        for key, value in (completion.usage or {}).items():
+            if key in self.stats and isinstance(value, int):
+                self.stats[key] += value
+
+        if completion.stop_reason == "refusal":
+            self.stats["refusals"] += 1
+            self.last_error = f"refusal ({completion.refusal_category or 'uncategorised'})"
+            self.log.warning("LLM declined to plan this cycle: %s", self.last_error)
+            return None
+        if completion.stop_reason == "max_tokens":
+            self.stats["truncated"] += 1
+            self.last_error = "response truncated at max_tokens"
+            self.log.warning("LLM response truncated; raise llm.max_tokens (%d)", self.max_tokens)
+            return None
+
+        self._consecutive_errors = 0
+        self.stats["ok"] += 1
+        self.last_error = ""
+        return completion
+
+    # ---- public API ----------------------------------------------------------
+
+    def plan(self, agent, observations: Optional[dict] = None) -> Optional[Decision]:
+        """Ask the model for the next task. ``None`` means "use the fallback"."""
+        try:
+            system = self._system_text(agent)
+            context = self.build_context(agent, observations)
+            user_text = ("Current situation as JSON. Decide the next task.\n\n"
+                         + json.dumps(context, default=str, separators=(",", ":")))
+            completion = self._call(system, user_text, structured=True)
+            if completion is None:
+                return None
+            raw = self._parse_plan(completion.text)
+            decision = self._to_decision(raw)
+        except Exception as e:  # never let a planning failure kill the loop
+            self.last_error = f"invalid plan: {e.__class__.__name__}: {e}"
+            self.log.error("LLM %s", self.last_error)
+            return None
+        self.last_reasoning = decision.reasoning
+        self.last_decision = raw
+        return decision
+
+    @staticmethod
+    def _parse_plan(text: str) -> Any:
+        """Parse the plan JSON; tolerate prose or code fences around it."""
+        text = (text or "").strip()
+        try:
+            return json.loads(text)
+        except ValueError:
+            pass
+        start = text.find("{")
+        if start < 0:
+            raise ValueError("no JSON object in model output")
+        depth = 0
+        in_str = False
+        esc = False
+        for i in range(start, len(text)):
+            ch = text[i]
+            if in_str:
+                if esc:
+                    esc = False
+                elif ch == "\\":
+                    esc = True
+                elif ch == '"':
+                    in_str = False
+                continue
+            if ch == '"':
+                in_str = True
+            elif ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    return json.loads(text[start:i + 1])
+        raise ValueError("unterminated JSON object in model output")
+
+    def _to_decision(self, raw: Any) -> Decision:
+        if not isinstance(raw, dict):
+            return Decision(reasoning="model returned a non-object plan", raw={})
+        reasoning = str(raw.get("reasoning") or "")[:2000]
+        note = str(raw.get("note") or "")[:1000]
+        completed_raw = raw.get("completed_goals")
+        completed = []
+        if isinstance(completed_raw, list):
+            completed = [str(g).strip() for g in completed_raw
+                         if isinstance(g, (str, int, float)) and str(g).strip()]
+        kind = str(raw.get("task_type") or "none")
+        task = None
+        if kind != "none" and kind in TaskType._value2member_map_:
+            try:
+                priority = int(raw.get("priority", 5))
+            except (TypeError, ValueError, OverflowError):
+                priority = 5
+            priority = max(0, min(priority, 10))
+            description = str(raw.get("description") or "").strip() or f"LLM task: {kind}"
+            metadata = {"source": "llm"}
+            goal = str(raw.get("goal") or "").strip()
+            if goal:
+                metadata["goal"] = goal[:500]
+            if kind == "shell_command":
+                command = str(raw.get("command") or "").strip()
+                if not command:
+                    return Decision(reasoning=reasoning + " (shell_command without a command; idling)",
+                                    completed_goals=completed, note=note, raw=raw)
+                metadata["command"] = command
+            task = Task(priority=priority, description=description[:200],
+                        task_type=TaskType(kind), metadata=metadata, max_retries=1)
+        return Decision(reasoning=reasoning, task=task, completed_goals=completed,
+                        note=note, raw=raw)
+
+    def ask(self, agent, question: str, observations: Optional[dict] = None) -> Optional[str]:
+        """Free-form question about the system, answered with agent context."""
+        question = (question or "").strip()
+        if not question:
+            return None
+        try:
+            context = self.build_context(agent, observations)
+            user_text = ("Context as JSON:\n" + json.dumps(context, default=str, indent=1)
+                         + "\n\nQuestion: " + question)
+            completion = self._call(ASK_PROMPT, user_text, structured=False, cache=False)
+        except Exception as e:
+            self.last_error = f"ask failed: {e.__class__.__name__}: {e}"
+            self.log.error("LLM %s", self.last_error)
+            return None
+        if completion is None:
+            return None
+        return completion.text.strip() or None
+
+
+class ClaudeBrain(BaseBrain):
+    """Claude via the official ``anthropic`` SDK (Claude API)."""
+
+    provider = "anthropic"
+    default_model = DEFAULT_MODEL
+
+    def _make_client(self):
+        if anthropic is None:
+            self._disabled_reason = "anthropic SDK not installed (pip install anthropic)"
+            self.log.warning("LLM brain disabled: %s", self._disabled_reason)
+            return None
+        key, source = resolve_api_key(self.config)
+        kwargs = {
+            "max_retries": int(self.config.get("max_retries", 2)),
+            "timeout": float(self.config.get("timeout", 120)),
+        }
+        if self.config.get("base_url"):
+            kwargs["base_url"] = self.config["base_url"]
+        try:
+            if key:
+                self.key_source = source
+                return anthropic.Anthropic(api_key=key, **kwargs)
+            # No explicit key: let the SDK resolve ANTHROPIC_AUTH_TOKEN or an
+            # `ant auth login` profile (useful on a developer machine). The
+            # SDK constructs happily with nothing at all and only fails on
+            # the first request, so check what it actually resolved.
+            client = anthropic.Anthropic(**kwargs)
+            if not any(getattr(client, attr, None)
+                       for attr in ("api_key", "auth_token", "credentials")):
+                self._disabled_reason = f"no credentials: {source}"
+                self.log.warning("LLM brain disabled: %s", self._disabled_reason)
+                return None
+            self.key_source = "sdk-default"
+            return client
+        except Exception as e:  # missing credentials or bad config
+            self._disabled_reason = f"{source}; SDK could not build a client ({e})"
+            self.log.warning("LLM brain disabled: %s", self._disabled_reason)
+            return None
+
     def _request_kwargs(self, system: str, user_text: str, structured: bool,
                         cache: bool = True) -> dict:
         system_block = {"type": "text", "text": system}
@@ -530,48 +714,24 @@ class ClaudeBrain:
                 return stream.get_final_message()
         return self.client.beta.messages.create(**kwargs)
 
-    def _call(self, kwargs: dict):
-        """Make one API call; returns the response or None (after logging)."""
-        if self.client is None or self._disabled_reason or time.time() < self._backoff_until:
-            return None
-        if not self._take_budget():
-            return None
-        self.stats["calls"] += 1
-        self.last_call_at = time.time()
-        try:
-            response = self._send(kwargs)
-        except Exception as e:  # classified below
-            self.stats["errors"] += 1
-            self._consecutive_errors += 1
-            self._handle_error(e)
-            return None
-
-        usage = getattr(response, "usage", None)
-        if usage is not None:
+    def _complete(self, system: str, user_text: str, structured: bool,
+                  cache: bool = True) -> Completion:
+        response = self._send(self._request_kwargs(system, user_text, structured, cache))
+        usage = {}
+        u = getattr(response, "usage", None)
+        if u is not None:
             for key in ("input_tokens", "output_tokens",
                         "cache_read_input_tokens", "cache_creation_input_tokens"):
-                value = getattr(usage, key, None)
+                value = getattr(u, key, None)
                 if isinstance(value, int):
-                    self.stats[key] += value
-
-        stop = getattr(response, "stop_reason", None)
+                    usage[key] = value
+        stop = getattr(response, "stop_reason", None) or "end_turn"
+        category = None
         if stop == "refusal":
-            self.stats["refusals"] += 1
             details = getattr(response, "stop_details", None)
             category = getattr(details, "category", None) if details else None
-            self.last_error = f"refusal ({category or 'uncategorised'})"
-            self.log.warning("LLM declined to plan this cycle: %s", self.last_error)
-            return None
-        if stop == "max_tokens":
-            self.stats["truncated"] += 1
-            self.last_error = "response truncated at max_tokens"
-            self.log.warning("LLM response truncated; raise llm.max_tokens (%d)", self.max_tokens)
-            return None
-
-        self._consecutive_errors = 0
-        self.stats["ok"] += 1
-        self.last_error = ""
-        return response
+        return Completion(text=self._text_of(response), stop_reason=stop, usage=usage,
+                          refusal_category=category)
 
     def _handle_error(self, e: Exception):
         if anthropic is not None:
@@ -621,77 +781,15 @@ class ClaudeBrain:
                 parts.append(block.text)
         return "".join(parts)
 
-    # ---- public API ----------------------------------------------------------
 
-    def plan(self, agent, observations: Optional[dict] = None) -> Optional[Decision]:
-        """Ask the model for the next task. ``None`` means "use the fallback"."""
-        try:
-            system = self._system_text(agent)
-            context = self.build_context(agent, observations)
-            user_text = ("Current situation as JSON. Decide the next task.\n\n"
-                         + json.dumps(context, default=str, separators=(",", ":")))
-            response = self._call(self._request_kwargs(system, user_text, structured=True))
-            if response is None:
-                return None
-            raw = json.loads(self._text_of(response))
-            decision = self._to_decision(raw)
-        except Exception as e:  # never let a planning failure kill the loop
-            self.last_error = f"invalid plan: {e.__class__.__name__}: {e}"
-            self.log.error("LLM %s", self.last_error)
-            return None
-        self.last_reasoning = decision.reasoning
-        self.last_decision = raw
-        return decision
 
-    def _to_decision(self, raw: Any) -> Decision:
-        if not isinstance(raw, dict):
-            return Decision(reasoning="model returned a non-object plan", raw={})
-        reasoning = str(raw.get("reasoning") or "")[:2000]
-        note = str(raw.get("note") or "")[:1000]
-        completed_raw = raw.get("completed_goals")
-        completed = []
-        if isinstance(completed_raw, list):
-            completed = [str(g).strip() for g in completed_raw
-                         if isinstance(g, (str, int, float)) and str(g).strip()]
-        kind = str(raw.get("task_type") or "none")
-        task = None
-        if kind != "none" and kind in TaskType._value2member_map_:
-            try:
-                priority = int(raw.get("priority", 5))
-            except (TypeError, ValueError, OverflowError):
-                priority = 5
-            priority = max(0, min(priority, 10))
-            description = str(raw.get("description") or "").strip() or f"LLM task: {kind}"
-            metadata = {"source": "llm"}
-            goal = str(raw.get("goal") or "").strip()
-            if goal:
-                metadata["goal"] = goal[:500]
-            if kind == "shell_command":
-                command = str(raw.get("command") or "").strip()
-                if not command:
-                    return Decision(reasoning=reasoning + " (shell_command without a command; idling)",
-                                    completed_goals=completed, note=note, raw=raw)
-                metadata["command"] = command
-            task = Task(priority=priority, description=description[:200],
-                        task_type=TaskType(kind), metadata=metadata, max_retries=1)
-        return Decision(reasoning=reasoning, task=task, completed_goals=completed,
-                        note=note, raw=raw)
-
-    def ask(self, agent, question: str, observations: Optional[dict] = None) -> Optional[str]:
-        """Free-form question about the system, answered with agent context."""
-        question = (question or "").strip()
-        if not question:
-            return None
-        try:
-            context = self.build_context(agent, observations)
-            user_text = ("Context as JSON:\n" + json.dumps(context, default=str, indent=1)
-                         + "\n\nQuestion: " + question)
-            response = self._call(self._request_kwargs(ASK_PROMPT, user_text,
-                                                       structured=False, cache=False))
-        except Exception as e:
-            self.last_error = f"ask failed: {e.__class__.__name__}: {e}"
-            self.log.error("LLM %s", self.last_error)
-            return None
-        if response is None:
-            return None
-        return self._text_of(response).strip() or None
+def build_brain(config: Optional[dict], logger: logging.Logger,
+                cycle_interval: Optional[float] = None, region: Optional[str] = None):
+    """Construct the brain named by ``llm.provider`` (anthropic or bedrock)."""
+    provider = str((config or {}).get("provider") or "anthropic").lower()
+    if provider in ("anthropic", "claude"):
+        return ClaudeBrain(config, logger, cycle_interval=cycle_interval)
+    if provider in ("bedrock", "aws"):
+        from openclaw.brain.bedrock import BedrockBrain
+        return BedrockBrain(config, logger, cycle_interval=cycle_interval, region=region)
+    raise ValueError(f"unknown llm.provider {provider!r} (use anthropic or bedrock)")

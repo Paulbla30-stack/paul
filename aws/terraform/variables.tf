@@ -75,3 +75,19 @@ variable "anthropic_api_key_ssm_parameter" {
   default     = ""
   description = "Alternative: SSM SecureString holding the Anthropic API key. Empty disables the grant. With neither source set the agent runs on the rule planner."
 }
+
+variable "llm_provider" {
+  type        = string
+  default     = "anthropic"
+  description = "Which planner the instance role is set up for: anthropic (Claude API key from Secrets Manager / SSM) or bedrock (Amazon Bedrock, no key). Must match llm.provider in the user data."
+  validation {
+    condition     = contains(["anthropic", "bedrock"], var.llm_provider)
+    error_message = "llm_provider must be anthropic or bedrock."
+  }
+}
+
+variable "bedrock_model_arns" {
+  type        = list(string)
+  default     = ["arn:aws:bedrock:*::foundation-model/*", "arn:aws:bedrock:*:*:inference-profile/*", "arn:aws:bedrock:*:*:imported-model/*"]
+  description = "Resources the instance may invoke on Bedrock when llm_provider is bedrock. Narrow to your model or imported-model ARN in production."
+}
