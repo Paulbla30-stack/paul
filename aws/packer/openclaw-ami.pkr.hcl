@@ -88,6 +88,16 @@ variable "extra_tags" {
   default = {}
 }
 
+variable "ssh_interface" {
+  type        = string
+  default     = "session_manager"
+  description = "How Packer reaches the build instance: session_manager (SSM over HTTPS, no open port 22; needs the session-manager-plugin locally) or public_ip (plain SSH)."
+  validation {
+    condition     = contains(["session_manager", "public_ip", "private_ip"], var.ssh_interface)
+    error_message = "The ssh_interface must be session_manager, public_ip or private_ip."
+  }
+}
+
 # ---- Derived values -------------------------------------------------------
 
 locals {
@@ -141,7 +151,29 @@ source "amazon-ebs" "openclaw" {
     most_recent = true
   }
 
-  ssh_username = local.base.ssh_user
+  ssh_username  = local.base.ssh_user
+  ssh_interface = var.ssh_interface
+  ssh_timeout   = "10m"
+
+  # With session_manager the build instance needs an SSM-capable role;
+  # Packer creates and removes a temporary one.
+  temporary_iam_instance_profile_policy_document {
+    Version = "2012-10-17"
+    Statement {
+      Effect = "Allow"
+      Action = [
+        "ssm:UpdateInstanceInformation",
+        "ssmmessages:CreateControlChannel",
+        "ssmmessages:CreateDataChannel",
+        "ssmmessages:OpenControlChannel",
+        "ssmmessages:OpenDataChannel",
+        "ec2messages:GetMessages",
+        "ec2messages:AcknowledgeMessage",
+        "ec2messages:SendReply",
+      ]
+      Resource = ["*"]
+    }
+  }
 
   # IMDSv2 only - the bootstrap service uses token-based calls.
   metadata_options {

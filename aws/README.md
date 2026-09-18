@@ -55,6 +55,7 @@ Options (all `make` variables or `-var` flags):
 | `AMI_BASE`     | al2023     | `al2023` or `ubuntu` (24.04)             |
 | `AMI_ARCH`     | x86_64     | `x86_64` or `arm64`                      |
 | `AMI_INSTANCE` | t3.small   | Use `t4g.small` for arm64                |
+| `AMI_SSH`      | session_manager | How Packer reaches the build instance: `session_manager` (SSM over HTTPS, no port 22, needs the [session-manager-plugin](https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-working-with-install-plugin.html) locally) or `public_ip` (plain SSH) |
 
 The build uploads `git archive HEAD`, so commit before building; the
 image always corresponds to a commit. Provisioning ends with a three-cycle

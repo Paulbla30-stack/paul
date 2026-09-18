@@ -30,9 +30,11 @@ AWS_REGION    ?= eu-west-2
 AMI_ARCH      ?= x86_64
 AMI_BASE      ?= al2023
 AMI_INSTANCE  ?= t3.small
+AMI_SSH       ?= session_manager   # or public_ip when plain SSH egress is available
 AMI_BUNDLE    := $(BUILD_DIR)/openclaw-src.tar.gz
 PACKER_VARS   := -var region=$(AWS_REGION) -var arch=$(AMI_ARCH) \
-                 -var base=$(AMI_BASE) -var instance_type=$(AMI_INSTANCE)
+                 -var base=$(AMI_BASE) -var instance_type=$(AMI_INSTANCE) \
+                 -var ssh_interface=$(AMI_SSH)
 
 # Kernel (use host kernel for now, override for custom)
 KERNEL       ?= /boot/vmlinuz-$(shell uname -r)
