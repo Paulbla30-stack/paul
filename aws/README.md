@@ -169,7 +169,7 @@ and prints the ARN.
 
 ```bash
 pip install boto3
-python3 aws/scripts/bedrock_import.py --hf-repo Qwen/Qwen2.5-7B-Instruct --name openclaw-qwen25-7b
+python3 aws/scripts/bedrock_import.py --hf-repo Qwen/Qwen3-32B --name openclaw-qwen3-32b --instance-type m6i.2xlarge
 # gated repo (Llama, Mistral): store a HF read token in Secrets Manager first
 python3 aws/scripts/bedrock_import.py --hf-repo meta-llama/Llama-3.1-8B-Instruct \
     --name openclaw-llama31-8b --hf-token-secret openclaw/hf-token
