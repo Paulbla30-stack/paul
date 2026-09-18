@@ -67,9 +67,14 @@ Either use the Terraform example:
 
 ```bash
 cd aws/terraform
-terraform init
+terraform init -backend-config="bucket=<your-state-bucket>" \
+               -backend-config="key=openclaw/terraform.tfstate" \
+               -backend-config="region=eu-west-2"
 terraform apply -var ami_id=ami-0123456789abcdef0 -var region=eu-west-2
 ```
+
+State is kept in S3 (create a private, versioned bucket once) so the
+instance can be managed from any machine later.
 
 It creates an IAM role with SSM Session Manager access, a security group
 with no inbound rules, and an instance with IMDSv2 enforced and tags

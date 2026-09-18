@@ -1,0 +1,27 @@
+#cloud-config
+# OpenClaw user data: plan with an open-weight model on Amazon Bedrock.
+# No API key: the instance role calls Bedrock (terraform -var llm_provider=bedrock).
+# Swap `model` for your own imported model's ARN once Custom Model Import is done:
+#   arn:aws:bedrock:us-west-2:ACCOUNT:imported-model/ID
+
+openclaw:
+  agent:
+    name: paul-life-agent
+
+  goals:
+    - description: Keep the root filesystem under 80% used
+      priority: 2
+    - description: Report security posture once per hour and note anything new
+      priority: 5
+
+  cloud:
+    cycle_interval: 30
+    status_port: 8471
+
+  llm:
+    enabled: true
+    provider: bedrock
+    model: openai.gpt-oss-120b-1:0
+    max_calls_per_hour: 60
+    shell:
+      enabled: true

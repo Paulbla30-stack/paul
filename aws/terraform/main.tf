@@ -12,6 +12,13 @@
 
 terraform {
   required_version = ">= 1.5.0"
+
+  # State lives in S3 so any machine (or agent) can manage the instance:
+  #   terraform init -backend-config="bucket=<your-bucket>" \
+  #                  -backend-config="key=openclaw/terraform.tfstate" \
+  #                  -backend-config="region=<region>"
+  backend "s3" {}
+
   required_providers {
     aws = {
       source  = "hashicorp/aws"
