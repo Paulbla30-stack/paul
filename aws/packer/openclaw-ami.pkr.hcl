@@ -109,26 +109,26 @@ locals {
   base = local.base_filters[var.base]
 
   tags = merge({
-    Name             = local.ami_name
-    Project          = "openclaw"
-    Role             = "agent-first-os"
-    OpenClawVersion  = var.openclaw_version
-    OpenClawProfile  = "cloud"
-    BaseImage        = var.base
-    Architecture     = var.arch
-    BuiltBy          = "packer"
+    Name            = local.ami_name
+    Project         = "openclaw"
+    Role            = "agent-first-os"
+    OpenClawVersion = var.openclaw_version
+    OpenClawProfile = "cloud"
+    BaseImage       = var.base
+    Architecture    = var.arch
+    BuiltBy         = "packer"
   }, var.extra_tags)
 }
 
 # ---- Source ---------------------------------------------------------------
 
 source "amazon-ebs" "openclaw" {
-  region        = var.region
-  instance_type = var.instance_type
-  ami_name      = local.ami_name
+  region          = var.region
+  instance_type   = var.instance_type
+  ami_name        = local.ami_name
   ami_description = "OpenClaw agent-first OS ${var.openclaw_version} (${var.base}, ${var.arch})"
-  ami_users     = var.ami_users
-  subnet_id     = var.subnet_id != "" ? var.subnet_id : null
+  ami_users       = var.ami_users
+  subnet_id       = var.subnet_id != "" ? var.subnet_id : null
 
   source_ami_filter {
     filters = {
