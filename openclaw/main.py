@@ -147,6 +147,7 @@ def load_config(path, extra_paths=()):
             "fallbacks": True,
             "api_key": None,
             "api_key_file": "/etc/openclaw/anthropic.key",
+            "api_key_secret": None,
             "api_key_ssm_parameter": None,
             "base_url": None,
             "timeout": 120,

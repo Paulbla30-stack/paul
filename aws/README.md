@@ -90,23 +90,29 @@ Or launch by hand from the console or CLI. The only things that matter:
 ## Giving the agent a brain
 
 The AMI profile has `llm.enabled: true` with `claude-opus-5`; the only thing
-missing at build time is the key. Store it once in SSM Parameter Store and
-tell the instance where it is:
+missing at build time is the Anthropic API key. Store it once in AWS
+Secrets Manager:
 
 ```bash
-aws ssm put-parameter --name /openclaw/anthropic-api-key \
-    --type SecureString --value "$ANTHROPIC_API_KEY"
+aws secretsmanager create-secret --name openclaw/anthropic-api-key \
+    --secret-string "$ANTHROPIC_API_KEY"
 ```
 
-Then either keep the default `llm.api_key_ssm_parameter: /openclaw/anthropic-api-key`
-in the user data (as in the bundled example), or tag the instance
-`openclaw:llm-key-parameter = /openclaw/anthropic-api-key`. The Terraform
-example grants `ssm:GetParameter` on that name to the instance role
-(`-var anthropic_api_key_ssm_parameter=...`, empty to skip). At every boot
-the bootstrap service reads the parameter with the instance role and writes
-`/etc/openclaw/anthropic.key` (0600). The key never appears in user data,
-cloud.yaml or the journal. An inline `llm.api_key` in user data also works
-for quick tests, but user data is readable by anyone on the instance.
+The value can be the bare key or a JSON object with an `ANTHROPIC_API_KEY`
+(or `api_key`) field. The AMI profile already points at
+`llm.api_key_secret: openclaw/anthropic-api-key`; override it in user data
+or with an `openclaw:llm-key-secret` tag (name or ARN). SSM Parameter Store
+works the same way through `llm.api_key_ssm_parameter` and the
+`openclaw:llm-key-parameter` tag, and is tried second.
+
+The Terraform example grants `secretsmanager:GetSecretValue` on that secret
+to the instance role (`-var anthropic_api_key_secret=...`; set
+`anthropic_api_key_ssm_parameter` instead or as well for SSM; empty skips
+the grant). At every boot the bootstrap service reads the secret with the
+instance role and writes `/etc/openclaw/anthropic.key` (0600). The key never
+appears in user data, cloud.yaml or the journal. An inline `llm.api_key` in
+user data also works for quick tests, but user data is readable by anyone on
+the instance.
 
 What the brain may do is set by `llm.shell` in `/etc/openclaw/config.yaml`
 (on in the AMI profile, deny-list guarded) and by the goals you give it.

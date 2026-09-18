@@ -46,8 +46,10 @@ goals: []                    # add goals via user data or the openclaw:goal tag
 
 # LLM planner. Enabled here, but it only runs when a key is available:
 #   - /etc/openclaw/anthropic.key (0600), written at boot by
-#     openclaw-bootstrap from llm.api_key_ssm_parameter (user data or the
-#     openclaw:llm-key-parameter tag), or
+#     openclaw-bootstrap from llm.api_key_secret (AWS Secrets Manager) or
+#     llm.api_key_ssm_parameter (SSM Parameter Store), set here, in user
+#     data, or via the openclaw:llm-key-secret / openclaw:llm-key-parameter
+#     tags, or
 #   - ANTHROPIC_API_KEY in the service environment.
 # Without a key the agent falls back to the rule-based planner and says so
 # in the journal.
@@ -60,9 +62,11 @@ llm:
   max_tokens: 4096
   fallbacks: true            # server-side refusal fallbacks (Claude API only)
   api_key_file: /etc/openclaw/anthropic.key
-  api_key_ssm_parameter: null   # e.g. /openclaw/anthropic-api-key (SecureString); the
-                                # bootstrap reads this as the default when user data
-                                # and the openclaw:llm-key-parameter tag set nothing
+  api_key_secret: openclaw/anthropic-api-key   # AWS Secrets Manager name or ARN; the
+                                # value may be the bare key or JSON with an
+                                # ANTHROPIC_API_KEY / api_key field. Tried first.
+  api_key_ssm_parameter: null   # or an SSM SecureString, e.g. /openclaw/anthropic-api-key.
+                                # User data and the openclaw:llm-key-* tags override both.
   max_calls_per_hour: 60     # hard budget; rule planner takes over beyond it
   plan_every_n_cycles: 1
   history_window: 10

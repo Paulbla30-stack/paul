@@ -64,8 +64,14 @@ variable "tags" {
   default = {}
 }
 
+variable "anthropic_api_key_secret" {
+  type        = string
+  default     = "openclaw/anthropic-api-key"
+  description = "AWS Secrets Manager secret (name or ARN) holding the Anthropic API key for the LLM planner. The value may be the bare key or JSON with an ANTHROPIC_API_KEY field. Empty disables the grant."
+}
+
 variable "anthropic_api_key_ssm_parameter" {
   type        = string
-  default     = "/openclaw/anthropic-api-key"
-  description = "SSM SecureString holding the Anthropic API key for the LLM planner. Empty disables the grant (rule planner only)."
+  default     = ""
+  description = "Alternative: SSM SecureString holding the Anthropic API key. Empty disables the grant. With neither source set the agent runs on the rule planner."
 }

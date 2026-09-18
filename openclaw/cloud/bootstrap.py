@@ -33,12 +33,12 @@ from typing import Optional
 
 from openclaw.cloud.imds import IMDSClient
 from openclaw.brain.credentials import (DEFAULT_KEY_FILE, fetch_ssm_parameter,
-                                        install_key_file)
+                                        fetch_secretsmanager_secret, install_key_file)
 
 DEFAULT_OUTPUT = "/etc/openclaw/cloud.yaml"
 DEFAULT_BASE_CONFIG = "/etc/openclaw/config.yaml"
 CONFIG_KEYS = ("agent", "goals", "cloud", "security", "hardware", "llm")
-LLM_DEFAULT_KEYS = ("api_key_ssm_parameter", "api_key_file")
+LLM_DEFAULT_KEYS = ("api_key_secret", "api_key_ssm_parameter", "api_key_file")
 
 
 def _load_yaml_or_json(text: str) -> Optional[dict]:
@@ -126,6 +126,8 @@ def build_cloud_config(imds: IMDSClient) -> dict:
 
     if tags.get("openclaw:name"):
         config.setdefault("agent", {})["name"] = tags["openclaw:name"]
+    if tags.get("openclaw:llm-key-secret"):
+        config.setdefault("llm", {})["api_key_secret"] = tags["openclaw:llm-key-secret"]
     if tags.get("openclaw:llm-key-parameter"):
         config.setdefault("llm", {})["api_key_ssm_parameter"] = tags["openclaw:llm-key-parameter"]
     if instance:
@@ -166,13 +168,15 @@ def strip_secrets(config: dict) -> None:
 
 
 def provision_llm_key(config: dict, key_file: str = DEFAULT_KEY_FILE,
-                      fetch=fetch_ssm_parameter) -> str:
+                      fetch=fetch_ssm_parameter,
+                      fetch_secret=fetch_secretsmanager_secret) -> str:
     """Move any LLM API key out of the overlay and into a 0600 key file.
 
     Sources, in order: an inline ``llm.api_key`` from user data (removed
     from the overlay so it never lands in the world-readable cloud.yaml),
-    then ``llm.api_key_ssm_parameter`` fetched with the instance role.
-    Returns a short description of what happened for the boot log.
+    then ``llm.api_key_secret`` from AWS Secrets Manager, then
+    ``llm.api_key_ssm_parameter`` from SSM Parameter Store, both fetched
+    with the instance role. Returns a short description for the boot log.
     """
     llm = config.get("llm")
     if not isinstance(llm, dict):
@@ -184,17 +188,27 @@ def provision_llm_key(config: dict, key_file: str = DEFAULT_KEY_FILE,
         llm["api_key_file"] = key_file
         llm.setdefault("enabled", True)
         return f"inline key moved to {key_file}"
+    region = (config.get("cloud", {}).get("instance") or {}).get("region")
+    notes = []
+    secret = llm.get("api_key_secret")
+    if secret:
+        value = fetch_secret(secret, region)
+        if value:
+            install_key_file(value, key_file)
+            llm["api_key_file"] = key_file
+            llm.setdefault("enabled", True)
+            return f"key fetched from Secrets Manager {secret} -> {key_file}"
+        notes.append(f"Secrets Manager secret {secret} not readable (role permissions? awscli?)")
     param = llm.get("api_key_ssm_parameter")
     if param:
-        region = (config.get("cloud", {}).get("instance") or {}).get("region")
         value = fetch(param, region)
         if value:
             install_key_file(value, key_file)
             llm["api_key_file"] = key_file
             llm.setdefault("enabled", True)
             return f"key fetched from SSM {param} -> {key_file}"
-        return f"SSM parameter {param} not readable (role permissions? awscli?)"
-    return "no key configured"
+        notes.append(f"SSM parameter {param} not readable (role permissions? awscli?)")
+    return "; ".join(notes) if notes else "no key configured"
 
 
 def dump_config(config: dict) -> str:

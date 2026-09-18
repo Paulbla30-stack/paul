@@ -7,14 +7,20 @@ Order (first hit wins):
 2. ``llm.api_key`` in configuration (discouraged; lands in a 0644 file)
 3. ``llm.api_key_file`` (default ``/etc/openclaw/anthropic.key``, 0600)
 
-On AWS the bootstrap service can populate the key file from an SSM
-Parameter Store SecureString (``llm.api_key_ssm_parameter``) using the
-instance role, so the secret never appears in user data or cloud.yaml.
+On AWS the bootstrap service can populate the key file from AWS Secrets
+Manager (``llm.api_key_secret``) or an SSM Parameter Store SecureString
+(``llm.api_key_ssm_parameter``) using the instance role, so the secret never
+appears in user data or cloud.yaml.
 """
 
+import json
 import os
 import subprocess
 from typing import Optional
+
+# When a Secrets Manager secret is a JSON object, these fields are tried in
+# order for the key itself.
+SECRET_JSON_FIELDS = ("ANTHROPIC_API_KEY", "anthropic_api_key", "api_key", "apiKey", "key")
 
 DEFAULT_KEY_FILE = "/etc/openclaw/anthropic.key"
 
@@ -73,6 +79,57 @@ def fetch_ssm_parameter(name: str, region: Optional[str] = None,
         return None
     value = result.stdout.strip()
     return value or None
+
+
+def _run_aws(args: list, region: Optional[str], timeout: float) -> Optional[str]:
+    cmd = ["aws"] + args
+    if region:
+        cmd += ["--region", region]
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+        return None
+    if result.returncode != 0:
+        return None
+    value = result.stdout.strip()
+    return value or None
+
+
+def extract_secret_value(raw: Optional[str]) -> Optional[str]:
+    """A secret may be the bare key or a JSON object holding it."""
+    if not raw:
+        return None
+    raw = raw.strip()
+    if raw.startswith("{"):
+        try:
+            doc = json.loads(raw)
+        except ValueError:
+            return raw
+        if isinstance(doc, dict):
+            for field in SECRET_JSON_FIELDS:
+                value = doc.get(field)
+                if isinstance(value, str) and value.strip():
+                    return value.strip()
+            if len(doc) == 1:
+                only = next(iter(doc.values()))
+                if isinstance(only, str) and only.strip():
+                    return only.strip()
+            return None
+    return raw
+
+
+def fetch_secretsmanager_secret(secret_id: str, region: Optional[str] = None,
+                                timeout: float = 20.0) -> Optional[str]:
+    """Read a secret's string value from AWS Secrets Manager via the AWS CLI.
+
+    ``secret_id`` is a name or ARN. Uses the instance role; no boto3
+    needed. Returns ``None`` on any failure.
+    """
+    if not secret_id:
+        return None
+    raw = _run_aws(["secretsmanager", "get-secret-value", "--secret-id", secret_id,
+                    "--query", "SecretString", "--output", "text"], region, timeout)
+    return extract_secret_value(raw)
 
 
 def install_key_file(key: str, path: str = DEFAULT_KEY_FILE) -> str:

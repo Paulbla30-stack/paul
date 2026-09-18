@@ -144,9 +144,10 @@ Key points:
   console are treated as instructions from the operator, so anyone who can set
   them can steer a root shell; protect those channels accordingly.
 - **Credentials**: `ANTHROPIC_API_KEY`, then `llm.api_key`, then the 0600 file
-  `llm.api_key_file`. On AWS the bootstrap fetches `llm.api_key_ssm_parameter`
-  from SSM Parameter Store with the instance role. No key means the brain is
-  disabled with a logged reason and the agent still runs.
+  `llm.api_key_file`. On AWS the bootstrap fills that file at boot from AWS
+  Secrets Manager (`llm.api_key_secret`) or SSM Parameter Store
+  (`llm.api_key_ssm_parameter`) with the instance role. No key means the brain
+  is disabled with a logged reason and the agent still runs.
 - **Failure modes**: refusals, truncation, rate limits, network and API errors
   all fall back to the rule planner for that cycle; authentication failures
   disable the brain until restart. `openclaw --status` and `curl localhost:8471/brain`

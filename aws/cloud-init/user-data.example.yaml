@@ -28,16 +28,18 @@ openclaw:
     scan_on_boot: true
     enforce_hardening: false
 
-  # LLM planner. The key itself never goes in user data: point at an SSM
-  # SecureString the instance role can read and the bootstrap writes it to
-  # /etc/openclaw/anthropic.key (0600) at every boot.  (An inline
-  # `api_key:` is accepted for quick tests; it is moved to the key file and
-  # stripped from cloud.yaml, but anyone who can read user data can read it.)
+  # LLM planner. The key itself never goes in user data: point at an AWS
+  # Secrets Manager secret (or an SSM SecureString) the instance role can
+  # read and the bootstrap writes it to /etc/openclaw/anthropic.key (0600)
+  # at every boot.  (An inline `api_key:` is accepted for quick tests; it is
+  # moved to the key file and stripped from cloud.yaml, but anyone who can
+  # read user data can read it.)
   llm:
     enabled: true
     model: claude-opus-5
     effort: medium
-    api_key_ssm_parameter: /openclaw/anthropic-api-key
+    api_key_secret: openclaw/anthropic-api-key      # Secrets Manager name or ARN
+    # api_key_ssm_parameter: /openclaw/anthropic-api-key   # or SSM Parameter Store
     max_calls_per_hour: 60
     shell:
       enabled: true          # brain may run deny-list-guarded commands

@@ -68,25 +68,44 @@ resource "aws_iam_role_policy_attachment" "ssm" {
   policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
 }
 
-# Read access to the Anthropic API key stored as an SSM SecureString.
-# Put it there once (never in Terraform state):
+# Read access to the Anthropic API key. Store it once, never in Terraform
+# state, in AWS Secrets Manager (default) and/or SSM Parameter Store:
+#   aws secretsmanager create-secret --name openclaw/anthropic-api-key \
+#       --secret-string "$ANTHROPIC_API_KEY"
 #   aws ssm put-parameter --name /openclaw/anthropic-api-key \
 #       --type SecureString --value "$ANTHROPIC_API_KEY"
 data "aws_caller_identity" "current" {}
 
-resource "aws_iam_role_policy" "llm_key" {
-  count = var.anthropic_api_key_ssm_parameter != "" ? 1 : 0
-  name  = "openclaw-llm-key"
-  role  = aws_iam_role.openclaw.id
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
+data "aws_secretsmanager_secret" "llm_key" {
+  count = var.anthropic_api_key_secret != "" ? 1 : 0
+  name  = startswith(var.anthropic_api_key_secret, "arn:") ? null : var.anthropic_api_key_secret
+  arn   = startswith(var.anthropic_api_key_secret, "arn:") ? var.anthropic_api_key_secret : null
+}
+
+locals {
+  llm_key_statements = concat(
+    var.anthropic_api_key_secret != "" ? [{
+      Effect   = "Allow"
+      Action   = ["secretsmanager:GetSecretValue"]
+      Resource = data.aws_secretsmanager_secret.llm_key[0].arn
+    }] : [],
+    var.anthropic_api_key_ssm_parameter != "" ? [{
       Effect   = "Allow"
       Action   = ["ssm:GetParameter"]
       Resource = "arn:aws:ssm:${var.region}:${data.aws_caller_identity.current.account_id}:parameter/${trimprefix(var.anthropic_api_key_ssm_parameter, "/")}"
-    }]
-    # A SecureString under the default aws/ssm key needs nothing more; a
-    # customer-managed KMS key also needs kms:Decrypt on that key.
+    }] : [],
+  )
+}
+
+resource "aws_iam_role_policy" "llm_key" {
+  count = length(local.llm_key_statements) > 0 ? 1 : 0
+  name  = "openclaw-llm-key"
+  role  = aws_iam_role.openclaw.id
+  policy = jsonencode({
+    Version   = "2012-10-17"
+    Statement = local.llm_key_statements
+    # Secrets or parameters encrypted with a customer-managed KMS key also
+    # need kms:Decrypt on that key.
   })
 }
 
@@ -156,6 +175,7 @@ resource "aws_instance" "openclaw" {
       "openclaw:name" = var.name
     },
     var.agent_goal != "" ? { "openclaw:goal" = var.agent_goal } : {},
+    var.anthropic_api_key_secret != "" ? { "openclaw:llm-key-secret" = var.anthropic_api_key_secret } : {},
     var.anthropic_api_key_ssm_parameter != "" ? { "openclaw:llm-key-parameter" = var.anthropic_api_key_ssm_parameter } : {},
   )
 }

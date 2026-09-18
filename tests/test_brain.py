@@ -27,6 +27,7 @@ from openclaw.agent.planner import Task, TaskPlanner, TaskType
 from openclaw.brain import credentials
 from openclaw.brain.llm import ClaudeBrain, Decision, PLAN_SCHEMA, compact_observations
 from openclaw.cloud import bootstrap
+from openclaw.cloud.imds import IMDSClient
 from openclaw.cloud.headless import HeadlessRunner
 from openclaw.main import load_config, apply_cli_overrides, OpenClawSystem
 from tests.test_cloud import FakeIMDS, FakeIMDSHandler
@@ -254,6 +255,35 @@ class TestCredentials(unittest.TestCase):
     def test_fetch_ssm_parameter_without_cli(self):
         with mock.patch.dict(os.environ, {"PATH": "/nonexistent"}):
             self.assertIsNone(credentials.fetch_ssm_parameter("/x", "eu-west-2"))
+
+    def test_extract_secret_value(self):
+        ex = credentials.extract_secret_value
+        self.assertEqual(ex("sk-plain\n"), "sk-plain")
+        self.assertEqual(ex('{"ANTHROPIC_API_KEY": "sk-json"}'), "sk-json")
+        self.assertEqual(ex('{"api_key": " sk-a "}'), "sk-a")
+        self.assertEqual(ex('{"whatever": "sk-only"}'), "sk-only")   # single field
+        self.assertIsNone(ex('{"a": "1", "b": "2"}'))                # ambiguous
+        self.assertIsNone(ex(""))
+        self.assertIsNone(ex(None))
+
+    def test_fetch_secretsmanager_with_fake_cli(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            fake = os.path.join(tmp, "aws")
+            with open(fake, "w") as f:
+                f.write("#!/bin/sh\n"
+                        "[ \"$1\" = secretsmanager ] || exit 2\n"
+                        "case \"$4\" in\n"
+                        "  openclaw/plain) echo sk-sm ;;\n"
+                        "  openclaw/json) echo '{\"ANTHROPIC_API_KEY\": \"sk-sm-json\"}' ;;\n"
+                        "  *) exit 254 ;;\n"
+                        "esac\n")
+            os.chmod(fake, 0o755)
+            with mock.patch.dict(os.environ, {"PATH": tmp}):
+                self.assertEqual(credentials.fetch_secretsmanager_secret("openclaw/plain", "eu-west-2"),
+                                 "sk-sm")
+                self.assertEqual(credentials.fetch_secretsmanager_secret("openclaw/json"), "sk-sm-json")
+                self.assertIsNone(credentials.fetch_secretsmanager_secret("openclaw/missing"))
+                self.assertIsNone(credentials.fetch_secretsmanager_secret(""))
 
     def test_fetch_ssm_parameter_with_fake_cli(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -770,6 +800,65 @@ class TestConfigAndBootstrap(unittest.TestCase):
             self.assertIn("not readable", note)
             self.assertEqual(bootstrap.provision_llm_key({}, key_file, fetch=fake_fetch),
                              "no llm section")
+
+    def test_provision_llm_key_from_secrets_manager(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            key_file = os.path.join(tmp, "anthropic.key")
+            secret_calls, ssm_calls = [], []
+
+            def fake_secret(name, region=None):
+                secret_calls.append((name, region))
+                return "sk-from-sm" if name == "openclaw/key" else None
+
+            def fake_ssm(name, region=None):
+                ssm_calls.append((name, region))
+                return "sk-from-ssm"
+
+            # Secrets Manager first; SSM never consulted when it succeeds.
+            config = {"cloud": {"instance": {"region": "eu-west-2"}},
+                      "llm": {"api_key_secret": "openclaw/key",
+                              "api_key_ssm_parameter": "/openclaw/key"}}
+            note = bootstrap.provision_llm_key(config, key_file, fetch=fake_ssm,
+                                               fetch_secret=fake_secret)
+            self.assertIn("Secrets Manager", note)
+            self.assertEqual(secret_calls, [("openclaw/key", "eu-west-2")])
+            self.assertEqual(ssm_calls, [])
+            with open(key_file) as f:
+                self.assertEqual(f.read().strip(), "sk-from-sm")
+
+            # Unreadable secret falls back to SSM and reports both.
+            config = {"llm": {"api_key_secret": "openclaw/missing",
+                              "api_key_ssm_parameter": "/openclaw/key"}}
+            note = bootstrap.provision_llm_key(config, key_file, fetch=fake_ssm,
+                                               fetch_secret=fake_secret)
+            self.assertIn("fetched from SSM", note)
+            with open(key_file) as f:
+                self.assertEqual(f.read().strip(), "sk-from-ssm")
+
+            config = {"llm": {"api_key_secret": "openclaw/missing"}}
+            note = bootstrap.provision_llm_key(config, key_file, fetch=fake_ssm,
+                                               fetch_secret=fake_secret)
+            self.assertIn("openclaw/missing not readable", note)
+
+    def test_secret_tag_and_config_default(self):
+        from tests import test_cloud
+        saved = dict(test_cloud.METADATA)
+        test_cloud.METADATA["tags/instance"] = "Name\nopenclaw:llm-key-secret\n"
+        test_cloud.METADATA["tags/instance/openclaw:llm-key-secret"] = "arn:aws:secretsmanager:eu-west-2:1:secret:k"
+        try:
+            with FakeIMDS() as fake:
+                cfg = bootstrap.build_cloud_config(IMDSClient(base_url=fake.url))
+        finally:
+            test_cloud.METADATA.clear()
+            test_cloud.METADATA.update(saved)
+        self.assertEqual(cfg["llm"]["api_key_secret"], "arn:aws:secretsmanager:eu-west-2:1:secret:k")
+        with tempfile.TemporaryDirectory() as tmp:
+            base = os.path.join(tmp, "config.yaml")
+            with open(base, "w") as f:
+                f.write("llm:\n  api_key_secret: openclaw/from-config\n")
+            config = {"llm": {}}
+            bootstrap.apply_base_llm_defaults(config, base)
+            self.assertEqual(config["llm"]["api_key_secret"], "openclaw/from-config")
 
     def test_bootstrap_main_never_writes_inline_key(self):
         saved = FakeIMDSHandler.user_data
