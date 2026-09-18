@@ -84,13 +84,13 @@ resource "aws_iam_role_policy_attachment" "ssm" {
 data "aws_caller_identity" "current" {}
 
 data "aws_secretsmanager_secret" "llm_key" {
-  count = var.anthropic_api_key_secret != "" ? 1 : 0
+  count = var.llm_provider == "anthropic" && var.anthropic_api_key_secret != "" ? 1 : 0
   name  = startswith(var.anthropic_api_key_secret, "arn:") ? null : var.anthropic_api_key_secret
   arn   = startswith(var.anthropic_api_key_secret, "arn:") ? var.anthropic_api_key_secret : null
 }
 
 locals {
-  llm_key_statements = concat(
+  llm_key_statements = var.llm_provider != "anthropic" ? [] : concat(
     var.anthropic_api_key_secret != "" ? [{
       Effect   = "Allow"
       Action   = ["secretsmanager:GetSecretValue"]
@@ -174,15 +174,15 @@ resource "aws_security_group" "openclaw" {
 # ---- Instance ---------------------------------------------------------------
 
 resource "aws_instance" "openclaw" {
-  ami                    = var.ami_id
-  instance_type          = var.instance_type
-  subnet_id              = local.subnet_id
-  vpc_security_group_ids = [aws_security_group.openclaw.id]
-  iam_instance_profile   = aws_iam_instance_profile.openclaw.name
-  key_name               = var.key_name != "" ? var.key_name : null
-  user_data              = local.user_data
+  ami                         = var.ami_id
+  instance_type               = var.instance_type
+  subnet_id                   = local.subnet_id
+  vpc_security_group_ids      = [aws_security_group.openclaw.id]
+  iam_instance_profile        = aws_iam_instance_profile.openclaw.name
+  key_name                    = var.key_name != "" ? var.key_name : null
+  user_data                   = local.user_data
   user_data_replace_on_change = true
-  monitoring             = true
+  monitoring                  = true
 
   metadata_options {
     http_endpoint               = "enabled"
