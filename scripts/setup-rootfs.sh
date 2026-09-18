@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# OpenClaw Root Filesystem Setup
+# Jarvis Root Filesystem Setup
 # ===============================
 # Prepares a complete root filesystem for the bootable ISO.
 # This script is run on the build host to populate the rootfs.
@@ -8,13 +8,13 @@ set -euo pipefail
 
 ROOTFS="${1:?Usage: setup-rootfs.sh <rootfs_dir>}"
 
-echo "[*] Setting up OpenClaw root filesystem at: $ROOTFS"
+echo "[*] Setting up Jarvis root filesystem at: $ROOTFS"
 
 # ---- Create directory structure ----
 echo "[*] Creating directory structure..."
 mkdir -p "$ROOTFS"/{bin,sbin,lib,lib64,etc,proc,sys,dev,tmp,var,run,root,home}
-mkdir -p "$ROOTFS"/usr/{bin,sbin,lib,local/bin,local/lib,lib/openclaw}
-mkdir -p "$ROOTFS"/etc/{openclaw,init.d,network}
+mkdir -p "$ROOTFS"/usr/{bin,sbin,lib,local/bin,local/lib,lib/jarvis}
+mkdir -p "$ROOTFS"/etc/{jarvis,init.d,network}
 mkdir -p "$ROOTFS"/var/{log,run,tmp}
 
 # ---- Install busybox (static) ----
@@ -76,16 +76,16 @@ echo "[*] Setting up /etc..."
 # /etc/passwd
 cat > "$ROOTFS/etc/passwd" << 'PASSWD'
 root:x:0:0:root:/root:/bin/sh
-openclaw:x:1000:1000:OpenClaw Agent:/home/openclaw:/bin/sh
+jarvis:x:1000:1000:Jarvis Agent:/home/jarvis:/bin/sh
 PASSWD
 
 # /etc/group
 cat > "$ROOTFS/etc/group" << 'GROUP'
 root:x:0:
-input:x:5:openclaw
-video:x:44:openclaw
-disk:x:6:openclaw
-openclaw:x:1000:
+input:x:5:jarvis
+video:x:44:jarvis
+disk:x:6:jarvis
+jarvis:x:1000:
 GROUP
 
 # /etc/fstab
@@ -98,7 +98,7 @@ tmpfs           /var         tmpfs   defaults    0 0
 FSTAB
 
 # /etc/hostname
-echo "openclaw" > "$ROOTFS/etc/hostname"
+echo "jarvis" > "$ROOTFS/etc/hostname"
 
 echo "[+] Root filesystem setup complete: $ROOTFS"
 echo ""

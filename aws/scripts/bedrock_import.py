@@ -6,15 +6,15 @@ print the imported-model ARN to use as ``llm.model``.
 What it does, end to end, with boto3 and the caller's AWS credentials:
 
 1. Launches a temporary Amazon Linux 2023 instance with a large disk and
-   the ``openclaw-model-fetcher`` role (SSM + write access to the bucket).
+   the ``jarvis-model-fetcher`` role (SSM + write access to the bucket).
 2. Over SSM, installs the Hugging Face CLI, downloads the repo (safetensors,
    config and tokenizer only) and syncs it to ``s3://<bucket>/<name>/``.
 3. Terminates the instance.
-4. Creates a Bedrock model-import job using the ``openclaw-bedrock-import``
+4. Creates a Bedrock model-import job using the ``jarvis-bedrock-import``
    role, waits for it, and prints the ARN.
 
 Usage:
-  python3 aws/scripts/bedrock_import.py --hf-repo Qwen/Qwen2.5-7B-Instruct --name openclaw-qwen25-7b
+  python3 aws/scripts/bedrock_import.py --hf-repo Qwen/Qwen2.5-7B-Instruct --name jarvis-qwen25-7b
   python3 aws/scripts/bedrock_import.py --s3-uri s3://bucket/prefix/ --name my-model   # weights already in S3
 
 For gated repos (Llama, Mistral) pass --hf-token-secret <Secrets Manager name>
@@ -109,12 +109,12 @@ def fetch_to_s3(args, session):
     log(f"launching fetch instance {args.instance_type} with {args.disk_gb} GB disk")
     inst = ec2.run_instances(
         ImageId=latest_al2023(ec2), InstanceType=args.instance_type, MinCount=1, MaxCount=1,
-        IamInstanceProfile={"Name": "openclaw-model-fetcher"},
+        IamInstanceProfile={"Name": "jarvis-model-fetcher"},
         BlockDeviceMappings=[{"DeviceName": "/dev/xvda", "Ebs": {
             "VolumeSize": args.disk_gb, "VolumeType": "gp3", "DeleteOnTermination": True}}],
         MetadataOptions={"HttpTokens": "required"},
         TagSpecifications=[{"ResourceType": "instance", "Tags": [
-            {"Key": "Name", "Value": f"openclaw-model-fetch-{args.name}"}, {"Key": "Project", "Value": "openclaw"}]}],
+            {"Key": "Name", "Value": f"jarvis-model-fetch-{args.name}"}, {"Key": "Project", "Value": "jarvis"}]}],
         InstanceInitiatedShutdownBehavior="terminate",
     )["Instances"][0]
     iid = inst["InstanceId"]
@@ -137,7 +137,7 @@ def import_model(args, session, s3_uri):
     br = session.client("bedrock")
     sts = session.client("sts")
     acct = sts.get_caller_identity()["Account"]
-    role_arn = f"arn:aws:iam::{acct}:role/openclaw-bedrock-import"
+    role_arn = f"arn:aws:iam::{acct}:role/jarvis-bedrock-import"
     job_name = f"{args.name}-{int(time.time())}"
     log(f"creating import job {job_name} from {s3_uri}")
     br.create_model_import_job(
@@ -171,7 +171,7 @@ def main():
     src = ap.add_mutually_exclusive_group(required=True)
     src.add_argument("--hf-repo", help="Hugging Face repo id, e.g. Qwen/Qwen2.5-7B-Instruct")
     src.add_argument("--s3-uri", help="Weights already in S3 (s3://bucket/prefix/)")
-    ap.add_argument("--bucket", default=None, help="Bucket for weights (default openclaw-models-<account>)")
+    ap.add_argument("--bucket", default=None, help="Bucket for weights (default jarvis-models-<account>)")
     ap.add_argument("--region", default="us-west-2")
     ap.add_argument("--profile", default=None)
     ap.add_argument("--hf-token-secret", default=None, help="Secrets Manager secret holding a HF read token (gated repos)")
@@ -183,7 +183,7 @@ def main():
     session = boto3.Session(region_name=args.region, profile_name=args.profile)
     if not args.bucket:
         acct = session.client("sts").get_caller_identity()["Account"]
-        args.bucket = f"openclaw-models-{acct}"
+        args.bucket = f"jarvis-models-{acct}"
     s3_uri = args.s3_uri or fetch_to_s3(args, session)
     import_model(args, session, s3_uri)
 

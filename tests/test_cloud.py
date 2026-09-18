@@ -1,4 +1,4 @@
-"""Tests for OpenClaw cloud support (IMDS, bootstrap, headless runner)."""
+"""Tests for Jarvis cloud support (IMDS, bootstrap, headless runner)."""
 
 import json
 import logging
@@ -10,19 +10,19 @@ import unittest
 import urllib.request
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
-from openclaw.agent.core import AgentCore
-from openclaw.agent.planner import TaskPlanner, TaskType
-from openclaw.agent.memory import AgentMemory
-from openclaw.cloud.imds import IMDSClient, TOKEN_HEADER
-from openclaw.cloud import bootstrap
-from openclaw.cloud.headless import HeadlessRunner
-from openclaw.main import load_config, apply_cli_overrides
+from jarvis.agent.core import AgentCore
+from jarvis.agent.planner import TaskPlanner, TaskType
+from jarvis.agent.memory import AgentMemory
+from jarvis.cloud.imds import IMDSClient, TOKEN_HEADER
+from jarvis.cloud import bootstrap
+from jarvis.cloud.headless import HeadlessRunner
+from jarvis.main import load_config, apply_cli_overrides
 
 
 # ---- Fake IMDSv2 ------------------------------------------------------------
 
 USER_DATA = """#cloud-config
-openclaw:
+jarvis:
   agent:
     name: test-agent
   goals:
@@ -50,10 +50,10 @@ METADATA = {
     "hostname": "ip-10-0-0-1.eu-west-2.compute.internal",
     "local-ipv4": "10.0.0.1",
     "mac": "0a:00:00:00:00:01",
-    "iam/security-credentials/": "openclaw-role\n",
-    "tags/instance": "Name\nopenclaw:goal\n",
+    "iam/security-credentials/": "jarvis-role\n",
+    "tags/instance": "Name\njarvis:goal\n",
     "tags/instance/Name": "paul-agent",
-    "tags/instance/openclaw:goal": "Stay healthy",
+    "tags/instance/jarvis:goal": "Stay healthy",
 }
 
 
@@ -123,17 +123,17 @@ class TestIMDSClient(unittest.TestCase):
             self.assertEqual(summary["provider"], "aws")
             self.assertEqual(summary["instance_id"], "i-0123456789abcdef0")
             self.assertEqual(summary["region"], "eu-west-2")
-            self.assertEqual(summary["iam_role"], "openclaw-role")
+            self.assertEqual(summary["iam_role"], "jarvis-role")
             self.assertNotIn("public_ipv4", summary)  # 404 -> omitted
             self.assertEqual(imds.identity()["instanceType"], "t3.small")
 
     def test_user_data_and_tags(self):
         with FakeIMDS() as fake:
             imds = IMDSClient(base_url=fake.url)
-            self.assertIn("openclaw:", imds.user_data())
+            self.assertIn("jarvis:", imds.user_data())
             tags = imds.tags()
             self.assertEqual(tags["Name"], "paul-agent")
-            self.assertEqual(tags["openclaw:goal"], "Stay healthy")
+            self.assertEqual(tags["jarvis:goal"], "Stay healthy")
 
     def test_unavailable_endpoint(self):
         # Nothing listens here; client must degrade quietly and quickly.
@@ -162,7 +162,7 @@ class TestBootstrap(unittest.TestCase):
         self.assertEqual(cfg["agent"]["name"], "test-agent")
         self.assertEqual(len(cfg["goals"]), 2)
 
-    def test_parse_bare_openclaw_config(self):
+    def test_parse_bare_jarvis_config(self):
         cfg = bootstrap.parse_user_data('{"agent": {"name": "x"}, "goals": ["a"]}')
         self.assertEqual(cfg["agent"]["name"], "x")
         self.assertEqual(cfg["goals"], ["a"])
@@ -251,11 +251,11 @@ class TestConfigOverlays(unittest.TestCase):
         self.assertEqual(config["cloud"]["cycle_interval"], 1)
 
     def test_headless_env_and_cli_overrides(self):
-        os.environ["OPENCLAW_HEADLESS"] = "1"
+        os.environ["JARVIS_HEADLESS"] = "1"
         try:
             config = load_config("/nonexistent")
         finally:
-            del os.environ["OPENCLAW_HEADLESS"]
+            del os.environ["JARVIS_HEADLESS"]
         self.assertTrue(config["cloud"]["headless"])
 
         class Args:
@@ -290,7 +290,7 @@ class TestCloudProfile(unittest.TestCase):
         self.assertEqual(planner.profile, "bare-metal")
 
     def test_cloud_probe_without_imds_still_succeeds(self):
-        os.environ["OPENCLAW_IMDS_URL"] = "http://127.0.0.1:9"
+        os.environ["JARVIS_IMDS_URL"] = "http://127.0.0.1:9"
         try:
             agent = AgentCore({"name": "t", "profile": "cloud"},
                               {"display": None, "input": None,
@@ -298,7 +298,7 @@ class TestCloudProfile(unittest.TestCase):
                               logging.getLogger("test"))
             result = agent.run_cycle()
         finally:
-            del os.environ["OPENCLAW_IMDS_URL"]
+            del os.environ["JARVIS_IMDS_URL"]
         self.assertEqual(result["action"], "Identify cloud instance (IMDS)")
         self.assertTrue(result["result"]["success"])
         self.assertFalse(result["result"]["output"]["available"])
@@ -306,7 +306,7 @@ class TestCloudProfile(unittest.TestCase):
 
     def test_cloud_probe_with_fake_imds(self):
         with FakeIMDS() as fake:
-            os.environ["OPENCLAW_IMDS_URL"] = fake.url
+            os.environ["JARVIS_IMDS_URL"] = fake.url
             try:
                 agent = AgentCore({"name": "t", "profile": "cloud"},
                                   {"display": None, "input": None,
@@ -314,7 +314,7 @@ class TestCloudProfile(unittest.TestCase):
                                   logging.getLogger("test"))
                 result = agent.run_cycle()
             finally:
-                del os.environ["OPENCLAW_IMDS_URL"]
+                del os.environ["JARVIS_IMDS_URL"]
         self.assertEqual(result["result"]["output"]["instance_id"],
                          "i-0123456789abcdef0")
         self.assertEqual(len(agent.memory.recall("cloud_probe")), 1)
@@ -331,7 +331,7 @@ class TestHeadlessRunner(unittest.TestCase):
                          logging.getLogger("test"))
 
     def test_runs_max_cycles_and_writes_status_file(self):
-        os.environ["OPENCLAW_IMDS_URL"] = "http://127.0.0.1:9"
+        os.environ["JARVIS_IMDS_URL"] = "http://127.0.0.1:9"
         try:
             with tempfile.TemporaryDirectory() as tmp:
                 status_file = os.path.join(tmp, "run", "status.json")
@@ -343,13 +343,13 @@ class TestHeadlessRunner(unittest.TestCase):
                 with open(status_file) as f:
                     status = json.load(f)
         finally:
-            del os.environ["OPENCLAW_IMDS_URL"]
+            del os.environ["JARVIS_IMDS_URL"]
         self.assertEqual(status["cycle_count"], 3)
         self.assertEqual(status["runner"]["mode"], "headless")
         self.assertFalse(status["running"])
 
     def test_status_endpoint(self):
-        os.environ["OPENCLAW_IMDS_URL"] = "http://127.0.0.1:9"
+        os.environ["JARVIS_IMDS_URL"] = "http://127.0.0.1:9"
         try:
             agent = self._agent()
             with tempfile.TemporaryDirectory() as tmp:
@@ -392,7 +392,7 @@ class TestHeadlessRunner(unittest.TestCase):
             finally:
                 runner.stop_status_server()
         finally:
-            del os.environ["OPENCLAW_IMDS_URL"]
+            del os.environ["JARVIS_IMDS_URL"]
         self.assertTrue(health["ok"])
         self.assertEqual(status["name"], "headless-test")
         self.assertEqual(status["cycle_count"], 1)
@@ -400,12 +400,12 @@ class TestHeadlessRunner(unittest.TestCase):
         self.assertGreater(memory["total_entries"], 0)
 
     def test_failed_tasks_back_off(self):
-        os.environ["OPENCLAW_IMDS_URL"] = "http://127.0.0.1:9"
+        os.environ["JARVIS_IMDS_URL"] = "http://127.0.0.1:9"
         try:
             agent = self._agent()
             agent.planner._boot_tasks_generated = True
             # every cycle runs a task that fails
-            from openclaw.agent.planner import Task, TaskType
+            from jarvis.agent.planner import Task, TaskType
             original = agent.planner.generate_task
             agent.planner.generate_task = lambda obs: Task(priority=1, description="boom",
                                                            task_type=TaskType.SHELL_COMMAND,
@@ -416,13 +416,13 @@ class TestHeadlessRunner(unittest.TestCase):
             runner.run()
             elapsed = time.time() - t0
         finally:
-            del os.environ["OPENCLAW_IMDS_URL"]
+            del os.environ["JARVIS_IMDS_URL"]
         # streak waits after cycles 1 and 2: 0.2 + 0.4 (cycle 3 ends the run before its wait)
         self.assertGreaterEqual(elapsed, 0.55)
         self.assertEqual(runner.failure_streak, 2)
 
     def test_idle_cycles_back_off_and_wake_resets(self):
-        os.environ["OPENCLAW_IMDS_URL"] = "http://127.0.0.1:9"
+        os.environ["JARVIS_IMDS_URL"] = "http://127.0.0.1:9"
         try:
             agent = self._agent()
             agent.planner._boot_tasks_generated = True
@@ -447,17 +447,17 @@ class TestHeadlessRunner(unittest.TestCase):
             self.assertLess(time.time() - t0, 5)
             self.assertEqual(runner.idle_streak, 0)  # reset by the wake; cycle 2 ends the run
         finally:
-            del os.environ["OPENCLAW_IMDS_URL"]
+            del os.environ["JARVIS_IMDS_URL"]
 
     def test_stop_ends_loop(self):
-        os.environ["OPENCLAW_IMDS_URL"] = "http://127.0.0.1:9"
+        os.environ["JARVIS_IMDS_URL"] = "http://127.0.0.1:9"
         try:
             runner = HeadlessRunner(self._agent(), logging.getLogger("test"),
                                     interval=30, max_cycles=0, status_port=None)
             threading.Timer(0.2, runner.stop).start()
             cycles = runner.run()
         finally:
-            del os.environ["OPENCLAW_IMDS_URL"]
+            del os.environ["JARVIS_IMDS_URL"]
         self.assertGreaterEqual(cycles, 1)
         self.assertFalse(runner.agent.running)
 

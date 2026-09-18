@@ -10,8 +10,8 @@ import unittest
 import urllib.error
 import urllib.request
 
-from openclaw.agent.core import AgentCore
-from openclaw.cloud.headless import HeadlessRunner, UI_HTML_PATH
+from jarvis.agent.core import AgentCore
+from jarvis.cloud.headless import HeadlessRunner, UI_HTML_PATH
 from tests.test_brain import FakeClaude, make_brain, message, needs_sdk
 
 NO_HW = {"display": None, "input": None, "memory": None, "storage": None}
@@ -53,7 +53,7 @@ class TestUiListener(unittest.TestCase):
             try:
                 html, status = call(base, "/ui")
                 self.assertEqual(status, 200)
-                self.assertIn("<title>OpenClaw</title>", html)
+                self.assertIn("<title>Jarvis</title>", html)
                 self.assertIn("/upload", html)
                 with self.assertRaises(urllib.error.HTTPError) as cm:
                     call(base, "/uploads")
@@ -130,7 +130,7 @@ class TestUiListener(unittest.TestCase):
                 runner.stop_status_server()
 
     def test_turn_normalisation(self):
-        from openclaw.brain.llm import BaseBrain
+        from jarvis.brain.llm import BaseBrain
         norm = BaseBrain._normalise_turns
         self.assertEqual(norm([]), [])
         self.assertEqual(norm([{"role": "assistant", "content": "x"}]), [])  # must start with user
@@ -156,7 +156,7 @@ class TestUiListener(unittest.TestCase):
                 ctx.verify_mode = ssl.CERT_NONE
                 html, status = call(f"https://127.0.0.1:{port}", "/ui", ctx=ctx)
                 self.assertEqual(status, 200)
-                self.assertIn("OpenClaw", html)
+                self.assertIn("Jarvis", html)
                 # plain HTTP to the TLS port must fail, not be served
                 with self.assertRaises(Exception):
                     call(f"http://127.0.0.1:{port}", "/ui", timeout=3)

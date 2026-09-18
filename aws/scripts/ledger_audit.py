@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Audit an OpenClaw agent's Glass Ledger from a machine the agent does not administer.
+"""Audit a Jarvis agent's Glass Ledger from a machine the agent does not administer.
 
-    python3 aws/scripts/ledger_audit.py --bucket openclaw-ledger-<acct>-<name> \
+    python3 aws/scripts/ledger_audit.py --bucket jarvis-ledger-<acct>-<name> \
         --writer <agent name> --region us-west-2 --pubkey <64 hex> --pin build/ledger.pin
 
 Fetches the witness copy the instance anchored into the Object Lock bucket
@@ -23,7 +23,7 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
 
-from openclaw.ledger.verify import verify_file, load_pin, save_pin  # noqa: E402
+from jarvis.ledger.verify import verify_file, load_pin, save_pin  # noqa: E402
 
 
 def fetch(bucket: str, writer: str, region: str, profile: str, out_dir: str) -> tuple:

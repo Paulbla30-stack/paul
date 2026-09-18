@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# OpenClaw AMI cleanup
+# Jarvis AMI cleanup
 # ====================
 # Last Packer step.  Removes anything instance-specific so every launch
 # from the AMI starts clean: cloud-init state, SSH host keys, logs,
@@ -10,7 +10,7 @@ set -euo pipefail
 log() { printf '[cleanup] %s\n' "$*"; }
 
 log "Removing build source"
-rm -rf /tmp/openclaw-src /tmp/openclaw-src.tar.gz
+rm -rf /tmp/jarvis-src /tmp/jarvis-src.tar.gz
 
 log "Resetting cloud-init"
 if command -v cloud-init >/dev/null 2>&1; then
@@ -25,8 +25,8 @@ log "Clearing logs and caches"
 find /var/log -type f -name '*.gz' -delete 2>/dev/null || true
 find /var/log -type f -name '*.[0-9]' -delete 2>/dev/null || true
 for f in /var/log/messages /var/log/secure /var/log/cloud-init.log \
-         /var/log/cloud-init-output.log /var/log/openclaw.log \
-         /var/log/openclaw-security.log /var/log/dnf.log /var/log/dnf.rpm.log \
+         /var/log/cloud-init-output.log /var/log/jarvis.log \
+         /var/log/jarvis-security.log /var/log/dnf.log /var/log/dnf.rpm.log \
          /var/log/syslog /var/log/auth.log; do
     [ -f "$f" ] && : > "$f"
 done

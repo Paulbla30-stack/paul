@@ -10,7 +10,7 @@ variable "ami_id" {
 
 variable "name" {
   type    = string
-  default = "openclaw-agent"
+  default = "jarvis-agent"
 }
 
 variable "instance_type" {
@@ -50,13 +50,13 @@ variable "ssh_cidr" {
 variable "user_data_file" {
   type        = string
   default     = ""
-  description = "cloud-config file with an openclaw: block; empty = the bundled example."
+  description = "cloud-config file with a jarvis: block; empty = the bundled example."
 }
 
 variable "agent_goal" {
   type        = string
   default     = ""
-  description = "Optional goal passed via the openclaw:goal instance tag."
+  description = "Optional goal passed via the jarvis:goal instance tag."
 }
 
 variable "tags" {
@@ -66,7 +66,7 @@ variable "tags" {
 
 variable "anthropic_api_key_secret" {
   type        = string
-  default     = "openclaw/anthropic-api-key"
+  default     = "jarvis/anthropic-api-key"
   description = "AWS Secrets Manager secret (name or ARN) holding the Anthropic API key for the LLM planner. The value may be the bare key or JSON with an ANTHROPIC_API_KEY field. Empty disables the grant."
 }
 

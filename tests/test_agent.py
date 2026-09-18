@@ -1,12 +1,12 @@
-"""Tests for OpenClaw Agent Core."""
+"""Tests for Jarvis Agent Core."""
 
 import unittest
 import logging
 
-from openclaw.agent.core import AgentCore
-from openclaw.agent.planner import Task, TaskPlanner, TaskType, TaskStatus
-from openclaw.agent.executor import TaskExecutor
-from openclaw.agent.memory import AgentMemory
+from jarvis.agent.core import AgentCore
+from jarvis.agent.planner import Task, TaskPlanner, TaskType, TaskStatus
+from jarvis.agent.executor import TaskExecutor
+from jarvis.agent.memory import AgentMemory
 
 
 class TestAgentMemory(unittest.TestCase):

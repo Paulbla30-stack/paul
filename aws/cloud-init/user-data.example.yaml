@@ -1,15 +1,15 @@
 #cloud-config
-# Example EC2 user data for an OpenClaw agent-first instance.
+# Example EC2 user data for a Jarvis agent-first instance.
 #
-# openclaw-bootstrap.service reads this block through IMDS at every boot
-# and writes /etc/openclaw/cloud.yaml, which the agent merges on top of
-# /etc/openclaw/config.yaml.  Everything under `openclaw:` is optional.
+# jarvis-bootstrap.service reads this block through IMDS at every boot
+# and writes /etc/jarvis/cloud.yaml, which the agent merges on top of
+# /etc/jarvis/config.yaml.  Everything under `jarvis:` is optional.
 #
 # Goals may also be given without user data by tagging the instance with
-#   openclaw:goal = "<text>"     and/or     openclaw:name = "<agent name>"
+#   jarvis:goal = "<text>"     and/or     jarvis:name = "<agent name>"
 # (enable "Allow tags in instance metadata" on the instance).
 
-openclaw:
+jarvis:
   agent:
     name: paul-life-agent
 
@@ -30,7 +30,7 @@ openclaw:
 
   # LLM planner. The key itself never goes in user data: point at an AWS
   # Secrets Manager secret (or an SSM SecureString) the instance role can
-  # read and the bootstrap writes it to /etc/openclaw/anthropic.key (0600)
+  # read and the bootstrap writes it to /etc/jarvis/anthropic.key (0600)
   # at every boot.  (An inline `api_key:` is accepted for quick tests; it is
   # moved to the key file and stripped from cloud.yaml, but anyone who can
   # read user data can read it.)
@@ -39,8 +39,8 @@ openclaw:
     provider: anthropic
     model: claude-opus-5
     effort: medium
-    api_key_secret: openclaw/anthropic-api-key      # Secrets Manager name or ARN
-    # api_key_ssm_parameter: /openclaw/anthropic-api-key   # or SSM Parameter Store
+    api_key_secret: jarvis/anthropic-api-key      # Secrets Manager name or ARN
+    # api_key_ssm_parameter: /jarvis/anthropic-api-key   # or SSM Parameter Store
 
   # Or run an open-weight model, or your own, on Amazon Bedrock. No key
   # needed: the instance role calls Bedrock directly (see aws/terraform).
@@ -53,6 +53,6 @@ openclaw:
     shell:
       enabled: true          # brain may run deny-list-guarded commands
 
-# Regular cloud-init keys still work alongside the openclaw block:
+# Regular cloud-init keys still work alongside the jarvis block:
 # packages:
 #   - htop

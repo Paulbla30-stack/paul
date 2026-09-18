@@ -1,6 +1,6 @@
-# OpenClaw on AWS: the agent-first AMI
+# Jarvis on AWS: the agent-first AMI
 
-This directory turns OpenClaw into an Amazon Machine Image where the agent
+This directory turns Jarvis into an Amazon Machine Image where the agent
 is the operating system's primary process. The instance boots, works out
 who it is from the EC2 metadata service, reads its goals from user data,
 and starts its observe-plan-act-reflect loop before any human logs in.
@@ -8,12 +8,12 @@ People are guests on the box; the agent is the tenant.
 
 ```
 aws/
-├── packer/openclaw-ami.pkr.hcl   # builds the AMI (Amazon Linux 2023 or Ubuntu 24.04)
+├── packer/jarvis-ami.pkr.hcl   # builds the AMI (Amazon Linux 2023 or Ubuntu 24.04)
 ├── scripts/provision.sh          # installs the agent + units inside the build instance
 ├── scripts/cleanup.sh            # scrubs instance identity before the snapshot
 ├── scripts/motd.sh               # login banner pointing humans at the agent
-├── systemd/openclaw-bootstrap.service   # IMDS + user data -> /etc/openclaw/cloud.yaml
-├── systemd/openclaw.service             # the agent, headless, restart=always
+├── systemd/jarvis-bootstrap.service   # IMDS + user data -> /etc/jarvis/cloud.yaml
+├── systemd/jarvis.service             # the agent, headless, restart=always
 ├── cloud-init/user-data.example.yaml    # how to hand the agent goals at launch
 └── terraform/                    # optional: launch an instance from the AMI
 ```
@@ -21,19 +21,19 @@ aws/
 ## What happens at boot
 
 1. **cloud-init** runs as usual (SSH keys, hostname, packages).
-2. **openclaw-bootstrap.service** asks IMDSv2 for the instance identity,
-   tags and user data, then writes `/etc/openclaw/cloud.yaml`:
+2. **jarvis-bootstrap.service** asks IMDSv2 for the instance identity,
+   tags and user data, then writes `/etc/jarvis/cloud.yaml`:
    instance facts under `cloud.instance`, operator overrides, and a
    normalised `goals` list.
-3. **openclaw.service** starts `openclaw --headless --extra-config
-   /etc/openclaw/cloud.yaml`. The agent seeds its goals, runs the cloud
+3. **jarvis.service** starts `jarvis --headless --extra-config
+   /etc/jarvis/cloud.yaml`. The agent seeds its goals, runs the cloud
    boot tasks (IMDS probe, memory, storage, security scan) and then keeps
    cycling every `cloud.cycle_interval` seconds. Its log goes to the
    journal and the EC2 serial console.
 4. If an Anthropic API key is available, the **LLM brain** plans each cycle
    (see below); otherwise the rule planner runs and the journal says why.
 5. A status endpoint listens on `127.0.0.1:8471` and a snapshot is kept at
-   `/run/openclaw/status.json`. `openclaw --status` reads either.
+   `/run/jarvis/status.json`. `jarvis --status` reads either.
 
 ## Building the AMI
 
@@ -68,7 +68,7 @@ Either use the Terraform example:
 ```bash
 cd aws/terraform
 terraform init -backend-config="bucket=<your-state-bucket>" \
-               -backend-config="key=openclaw/terraform.tfstate" \
+               -backend-config="key=jarvis/terraform.tfstate" \
                -backend-config="region=eu-west-2"
 terraform apply -var ami_id=ami-0123456789abcdef0 -var region=eu-west-2
 ```
@@ -80,16 +80,16 @@ It creates an IAM role with SSM Session Manager access, a security group
 with no inbound rules, and an instance with IMDSv2 enforced and tags
 exposed to metadata. The bundled example user data is attached so the
 agent starts with goals. Pass `-var agent_goal="..."` to add a goal via
-the `openclaw:goal` tag, or `-var ssh_cidr=203.0.113.4/32 -var key_name=mykey`
+the `jarvis:goal` tag, or `-var ssh_cidr=203.0.113.4/32 -var key_name=mykey`
 if you want SSH as well.
 
 Or launch by hand from the console or CLI. The only things that matter:
 
-- **User data**: a cloud-config with an `openclaw:` block
+- **User data**: a cloud-config with an `jarvis:` block
   (see `cloud-init/user-data.example.yaml`). cloud-init will log a schema
   warning about the unknown key; that is expected.
 - **Tags** (optional, needs "allow tags in instance metadata"):
-  `openclaw:name` renames the agent, `openclaw:goal` adds one goal.
+  `jarvis:name` renames the agent, `jarvis:goal` adds one goal.
 - **IAM role** with `AmazonSSMManagedInstanceCore` if you want to reach
   the box without opening port 22.
 
@@ -100,44 +100,44 @@ missing at build time is the Anthropic API key. Store it once in AWS
 Secrets Manager:
 
 ```bash
-aws secretsmanager create-secret --name openclaw/anthropic-api-key \
+aws secretsmanager create-secret --name jarvis/anthropic-api-key \
     --secret-string "$ANTHROPIC_API_KEY"
 ```
 
 The value can be the bare key or a JSON object with an `ANTHROPIC_API_KEY`
 (or `api_key`) field. The AMI profile already points at
-`llm.api_key_secret: openclaw/anthropic-api-key`; override it in user data
-or with an `openclaw:llm-key-secret` tag (name or ARN). SSM Parameter Store
+`llm.api_key_secret: jarvis/anthropic-api-key`; override it in user data
+or with an `jarvis:llm-key-secret` tag (name or ARN). SSM Parameter Store
 works the same way through `llm.api_key_ssm_parameter` and the
-`openclaw:llm-key-parameter` tag, and is tried second.
+`jarvis:llm-key-parameter` tag, and is tried second.
 
 The Terraform example grants `secretsmanager:GetSecretValue` on that secret
 to the instance role (`-var anthropic_api_key_secret=...`; set
 `anthropic_api_key_ssm_parameter` instead or as well for SSM; empty skips
 the grant). At every boot the bootstrap service reads the secret with the
-instance role and writes `/etc/openclaw/anthropic.key` (0600). The key never
+instance role and writes `/etc/jarvis/anthropic.key` (0600). The key never
 appears in user data, cloud.yaml or the journal. An inline `llm.api_key` in
 user data also works for quick tests, but user data is readable by anyone on
 the instance.
 
-What the brain may do is set by `llm.shell` in `/etc/openclaw/config.yaml`
+What the brain may do is set by `llm.shell` in `/etc/jarvis/config.yaml`
 (on in the AMI profile, deny-list guarded) and by the goals you give it.
 Budget it with `llm.max_calls_per_hour` (60 by default, so at the default
 30 s cycle it plans at most every minute when busy) and `llm.effort`.
 
 ```bash
-openclaw --status                       # includes brain model, budget and last reasoning
-T="Authorization: Bearer $(sudo cat /run/openclaw/token)"   # 0600, root only
+jarvis --status                       # includes brain model, budget and last reasoning
+T="Authorization: Bearer $(sudo cat /run/jarvis/token)"   # 0600, root only
 curl -s -H "$T" localhost:8471/brain    # full brain status + last thought
 curl -s -H "$T" -X POST localhost:8471/goal -d 'Find out why disk fills up nightly'
 curl -s -H "$T" -X POST localhost:8471/think    # plan one step now and run it
 curl -s -H "$T" -X POST localhost:8471/ask -d 'What have you changed today?'
-sudo openclaw --ask 'Is anything wrong with this box?' --no-hardware   # key file is root-only
+sudo jarvis --ask 'Is anything wrong with this box?' --no-hardware   # key file is root-only
 ```
 
 A goal is an instruction the root agent will act on with its shell, so the
 token is required for every call except `/health` and `/status`, and the
-goal channels (user data, the `openclaw:goal` tag, `POST /goal`) should be
+goal channels (user data, the `jarvis:goal` tag, `POST /goal`) should be
 treated as root-equivalent: anyone with `ec2:CreateTags` on the instance can
 hand it work.
 
@@ -163,22 +163,22 @@ Mistral/Mixtral, gpt-oss or Qwen architecture weights in Hugging Face
 safetensors format, in S3, imported once (us-east-1 and us-west-2 only).
 `aws/scripts/bedrock_import.py` does the whole thing from a Hugging Face
 repo id: it launches a temporary instance with a big disk, downloads the
-weights straight into `s3://openclaw-models-<account>/<name>/`, terminates
-the instance, runs the import job with the `openclaw-bedrock-import` role
+weights straight into `s3://jarvis-models-<account>/<name>/`, terminates
+the instance, runs the import job with the `jarvis-bedrock-import` role
 and prints the ARN.
 
 ```bash
 pip install boto3
-python3 aws/scripts/bedrock_import.py --hf-repo Qwen/Qwen3-32B --name openclaw-qwen3-32b --instance-type m6i.2xlarge
+python3 aws/scripts/bedrock_import.py --hf-repo Qwen/Qwen3-32B --name jarvis-qwen3-32b --instance-type m6i.2xlarge
 # gated repo (Llama, Mistral): store a HF read token in Secrets Manager first
 python3 aws/scripts/bedrock_import.py --hf-repo meta-llama/Llama-3.1-8B-Instruct \
-    --name openclaw-llama31-8b --hf-token-secret openclaw/hf-token
+    --name jarvis-llama31-8b --hf-token-secret jarvis/hf-token
 # weights already in S3
 python3 aws/scripts/bedrock_import.py --s3-uri s3://my-bucket/my-model/ --name my-model
 ```
 
-It needs the bucket and the two roles (`openclaw-bedrock-import` for
-Bedrock, `openclaw-model-fetcher` for the temporary instance); create them
+It needs the bucket and the two roles (`jarvis-bedrock-import` for
+Bedrock, `jarvis-model-fetcher` for the temporary instance); create them
 once with the snippet in the script's docstring or let an operator with
 IAM rights run it first.
 
@@ -213,10 +213,10 @@ fine with `llm.shell.enabled: true`; with a small model, keep shell off.
 Any system that keeps its own log can rewrite its own log. The AMI ships
 the Glass Ledger (Blatherwick, *The Glass Ledger v2*,
 [doi:10.5281/zenodo.21515861](https://doi.org/10.5281/zenodo.21515861)):
-an append-only journal at `/var/lib/openclaw/ledger.jsonl` where every
+an append-only journal at `/var/lib/jarvis/ledger.jsonl` where every
 entry carries the SHA-256 fingerprint of the entry before it and an
 Ed25519 signature over its own fingerprint, with length-prefix framing,
-canonical JSON and domain-separated signing (`openclaw/ledger/chain.py`
+canonical JSON and domain-separated signing (`jarvis/ledger/chain.py`
 documents the exact bytes). The agent records:
 
 | kind | what |
@@ -233,7 +233,7 @@ The action entry is written **before** the task runs. With
 answer while it cannot record: no record, no action, no answer. The
 reason (a torn tail after a power loss, a locked file) shows under
 `ledger` in `/status` and on the UI; the one documented repair is an
-operator command, `python -m openclaw.ledger repair <file>`, never the
+operator command, `python -m jarvis.ledger repair <file>`, never the
 agent's. The shell policy denies the agent any command touching the
 ledger, its key or the verifier, and the planner prompt says why: the
 ledger is evidence about the agent, not context for it.
@@ -253,18 +253,18 @@ your machine:
 # once, when the agent first starts: record its public key somewhere the
 # instance cannot reach (it is also logged at start and at /ledger/pubkey)
 aws ssm send-command --instance-ids <id> --document-name AWS-RunShellScript \
-    --parameters commands='cat /etc/openclaw/ledger/ed25519.pub'
+    --parameters commands='cat /etc/jarvis/ledger/ed25519.pub'
 
 # then, whenever you like: verify the witness copy, check your pin, advance it
 python3 aws/scripts/ledger_audit.py --bucket $(terraform -chdir=aws/terraform output -raw ledger_bucket) \
-    --writer openclaw-agent --region us-west-2 --pubkey <hex> --pin build/ledger.pin
+    --writer jarvis-agent --region us-west-2 --pubkey <hex> --pin build/ledger.pin
 ```
 
 The audit checks the four chain rules on every entry, that genesis
 commits the key you pinned (a rewrite under a fresh key dies at seq 0),
 that the chain still extends the pin you kept (a rolled-back or
 regenerated history is BROKEN), and that the instance's own checkpoint
-agrees with the chain. `python -m openclaw.ledger verify <copy> --pubkey
+agrees with the chain. `python -m jarvis.ledger verify <copy> --pubkey
 <hex> --pin <file>` does the same on any copy; `tail` prints entries.
 Verdicts, never tracebacks: hostile input comes back as `BROKEN at seq N`.
 A partial final line is `INTACT (torn tail)` with a repair instruction,
@@ -282,7 +282,7 @@ timestamp belongs.
 
 The Anthropic SDK needs Python 3.10 or newer and AL2023's system `python3` is
 3.9, so provisioning installs `python3.11` and records it in
-`/etc/default/openclaw` as `OPENCLAW_PYTHON`. The launcher and both units read
+`/etc/default/jarvis` as `JARVIS_PYTHON`. The launcher and both units read
 that file; on Ubuntu 24.04 the system Python is used.
 
 ## The web UI
@@ -295,12 +295,12 @@ runner token, so it is safe to reach from a phone without a tunnel.
 
 ```bash
 terraform apply ... -var ui_cidr=203.0.113.4/32       # your public IP
-sudo cat /run/openclaw/token                          # via SSM; paste into the login box
+sudo cat /run/jarvis/token                          # via SSM; paste into the login box
 ```
 
 Then open `https://<public ip>:8443/ui`, accept the certificate warning
 once, and paste the token. In chat, `/goal text` adds a goal and `/think`
-runs one planning step. Uploaded files go to `/var/lib/openclaw/uploads`
+runs one planning step. Uploaded files go to `/var/lib/jarvis/uploads`
 and appear in the brain's context as `uploaded_files`, so "look at the CSV
 I just uploaded" works.
 
@@ -311,16 +311,16 @@ can hand the root agent work.
 
 ```bash
 aws ssm start-session --target i-0123456789abcdef0   # or ssh
-openclaw --status                                     # summary
+jarvis --status                                     # summary
 curl -s localhost:8471/status | python3 -m json.tool  # full snapshot
-curl -s -H "Authorization: Bearer $(sudo cat /run/openclaw/token)" localhost:8471/history   # last 20 task results
-journalctl -u openclaw -f                             # live log
-sudo systemctl restart openclaw                       # re-read config + user data
+curl -s -H "Authorization: Bearer $(sudo cat /run/jarvis/token)" localhost:8471/history   # last 20 task results
+journalctl -u jarvis -f                             # live log
+sudo systemctl restart jarvis                       # re-read config + user data
 ```
 
 The bootstrap unit runs on every boot, so changing user data and
 rebooting is enough to give the agent new goals. Editing
-`/etc/openclaw/config.yaml` changes the baseline; `cloud.yaml` is
+`/etc/jarvis/config.yaml` changes the baseline; `cloud.yaml` is
 regenerated and should not be edited by hand.
 
 ## Differences from the bootable ISO
@@ -332,7 +332,7 @@ regenerated and should not be edited by hand.
 | Display / input    | Framebuffer and evdev enabled     | Disabled (no such devices on EC2)      |
 | Boot tasks         | Hardware enumeration first        | IMDS identity first, then memory, storage, scan |
 | Configuration      | `config.yaml` + kernel cmdline    | `config.yaml` + `cloud.yaml` from user data and tags |
-| Status             | Console commands                  | `openclaw --status`, HTTP on loopback  |
+| Status             | Console commands                  | `jarvis --status`, HTTP on loopback  |
 | LLM brain          | Off unless `llm.enabled` is set   | On; Claude with a key from Secrets Manager, or any Bedrock model with the instance role |
 
-Both profiles run the same `openclaw` package; the ISO build is untouched.
+Both profiles run the same `jarvis` package; the ISO build is untouched.

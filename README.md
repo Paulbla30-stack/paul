@@ -1,6 +1,6 @@
-# OpenClaw Agent-First OS
+# Jarvis Agent-First OS
 
-OpenClaw is an agentic agent that owns the machine it runs on. It ships in
+Jarvis is an agentic agent that owns the machine it runs on. It ships in
 two forms built from the same code:
 
 - **Bootable ISO** for bare metal or a VM: the agent is PID 1 with full
@@ -14,8 +14,8 @@ Both include the integrated security vulnerability scanner.
 ## Architecture
 
 ```
-openclaw/
-├── openclaw/           # Core agent software
+jarvis/
+├── jarvis/           # Core agent software
 │   ├── agent/          # Agentic AI core (planner, executor, memory)
 │   ├── brain/          # LLM planner (Claude), credentials
 │   ├── cloud/          # IMDS client, boot-time bootstrap, headless runner
@@ -39,7 +39,7 @@ openclaw/
 - **Security Scanner**: Integrated vulnerability detection and system hardening
 - **Bootable ISO**: Standalone environment bootable from USB/CD/VM
 - **AWS AMI**: Agent-first EC2 image; goals arrive via user data or tags,
-  status via `openclaw --status` or a loopback HTTP endpoint
+  status via `jarvis --status` or a loopback HTTP endpoint
 - **Glass Ledger**: a signed, hash-chained, append-only journal of every decision, action and outcome that the agent cannot rewrite, verified off-box with a pinned public key ([The Glass Ledger v2](https://doi.org/10.5281/zenodo.21515861)); see `aws/README.md`
 
 ## Building the ISO
@@ -78,7 +78,7 @@ make scan && make iso
 ## Booting
 
 The ISO boots into a minimal Linux environment that automatically launches
-the OpenClaw agent. The agent has full access to:
+the Jarvis agent. The agent has full access to:
 
 | Resource     | Access Method          | Permission |
 |-------------|------------------------|------------|
@@ -96,7 +96,7 @@ make ami-init                    # once: install the Packer amazon plugin
 make ami AWS_REGION=eu-west-2    # build; AMI id lands in build/ami-manifest.json
 ```
 
-Launch the AMI with an `openclaw:` block in the user data to hand the
+Launch the AMI with an `jarvis:` block in the user data to hand the
 agent its goals (example in `aws/cloud-init/user-data.example.yaml`), or
 use the Terraform in `aws/terraform/`. Full details in
 [`aws/README.md`](aws/README.md).
@@ -114,7 +114,7 @@ signal, and any goals the evidence shows are complete.
 export ANTHROPIC_API_KEY=sk-ant-...
 make headless CYCLES=5                      # cloud profile has llm.enabled: true
 make ask Q="what is using the most memory?" # one-shot question, no loop
-PYTHONPATH=. python3 -m openclaw.main --no-hardware --llm   # console: think / ask / brain / goals
+PYTHONPATH=. python3 -m jarvis.main --no-hardware --llm   # console: think / ask / brain / goals
 ```
 
 Key points:
@@ -123,7 +123,7 @@ Key points:
   `bedrock` (any Amazon Bedrock model, including your own imported weights,
   using the instance role and no API key). Both share the same loop, context
   and shell policy; see `aws/README.md` for the Bedrock setup.
-- **Model**: `claude-opus-5` by default (`llm.model`, `--model`, `OPENCLAW_MODEL`).
+- **Model**: `claude-opus-5` by default (`llm.model`, `--model`, `JARVIS_MODEL`).
   Adaptive thinking is on (`llm.thinking: adaptive` or `disabled`); `llm.effort`
   (default `medium`) sets how hard it thinks. `xhigh` and `max` need
   `llm.max_tokens` of at least 64000 and are clamped to `high` otherwise. Models
@@ -155,7 +155,7 @@ Key points:
   is disabled with a logged reason and the agent still runs.
 - **Failure modes**: refusals, truncation, rate limits, network and API errors
   all fall back to the rule planner for that cycle; authentication failures
-  disable the brain until restart. `openclaw --status` and `curl localhost:8471/brain`
+  disable the brain until restart. `jarvis --status` and `curl localhost:8471/brain`
   show what it last reasoned and why it is off, if it is.
 
 The ISO profile leaves `llm.enabled` false; nothing changes there unless you
@@ -173,7 +173,7 @@ uploads that land in `cloud.ui.upload_dir` and are handed to the brain as
 
 ## Headless mode
 
-`openclaw --headless` runs the same agent loop without the console. It is
+`jarvis --headless` runs the same agent loop without the console. It is
 what the AMI uses, and it works anywhere:
 
 ```bash
@@ -189,18 +189,18 @@ The status endpoint also accepts `POST /goal` (body is the goal text),
 `POST /think` (one LLM planning step, executed) and `POST /ask`, and serves
 `GET /brain`, `GET /goals`, `GET /history` and `GET /memory`. Everything
 except `/health` and `/status` needs the runner token, generated at start and
-written 0600 to `cloud.status_token_file` (default `/run/openclaw/token`):
+written 0600 to `cloud.status_token_file` (default `/run/jarvis/token`):
 
 ```bash
-curl -s -H "Authorization: Bearer $(sudo cat /run/openclaw/token)" localhost:8471/brain
+curl -s -H "Authorization: Bearer $(sudo cat /run/jarvis/token)" localhost:8471/brain
 ```
 
 ## Configuration
 
-Edit `rootfs/etc/openclaw/config.yaml` to customize agent behavior,
+Edit `rootfs/etc/jarvis/config.yaml` to customize agent behavior,
 hardware access policies, and security scan settings. The AMI installs
-`rootfs/etc/openclaw/config-aws.yaml` instead (cloud profile: display and
-input off, headless on) and merges `/etc/openclaw/cloud.yaml`, generated
+`rootfs/etc/jarvis/config-aws.yaml` instead (cloud profile: display and
+input off, headless on) and merges `/etc/jarvis/cloud.yaml`, generated
 at boot from user data and instance tags. Top-level `goals:` in either
 file are handed to the agent at start.
 

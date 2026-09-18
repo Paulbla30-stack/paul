@@ -1,4 +1,4 @@
-# OpenClaw Bootable ISO - Build System
+# Jarvis Bootable ISO - Build System
 # =====================================
 
 SHELL := /bin/bash
@@ -9,10 +9,10 @@ SHELL := /bin/bash
 BUILD_DIR    := build
 ROOTFS_DIR   := $(BUILD_DIR)/rootfs
 ISO_DIR      := $(BUILD_DIR)/iso
-ISO_OUTPUT   := $(BUILD_DIR)/openclaw.iso
+ISO_OUTPUT   := $(BUILD_DIR)/jarvis.iso
 SCRIPTS_DIR  := scripts
 CONFIG_DIR   := config
-SRC_DIR      := openclaw
+SRC_DIR      := jarvis
 
 # Python
 PYTHON       := python3
@@ -31,7 +31,7 @@ AMI_ARCH      ?= x86_64
 AMI_BASE      ?= al2023
 AMI_INSTANCE  ?= t3.small
 AMI_SSH       ?= session_manager   # or public_ip when plain SSH egress is available
-AMI_BUNDLE    := $(BUILD_DIR)/openclaw-src.tar.gz
+AMI_BUNDLE    := $(BUILD_DIR)/jarvis-src.tar.gz
 PACKER_VARS   := -var region=$(AWS_REGION) -var arch=$(AMI_ARCH) \
                  -var base=$(AMI_BASE) -var instance_type=$(AMI_INSTANCE) \
                  -var ssh_interface=$(AMI_SSH)
@@ -43,7 +43,7 @@ INITRD       ?= ""
 # ---- Targets ----
 
 help: ## Show this help
-	@echo "OpenClaw Bootable ISO Build System"
+	@echo "Jarvis Bootable ISO Build System"
 	@echo "=================================="
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
 		awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2}'
@@ -57,17 +57,17 @@ $(BUILD_DIR):
 
 rootfs: $(BUILD_DIR) ## Build the root filesystem
 	@echo "[*] Building root filesystem..."
-	mkdir -p $(ROOTFS_DIR)/{bin,sbin,etc,proc,sys,dev,tmp,var,usr/local/bin,usr/lib/openclaw,root}
-	# Install OpenClaw agent
-	cp -r $(SRC_DIR)/ $(ROOTFS_DIR)/usr/lib/openclaw/
+	mkdir -p $(ROOTFS_DIR)/{bin,sbin,etc,proc,sys,dev,tmp,var,usr/local/bin,usr/lib/jarvis,root}
+	# Install Jarvis agent
+	cp -r $(SRC_DIR)/ $(ROOTFS_DIR)/usr/lib/jarvis/
 	# Install configuration
-	mkdir -p $(ROOTFS_DIR)/etc/openclaw
-	cp rootfs/etc/openclaw/config.yaml $(ROOTFS_DIR)/etc/openclaw/
+	mkdir -p $(ROOTFS_DIR)/etc/jarvis
+	cp rootfs/etc/jarvis/config.yaml $(ROOTFS_DIR)/etc/jarvis/
 	# Install init scripts
-	cp rootfs/etc/init.d/openclaw $(ROOTFS_DIR)/etc/init.d/ 2>/dev/null || true
+	cp rootfs/etc/init.d/jarvis $(ROOTFS_DIR)/etc/init.d/ 2>/dev/null || true
 	# Install launcher
-	cp rootfs/usr/local/bin/openclaw $(ROOTFS_DIR)/usr/local/bin/
-	chmod +x $(ROOTFS_DIR)/usr/local/bin/openclaw
+	cp rootfs/usr/local/bin/jarvis $(ROOTFS_DIR)/usr/local/bin/
+	chmod +x $(ROOTFS_DIR)/usr/local/bin/jarvis
 	# Install boot init
 	cp $(SCRIPTS_DIR)/init.sh $(ROOTFS_DIR)/init
 	chmod +x $(ROOTFS_DIR)/init
@@ -103,13 +103,13 @@ iso: rootfs ## Build the bootable ISO image
 # ---- Testing ----
 
 test: ## Run test suite
-	@echo "[*] Running OpenClaw tests..."
+	@echo "[*] Running Jarvis tests..."
 	$(PYTHON) -m pytest tests/ -v --tb=short 2>/dev/null || \
 		$(PYTHON) -m unittest discover -s tests -v
 
 scan: ## Run security vulnerability scan
 	@echo "[*] Running security vulnerability scan..."
-	$(PYTHON) -m openclaw.security.scanner --target . --report $(BUILD_DIR)/security-report.txt
+	$(PYTHON) -m jarvis.security.scanner --target . --report $(BUILD_DIR)/security-report.txt
 	@echo "[+] Security report: $(BUILD_DIR)/security-report.txt"
 
 # ---- Development ----
@@ -131,18 +131,18 @@ qemu: iso ## Boot ISO in QEMU for testing
 # ---- Headless / cloud mode ----
 
 headless: ## Run the agent headless locally for a few cycles (no hardware)
-	PYTHONPATH=. $(PYTHON) -m openclaw.main --no-hardware --headless \
-		--config rootfs/etc/openclaw/config-aws.yaml \
+	PYTHONPATH=. $(PYTHON) -m jarvis.main --no-hardware --headless \
+		--config rootfs/etc/jarvis/config-aws.yaml \
 		--max-cycles $(or $(CYCLES),5) --cycle-interval 1 \
 		--status-port 8471 --status-file $(BUILD_DIR)/status.json
 
 ask: ## Ask the LLM brain about this machine: make ask Q="what is using memory?"
-	PYTHONPATH=. $(PYTHON) -m openclaw.main --no-hardware --llm \
-		--config rootfs/etc/openclaw/config-aws.yaml --ask "$(Q)"
+	PYTHONPATH=. $(PYTHON) -m jarvis.main --no-hardware --llm \
+		--config rootfs/etc/jarvis/config-aws.yaml --ask "$(Q)"
 
 status: ## Query a running headless agent
-	PYTHONPATH=. $(PYTHON) -m openclaw.main --status \
-		--config rootfs/etc/openclaw/config-aws.yaml \
+	PYTHONPATH=. $(PYTHON) -m jarvis.main --status \
+		--config rootfs/etc/jarvis/config-aws.yaml \
 		--status-file $(BUILD_DIR)/status.json
 
 # ---- AWS AMI ----
@@ -161,7 +161,7 @@ ami-fmt: ## Format the Packer template
 ami-validate: ami-bundle ## Validate the Packer template
 	$(PACKER) validate $(PACKER_VARS) $(PACKER_DIR)
 
-ami: ami-validate ## Build the OpenClaw agent-first AMI in $(AWS_REGION)
+ami: ami-validate ## Build the Jarvis agent-first AMI in $(AWS_REGION)
 	@echo "[*] Building AMI ($(AMI_BASE), $(AMI_ARCH)) in $(AWS_REGION)..."
 	$(PACKER) build $(PACKER_VARS) $(PACKER_DIR)
 	@echo "[+] AMI manifest: $(BUILD_DIR)/ami-manifest.json"

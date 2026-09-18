@@ -1,4 +1,4 @@
-# Launch an OpenClaw agent-first instance from a built AMI.
+# Launch a Jarvis agent-first instance from a built AMI.
 # ---------------------------------------------------------
 #   cd aws/terraform
 #   terraform init
@@ -8,14 +8,14 @@
 # ports needed), IMDSv2 with tags exposed, and the example user data so
 # the agent boots with goals.  Reach the agent with:
 #   aws ssm start-session --target <instance-id>
-#   openclaw --status
+#   jarvis --status
 
 terraform {
   required_version = ">= 1.5.0"
 
   # State lives in S3 so any machine (or agent) can manage the instance:
   #   terraform init -backend-config="bucket=<your-bucket>" \
-  #                  -backend-config="key=openclaw/terraform.tfstate" \
+  #                  -backend-config="key=jarvis/terraform.tfstate" \
   #                  -backend-config="region=<region>"
   backend "s3" {}
 
@@ -47,7 +47,7 @@ locals {
   subnet_id = var.subnet_id != "" ? var.subnet_id : sort(data.aws_subnets.selected.ids)[0]
   user_data = var.user_data_file != "" ? file(var.user_data_file) : file("${path.module}/../cloud-init/user-data.example.yaml")
   tags = merge({
-    Project = "openclaw"
+    Project = "jarvis"
     Role    = "agent-first-os"
   }, var.tags)
 }
@@ -64,22 +64,22 @@ data "aws_iam_policy_document" "assume" {
   }
 }
 
-resource "aws_iam_role" "openclaw" {
+resource "aws_iam_role" "jarvis" {
   name_prefix        = "${var.name}-"
   assume_role_policy = data.aws_iam_policy_document.assume.json
   tags               = local.tags
 }
 
 resource "aws_iam_role_policy_attachment" "ssm" {
-  role       = aws_iam_role.openclaw.name
+  role       = aws_iam_role.jarvis.name
   policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
 }
 
 # Read access to the Anthropic API key. Store it once, never in Terraform
 # state, in AWS Secrets Manager (default) and/or SSM Parameter Store:
-#   aws secretsmanager create-secret --name openclaw/anthropic-api-key \
+#   aws secretsmanager create-secret --name jarvis/anthropic-api-key \
 #       --secret-string "$ANTHROPIC_API_KEY"
-#   aws ssm put-parameter --name /openclaw/anthropic-api-key \
+#   aws ssm put-parameter --name /jarvis/anthropic-api-key \
 #       --type SecureString --value "$ANTHROPIC_API_KEY"
 data "aws_caller_identity" "current" {}
 
@@ -109,8 +109,8 @@ locals {
 # exact model or imported-model ARN.
 resource "aws_iam_role_policy" "bedrock" {
   count = var.llm_provider == "bedrock" ? 1 : 0
-  name  = "openclaw-bedrock"
-  role  = aws_iam_role.openclaw.id
+  name  = "jarvis-bedrock"
+  role  = aws_iam_role.jarvis.id
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [{
@@ -131,7 +131,7 @@ resource "aws_iam_role_policy" "bedrock" {
 # runs elsewhere against this copy with a pinned public key.
 resource "aws_s3_bucket" "ledger" {
   count               = var.ledger_anchor ? 1 : 0
-  bucket              = "openclaw-ledger-${data.aws_caller_identity.current.account_id}-${var.name}"
+  bucket              = "jarvis-ledger-${data.aws_caller_identity.current.account_id}-${var.name}"
   object_lock_enabled = true
   force_destroy       = false
   tags                = local.tags
@@ -178,8 +178,8 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "ledger" {
 
 resource "aws_iam_role_policy" "ledger_anchor" {
   count = var.ledger_anchor ? 1 : 0
-  name  = "openclaw-ledger-anchor"
-  role  = aws_iam_role.openclaw.id
+  name  = "jarvis-ledger-anchor"
+  role  = aws_iam_role.jarvis.id
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
@@ -206,8 +206,8 @@ resource "aws_iam_role_policy" "ledger_anchor" {
 
 resource "aws_iam_role_policy" "llm_key" {
   count = length(local.llm_key_statements) > 0 && var.llm_provider == "anthropic" ? 1 : 0
-  name  = "openclaw-llm-key"
-  role  = aws_iam_role.openclaw.id
+  name  = "jarvis-llm-key"
+  role  = aws_iam_role.jarvis.id
   policy = jsonencode({
     Version   = "2012-10-17"
     Statement = local.llm_key_statements
@@ -216,16 +216,16 @@ resource "aws_iam_role_policy" "llm_key" {
   })
 }
 
-resource "aws_iam_instance_profile" "openclaw" {
+resource "aws_iam_instance_profile" "jarvis" {
   name_prefix = "${var.name}-"
-  role        = aws_iam_role.openclaw.name
+  role        = aws_iam_role.jarvis.name
 }
 
 # ---- Network: outbound only unless ssh_cidr is set ------------------------
 
-resource "aws_security_group" "openclaw" {
+resource "aws_security_group" "jarvis" {
   name_prefix = "${var.name}-"
-  description = "OpenClaw agent instance"
+  description = "Jarvis agent instance"
   vpc_id      = data.aws_vpc.selected.id
   tags        = local.tags
 
@@ -243,7 +243,7 @@ resource "aws_security_group" "openclaw" {
   dynamic "ingress" {
     for_each = var.ui_cidr != "" ? [var.ui_cidr] : []
     content {
-      description = "OpenClaw web UI (HTTPS, token login)"
+      description = "Jarvis web UI (HTTPS, token login)"
       from_port   = var.ui_port
       to_port     = var.ui_port
       protocol    = "tcp"
@@ -262,12 +262,12 @@ resource "aws_security_group" "openclaw" {
 
 # ---- Instance ---------------------------------------------------------------
 
-resource "aws_instance" "openclaw" {
+resource "aws_instance" "jarvis" {
   ami                         = var.ami_id
   instance_type               = var.instance_type
   subnet_id                   = local.subnet_id
-  vpc_security_group_ids      = [aws_security_group.openclaw.id]
-  iam_instance_profile        = aws_iam_instance_profile.openclaw.name
+  vpc_security_group_ids      = [aws_security_group.jarvis.id]
+  iam_instance_profile        = aws_iam_instance_profile.jarvis.name
   key_name                    = var.key_name != "" ? var.key_name : null
   user_data                   = local.user_data
   user_data_replace_on_change = true
@@ -290,11 +290,11 @@ resource "aws_instance" "openclaw" {
     local.tags,
     {
       Name            = var.name
-      "openclaw:name" = var.name
+      "jarvis:name" = var.name
     },
-    var.agent_goal != "" ? { "openclaw:goal" = var.agent_goal } : {},
-    var.llm_provider == "anthropic" && var.anthropic_api_key_secret != "" ? { "openclaw:llm-key-secret" = var.anthropic_api_key_secret } : {},
-    var.llm_provider == "anthropic" && var.anthropic_api_key_ssm_parameter != "" ? { "openclaw:llm-key-parameter" = var.anthropic_api_key_ssm_parameter } : {},
-    var.ledger_anchor ? { "openclaw:ledger-bucket" = aws_s3_bucket.ledger[0].bucket } : {},
+    var.agent_goal != "" ? { "jarvis:goal" = var.agent_goal } : {},
+    var.llm_provider == "anthropic" && var.anthropic_api_key_secret != "" ? { "jarvis:llm-key-secret" = var.anthropic_api_key_secret } : {},
+    var.llm_provider == "anthropic" && var.anthropic_api_key_ssm_parameter != "" ? { "jarvis:llm-key-parameter" = var.anthropic_api_key_ssm_parameter } : {},
+    var.ledger_anchor ? { "jarvis:ledger-bucket" = aws_s3_bucket.ledger[0].bucket } : {},
   )
 }

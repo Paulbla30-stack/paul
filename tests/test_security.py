@@ -1,9 +1,9 @@
-"""Tests for OpenClaw Security Scanner."""
+"""Tests for Jarvis Security Scanner."""
 
 import unittest
 
-from openclaw.security.scanner import SecurityScanner, Finding, SystemAuditor
-from openclaw.security.hardening import SystemHardener, HardeningAction
+from jarvis.security.scanner import SecurityScanner, Finding, SystemAuditor
+from jarvis.security.hardening import SystemHardener, HardeningAction
 
 
 class TestFinding(unittest.TestCase):

@@ -5,13 +5,13 @@ import logging
 import unittest
 from unittest import mock
 
-from openclaw.agent.core import AgentCore
-from openclaw.agent.planner import TaskType
-from openclaw.brain import build_brain
-from openclaw.brain.bedrock import (BedrockBrain, JSON_INSTRUCTIONS, NO_THINK_PREFILL,
+from jarvis.agent.core import AgentCore
+from jarvis.agent.planner import TaskType
+from jarvis.brain import build_brain
+from jarvis.brain.bedrock import (BedrockBrain, JSON_INSTRUCTIONS, NO_THINK_PREFILL,
                                     render_prompt, guess_template, strip_thinking)
-from openclaw.brain.llm import BaseBrain, ClaudeBrain
-from openclaw.main import OpenClawSystem, load_config
+from jarvis.brain.llm import BaseBrain, ClaudeBrain
+from jarvis.main import JarvisSystem, load_config
 
 try:
     from botocore.exceptions import ClientError, NoCredentialsError
@@ -192,7 +192,7 @@ class TestBedrockBrain(unittest.TestCase):
         self.assertIn("region", brain.status()["disabled_reason"])
 
     def test_without_boto3(self):
-        with mock.patch("openclaw.brain.bedrock.boto3", None):
+        with mock.patch("jarvis.brain.bedrock.boto3", None):
             brain = BedrockBrain({"model": "x", "region": "eu-west-2"}, LOG)
         self.assertIsNone(brain.client)
         self.assertIn("boto3", brain.status()["disabled_reason"])
@@ -344,7 +344,7 @@ class TestFactory(unittest.TestCase):
     def test_build_brain_selects_provider(self):
         with mock.patch.dict("os.environ", {"ANTHROPIC_API_KEY": "sk-test"}):
             self.assertIsInstance(build_brain({"provider": "anthropic"}, LOG), ClaudeBrain)
-        with mock.patch("openclaw.brain.bedrock.boto3", None):
+        with mock.patch("jarvis.brain.bedrock.boto3", None):
             b = build_brain({"provider": "bedrock", "model": "m"}, LOG, region="eu-west-2")
         self.assertIsInstance(b, BedrockBrain)
         self.assertEqual(b.region, "eu-west-2")
@@ -356,9 +356,9 @@ class TestFactory(unittest.TestCase):
         cfg["llm"].update(enabled=True, provider="bedrock", model="meta.llama3-3-70b-instruct-v1:0")
         cfg["cloud"]["instance"] = {"region": "eu-west-2"}
         fake_client = FakeBedrock([])
-        with mock.patch("openclaw.brain.bedrock.boto3") as boto:
+        with mock.patch("jarvis.brain.bedrock.boto3") as boto:
             boto.client.return_value = fake_client
-            brain = OpenClawSystem(cfg, LOG).build_brain()
+            brain = JarvisSystem(cfg, LOG).build_brain()
         self.assertIsInstance(brain, BedrockBrain)
         self.assertEqual(brain.region, "eu-west-2")
         self.assertIs(brain.client, fake_client)
