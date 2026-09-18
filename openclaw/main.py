@@ -371,6 +371,7 @@ class OpenClawSystem:
                 status_file=cloud.get("status_file"),
                 token=cloud.get("status_token") or None,
                 token_file=cloud.get("status_token_file"),
+                max_idle_wait=cloud.get("max_idle_wait"),
                 ui=cloud.get("ui"),
             )
             self.runner.run()

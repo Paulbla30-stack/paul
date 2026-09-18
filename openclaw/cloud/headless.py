@@ -99,7 +99,8 @@ class HeadlessRunner:
                  status_file: Optional[str] = None,
                  token: Optional[str] = None,
                  token_file: Optional[str] = DEFAULT_TOKEN_FILE,
-                 ui: Optional[dict] = None):
+                 ui: Optional[dict] = None,
+                 max_idle_wait: Optional[float] = None):
         self.agent = agent
         self.log = logger.getChild("headless")
         self.interval = max(0.0, float(interval))
@@ -127,7 +128,13 @@ class HeadlessRunner:
         self.started_at = time.time()
         self.failure_streak = 0
         self.max_failure_wait = max(self.interval, 300.0)
+        # Idle cycles stretch the wait (interval x streak, capped) so a
+        # planner with nothing to do is not consulted every interval; any
+        # goal, upload or chat wakes the loop and resets the streak.
+        self.idle_streak = 0
+        self.max_idle_wait = max(self.interval, float(300.0 if max_idle_wait is None else max_idle_wait))
         self._stop = threading.Event()
+        self._wake = threading.Event()
         # Serialises agent cycles between the loop and HTTP-triggered work.
         self._lock = threading.RLock()
         self._server: Optional[ThreadingHTTPServer] = None
@@ -146,6 +153,7 @@ class HeadlessRunner:
             "last_action": self.last_cycle.get("action"),
             "last_cycle_at": self.last_cycle.get("timestamp"),
             "stopping": self._stop.is_set(),
+            "idle_streak": self.idle_streak,
         }
         return status
 
@@ -284,6 +292,7 @@ class HeadlessRunner:
                     with runner._lock:
                         runner.agent.add_goal(body, priority)
                         open_goals = len(runner.agent.planner.open_goals())
+                    runner.wake()
                     runner._write_status_file()
                     self._send(200, {"added": body, "priority": priority,
                                      "open_goals": open_goals})
@@ -308,6 +317,7 @@ class HeadlessRunner:
                         return self._send(400, {"error": "messages list required"})
                     with runner._lock:
                         answer = runner.agent.chat(turns)
+                    runner.wake()
                     self._send(200, {"answer": answer})
                 elif path == "/upload":
                     self._handle_upload()
@@ -335,6 +345,7 @@ class HeadlessRunner:
                     return self._send(500, {"error": f"could not save upload: {e}"})
                 with runner._lock:
                     entry = runner.agent.record_upload(name, path, length)
+                runner.wake()
                 runner._write_status_file()
                 self._send(200, entry)
 
@@ -486,7 +497,13 @@ class HeadlessRunner:
 
     def stop(self):
         self._stop.set()
+        self._wake.set()
         self.agent.running = False
+
+    def wake(self):
+        """Cut short an idle wait: something new arrived for the planner."""
+        self.idle_streak = 0
+        self._wake.set()
 
     def run(self) -> int:
         """Run until stopped or max_cycles reached. Returns cycles run."""
@@ -517,17 +534,22 @@ class HeadlessRunner:
                 # streak, capped) so a confused planner cannot burn its call
                 # budget retrying a bad idea every second.
                 if action == "idle":
-                    wait = self.interval
+                    self.idle_streak += 1
+                    wait = min(self.interval * self.idle_streak, self.max_idle_wait)
                 elif result.get("result", {}).get("success"):
                     self.failure_streak = 0
+                    self.idle_streak = 0
                     wait = min(self.interval, 1.0)
                 else:
                     self.failure_streak += 1
+                    self.idle_streak = 0
                     wait = min(self.interval * self.failure_streak, self.max_failure_wait)
                     if self.failure_streak >= 3:
                         self.log.warning("%d consecutive failed tasks; waiting %.0fs before "
                                          "the next cycle", self.failure_streak, wait)
-                if self._stop.wait(wait):
+                self._wake.clear()
+                self._wake.wait(wait)
+                if self._stop.is_set():
                     break
         finally:
             self.agent.running = False

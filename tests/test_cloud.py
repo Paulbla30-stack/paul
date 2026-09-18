@@ -421,6 +421,34 @@ class TestHeadlessRunner(unittest.TestCase):
         self.assertGreaterEqual(elapsed, 0.55)
         self.assertEqual(runner.failure_streak, 2)
 
+    def test_idle_cycles_back_off_and_wake_resets(self):
+        os.environ["OPENCLAW_IMDS_URL"] = "http://127.0.0.1:9"
+        try:
+            agent = self._agent()
+            agent.planner._boot_tasks_generated = True
+            agent.planner.generate_task = lambda obs: None  # nothing to do: every cycle idles
+            runner = HeadlessRunner(agent, logging.getLogger("test"), interval=0.2, max_cycles=4,
+                                    status_port=None, max_idle_wait=0.5)
+            t0 = time.time()
+            runner.run()
+            elapsed = time.time() - t0
+            # waits after cycles 1..3: 0.2 + 0.4 + 0.5 (capped); the 4th cycle ends the run
+            self.assertGreaterEqual(elapsed, 1.05)
+            self.assertLess(elapsed, 2.5)
+            self.assertEqual(runner.idle_streak, 3)  # the 4th cycle ends the run before its wait
+            self.assertEqual(runner.max_idle_wait, 0.5)
+            # a wake cuts the wait short and resets the streak
+            runner = HeadlessRunner(agent, logging.getLogger("test"), interval=30, max_cycles=2,
+                                    status_port=None)
+            threading.Timer(0.3, runner.wake).start()
+            threading.Timer(0.6, runner.stop).start()
+            t0 = time.time()
+            runner.run()
+            self.assertLess(time.time() - t0, 5)
+            self.assertEqual(runner.idle_streak, 0)  # reset by the wake; cycle 2 ends the run
+        finally:
+            del os.environ["OPENCLAW_IMDS_URL"]
+
     def test_stop_ends_loop(self):
         os.environ["OPENCLAW_IMDS_URL"] = "http://127.0.0.1:9"
         try:
