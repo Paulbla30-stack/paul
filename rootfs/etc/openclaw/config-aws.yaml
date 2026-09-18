@@ -92,3 +92,4 @@ llm:
     cwd: /
     deny_patterns: null      # extra patterns, ADDED to the built-in list
     replace_deny_patterns: false   # true = use only deny_patterns (not recommended)
+    allow_package_install: false   # true = let the planner run dnf/apt/pip install

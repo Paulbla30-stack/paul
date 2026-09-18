@@ -125,6 +125,8 @@ class HeadlessRunner:
         self.auth_failure_limit = int(ui.get("auth_failure_limit") or 10)
         self.auth_failure_window = float(ui.get("auth_failure_window") or 300)
         self.started_at = time.time()
+        self.failure_streak = 0
+        self.max_failure_wait = max(self.interval, 300.0)
         self._stop = threading.Event()
         # Serialises agent cycles between the loop and HTTP-triggered work.
         self._lock = threading.RLock()
@@ -510,8 +512,21 @@ class HeadlessRunner:
                 self._write_status_file()
                 if self.max_cycles and cycles >= self.max_cycles:
                     break
-                # Idle cycles wait the full interval; busy ones go straight on
-                wait = self.interval if action == "idle" else min(self.interval, 1.0)
+                # Idle cycles wait the full interval; successful work goes
+                # straight on; a failure waits the full interval (times the
+                # streak, capped) so a confused planner cannot burn its call
+                # budget retrying a bad idea every second.
+                if action == "idle":
+                    wait = self.interval
+                elif result.get("result", {}).get("success"):
+                    self.failure_streak = 0
+                    wait = min(self.interval, 1.0)
+                else:
+                    self.failure_streak += 1
+                    wait = min(self.interval * self.failure_streak, self.max_failure_wait)
+                    if self.failure_streak >= 3:
+                        self.log.warning("%d consecutive failed tasks; waiting %.0fs before "
+                                         "the next cycle", self.failure_streak, wait)
                 if self._stop.wait(wait):
                     break
         finally:

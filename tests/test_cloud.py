@@ -5,6 +5,7 @@ import logging
 import os
 import tempfile
 import threading
+import time
 import unittest
 import urllib.request
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -397,6 +398,28 @@ class TestHeadlessRunner(unittest.TestCase):
         self.assertEqual(status["cycle_count"], 1)
         self.assertEqual(len(history), 1)
         self.assertGreater(memory["total_entries"], 0)
+
+    def test_failed_tasks_back_off(self):
+        os.environ["OPENCLAW_IMDS_URL"] = "http://127.0.0.1:9"
+        try:
+            agent = self._agent()
+            agent.planner._boot_tasks_generated = True
+            # every cycle runs a task that fails
+            from openclaw.agent.planner import Task, TaskType
+            original = agent.planner.generate_task
+            agent.planner.generate_task = lambda obs: Task(priority=1, description="boom",
+                                                           task_type=TaskType.SHELL_COMMAND,
+                                                           metadata={"command": "x", "source": "llm"})
+            runner = HeadlessRunner(agent, logging.getLogger("test"), interval=0.2, max_cycles=3,
+                                    status_port=None)
+            t0 = time.time()
+            runner.run()
+            elapsed = time.time() - t0
+        finally:
+            del os.environ["OPENCLAW_IMDS_URL"]
+        # streak waits after cycles 1 and 2: 0.2 + 0.4 (cycle 3 ends the run before its wait)
+        self.assertGreaterEqual(elapsed, 0.55)
+        self.assertEqual(runner.failure_streak, 2)
 
     def test_stop_ends_loop(self):
         os.environ["OPENCLAW_IMDS_URL"] = "http://127.0.0.1:9"

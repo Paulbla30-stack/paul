@@ -73,6 +73,18 @@ DEFAULT_SHELL_DENY_PATTERNS = [
     _CMD + r"cloud-init\s+clean\b",
 ]
 
+# Installing software or enabling repositories as root is denied unless the
+# operator opts in: a planner that cannot find a tool tends to reach for the
+# package manager instead of the task types it was given.
+PACKAGE_INSTALL_DENY_PATTERNS = [
+    _CMD + r"(?:dnf|yum|apt|apt-get|microdnf|zypper|apk|pacman)\s+(?:-\S+\s+)*(?:install|reinstall|remove|erase|purge|upgrade|update|dist-upgrade|config-manager|copr|add-repository|groupinstall)\b",
+    _CMD + r"(?:pip3?|pipx|python[0-9.]*\s+-m\s+pip|npm|yarn|gem|cargo|go)\s+(?:-\S+\s+)*install\b",
+    _CMD + r"(?:amazon-linux-extras|snap|flatpak|brew)\s+(?:-\S+\s+)*(?:install|enable)\b",
+    _CMD + r"(?:rpm|dpkg)\s+(?:-\S+\s+)*(?:-i|--install|-U|-e|--erase)\b",
+    r"/etc/yum\.repos\.d/|/etc/apt/sources\.list",
+    r"\bepel-release\b",
+]
+
 DEFAULT_SHELL_POLICY = {
     "enabled": False,
     "timeout": 60,
@@ -80,6 +92,7 @@ DEFAULT_SHELL_POLICY = {
     "cwd": "/",
     "deny_patterns": None,          # extra patterns, added to the defaults
     "replace_deny_patterns": False,  # True = use only the configured list
+    "allow_package_install": False,  # True = let the planner install software
 }
 
 # Environment variables never handed to a planner-chosen shell command.
@@ -119,6 +132,8 @@ def normalise_shell_policy(policy: Optional[dict], log=None) -> dict:
         patterns = extra
     else:
         patterns = list(DEFAULT_SHELL_DENY_PATTERNS) + extra
+        if not merged.get("allow_package_install"):
+            patterns += PACKAGE_INSTALL_DENY_PATTERNS
     merged["deny_patterns"] = patterns
     merged["_compiled"] = _compile_patterns(patterns, log)
     merged["enabled"] = bool(merged.get("enabled"))

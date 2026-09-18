@@ -45,6 +45,12 @@ class AgentCore:
         # the rule-based planner takes over for that cycle.
         self.brain = brain
         self.last_thought: dict = {}
+        # Failure streak of brain-chosen tasks; past the limit the brain sits
+        # out a few cycles so the rule planner (and the operator) get a turn.
+        self.brain_failures = 0
+        self.brain_failure_limit = int(config.get("brain_failure_limit", 4))
+        self.brain_cooldown_cycles = int(config.get("brain_cooldown_cycles", 5))
+        self._brain_cooldown_until = 0
         # Brain notes live here, not in the evictable AgentMemory, so they
         # survive however busy the loop gets.
         self.notes = deque(maxlen=config.get("notes_limit", 20))
@@ -107,7 +113,8 @@ class AgentCore:
                              self.max_tasks)
             return None
 
-        if self.brain is not None and self.brain.should_plan(self.cycle_count):
+        if (self.brain is not None and self.cycle_count > self._brain_cooldown_until
+                and self.brain.should_plan(self.cycle_count)):
             try:
                 decision = self.brain.plan(self, observations)
             except Exception as e:  # belt and braces: never kill the loop
@@ -173,6 +180,8 @@ class AgentCore:
     def reflect(self, task: Task, result: dict):
         """Update memory and state based on task results."""
         success = result.get("success", False)
+        if success and task.metadata.get("source") == "llm":
+            self.brain_failures = 0
         self.memory.store(
             category="task_result",
             data={
@@ -194,6 +203,13 @@ class AgentCore:
                 self.memory.store(category="failed_task",
                                   data={"description": task.description, "error": error,
                                         "retries": 0, "source": "llm"})
+                self.brain_failures += 1
+                if self.brain_failures >= self.brain_failure_limit:
+                    self._brain_cooldown_until = self.cycle_count + self.brain_cooldown_cycles
+                    self.brain_failures = 0
+                    self.log.warning("%d brain tasks failed in a row; rule planner takes the "
+                                     "next %d cycles", self.brain_failure_limit,
+                                     self.brain_cooldown_cycles)
             else:
                 # Re-plan if task failed
                 self.planner.handle_failure(task, error)

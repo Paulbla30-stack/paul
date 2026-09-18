@@ -497,6 +497,26 @@ class TestAgentWithBrain(unittest.TestCase):
             agent.run_cycle()
             self.assertEqual(len(api.requests), calls + 1)
 
+    def test_brain_sits_out_after_a_failure_streak(self):
+        with FakeClaude() as api:
+            brain = make_brain(api.url)
+            agent = AgentCore({"name": "t", "profile": "cloud", "brain_failure_limit": 3,
+                               "brain_cooldown_cycles": 2}, dict(NO_HW), LOG, brain=brain)
+            agent.planner._boot_tasks_generated = True
+            agent.add_goal("Keep root under 80%", 3)
+            # shell disabled -> every brain shell task fails
+            for _ in range(3):
+                self.assertFalse(agent.run_cycle()["result"]["success"])
+            calls = len(api.requests)
+            self.assertEqual(calls, 3)
+            # next two cycles: rule planner only, no API calls
+            for _ in range(2):
+                self.assertTrue(agent.run_cycle()["action"].startswith("Goal step:"))
+            self.assertEqual(len(api.requests), calls)
+            # cooldown over: brain consulted again
+            agent.run_cycle()
+            self.assertEqual(len(api.requests), calls + 1)
+
     def test_think_runs_the_brain_task_even_with_queued_work(self):
         with FakeClaude() as api:
             brain = make_brain(api.url)
@@ -619,7 +639,8 @@ class TestShellPolicy(unittest.TestCase):
     def test_defaults_disabled(self):
         pol = normalise_shell_policy(None)
         self.assertFalse(pol["enabled"])
-        self.assertEqual(pol["deny_patterns"], DEFAULT_SHELL_DENY_PATTERNS)
+        self.assertEqual(pol["deny_patterns"][:len(DEFAULT_SHELL_DENY_PATTERNS)], DEFAULT_SHELL_DENY_PATTERNS)
+        self.assertGreater(len(pol["deny_patterns"]), len(DEFAULT_SHELL_DENY_PATTERNS))  # + package installs
         self.assertIn("disabled", check_command_allowed("ls", pol))
 
     def test_scrub_env(self):
@@ -656,6 +677,19 @@ class TestShellPolicy(unittest.TestCase):
         for cmd in allowed:
             self.assertIsNone(check_command_allowed(cmd, pol), cmd)
         self.assertIsNotNone(check_command_allowed("", pol))
+
+    def test_package_installs_denied_unless_allowed(self):
+        pol = normalise_shell_policy({"enabled": True})
+        for cmd in ["dnf install -y nmap", "sudo apt-get install lynis", "yum -y install epel-release",
+                    "pip3 install requests", "python3.11 -m pip install x", "dnf config-manager --enable epel",
+                    "amazon-linux-extras install epel", "rpm -i foo.rpm", "echo x > /etc/yum.repos.d/x.repo"]:
+            self.assertIsNotNone(check_command_allowed(cmd, pol), cmd)
+        for cmd in ["dnf list installed | head", "rpm -qa | wc -l", "pip3 list", "apt-cache policy curl",
+                    "python3 -m json.tool /tmp/x.json"]:
+            self.assertIsNone(check_command_allowed(cmd, pol), cmd)
+        allowed = normalise_shell_policy({"enabled": True, "allow_package_install": True})
+        self.assertIsNone(check_command_allowed("dnf install -y nmap", allowed))
+        self.assertIsNotNone(check_command_allowed("rm -rf /", allowed))
 
     def test_custom_deny_patterns_extend_defaults(self):
         pol = normalise_shell_policy({"enabled": True, "deny_patterns": [r"\bfoo\b"]})
