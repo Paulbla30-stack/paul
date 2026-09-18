@@ -25,11 +25,22 @@ Two transports:
   (``llm.bedrock.chat_template``: chatml for Qwen, llama3, mistral) and a
   ``{"prompt", "max_tokens", "temperature"}`` body. Both response shapes
   Bedrock uses for imported models are understood.
+
+Reasoning models (Qwen3 and similar) emit a ``<think>...</think>`` block
+before their answer. ``llm.bedrock.thinking`` controls it on the invoke
+path: ``off`` pre-fills an empty think block so the model answers directly
+(what Qwen3's own chat template does for ``enable_thinking=False``),
+``on`` lets the model think, and ``auto`` (default) leaves the first
+call alone and switches to ``off`` once a think block has been seen.
+Any think block in the output is stripped before it is parsed or shown,
+and a plan is always requested with thinking off so the reply fits the
+token budget.
 """
 
 import json
 import logging
 import os
+import re
 from typing import Optional
 
 from openclaw.brain.llm import BaseBrain, Completion, PLAN_SCHEMA
@@ -69,7 +80,7 @@ CHAT_TEMPLATES = {
 }
 
 
-def render_prompt(template: str, system: str, messages: list) -> str:
+def render_prompt(template: str, system: str, messages: list, prefill: str = "") -> str:
     """Render system + turns with a named chat template."""
     t = CHAT_TEMPLATES.get(template) or CHAT_TEMPLATES["chatml"]
     parts = []
@@ -85,7 +96,32 @@ def render_prompt(template: str, system: str, messages: list) -> str:
     for m in turns:
         parts.append(t[m["role"]].format(content=m["content"]))
     parts.append(t["cue"])
+    if prefill:
+        parts.append(prefill)
     return "".join(parts)
+
+
+# Pre-filled assistant turn that switches a Qwen3-style model out of
+# thinking mode: the closed, empty think block its template emits for
+# enable_thinking=False.
+NO_THINK_PREFILL = "<think>\n\n</think>\n\n"
+
+_THINK_RE = re.compile(r"\s*<think>.*?</think>\s*", re.DOTALL)
+
+
+def strip_thinking(text: str):
+    """Remove <think>...</think> blocks from model output.
+
+    Returns (clean_text, saw_thinking, truncated). ``truncated`` is set when
+    a think block was opened but never closed, i.e. the model ran out of
+    tokens while still reasoning and there is no answer to parse.
+    """
+    text = text or ""
+    saw = "<think>" in text
+    if saw and "</think>" not in text:
+        return "", True, True
+    clean = _THINK_RE.sub("\n", text).strip() if saw else text
+    return clean, saw, False
 
 
 def guess_template(model: str) -> str:
@@ -128,6 +164,12 @@ class BedrockBrain(BaseBrain):
             api = "invoke" if ":imported-model/" in model else "converse"
         self.api = api if api in ("converse", "invoke") else "converse"
         self.chat_template = str(bedrock_cfg.get("chat_template") or guess_template(model)).lower()
+        thinking = bedrock_cfg.get("thinking", "auto")
+        if isinstance(thinking, bool):
+            thinking = "on" if thinking else "off"
+        thinking = str(thinking).lower()
+        self.think_mode = thinking if thinking in ("on", "off", "auto") else "auto"
+        self._seen_thinking = False
         super().__init__(cfg, logger, client=client, cycle_interval=cycle_interval)
         self.key_source = f"instance-role/bedrock:{self.region or 'no-region'}"
 
@@ -162,6 +204,7 @@ class BedrockBrain(BaseBrain):
         out["api"] = self.api
         if self.api == "invoke":
             out["chat_template"] = self.chat_template
+            out["thinking"] = self.think_mode
         return out
 
     # ---- transport ----------------------------------------------------------
@@ -185,9 +228,20 @@ class BedrockBrain(BaseBrain):
         return {"input_tokens": int(u.get("inputTokens", 0) or 0),
                 "output_tokens": int(u.get("outputTokens", 0) or 0)}
 
-    def _invoke(self, system: str, messages: list) -> dict:
+    def _no_think_prefill(self, structured: bool) -> str:
+        """Prefill that disables a reasoning model's think block, if wanted."""
+        if self.chat_template != "chatml":
+            return ""
+        if self.think_mode == "on":
+            return "" if not structured else NO_THINK_PREFILL
+        if self.think_mode == "off" or structured or self._seen_thinking:
+            return NO_THINK_PREFILL
+        return ""
+
+    def _invoke(self, system: str, messages: list, structured: bool = False) -> dict:
         """InvokeModel for imported models; normalised to the converse shape."""
-        body = {"prompt": render_prompt(self.chat_template, system, messages),
+        prefill = self._no_think_prefill(structured)
+        body = {"prompt": render_prompt(self.chat_template, system, messages, prefill=prefill),
                 "max_tokens": self.max_tokens, "temperature": self.temperature}
         raw = self.client.invoke_model(modelId=self.model, body=json.dumps(body),
                                        contentType="application/json", accept="application/json")
@@ -206,13 +260,21 @@ class BedrockBrain(BaseBrain):
             finish = data.get("stop_reason") or "stop"
             in_tok, out_tok = data.get("prompt_token_count", 0), data.get("generation_token_count", 0)
         stop = "max_tokens" if str(finish).lower() in ("length", "max_tokens") else "end_turn"
+        text, saw_thinking, unfinished = strip_thinking(text)
+        if saw_thinking and not self._seen_thinking:
+            self._seen_thinking = True
+            if self.think_mode == "auto":
+                self.log.info("Bedrock model emits <think> blocks; disabling thinking "
+                              "for later calls (llm.bedrock.thinking=on to keep it)")
+        if unfinished:
+            stop = "max_tokens"
         return {"output": {"message": {"content": [{"text": text}]}},
                 "stopReason": stop,
                 "usage": {"inputTokens": int(in_tok or 0), "outputTokens": int(out_tok or 0)}}
 
-    def _chat(self, system: str, messages: list) -> dict:
+    def _chat(self, system: str, messages: list, structured: bool = False) -> dict:
         if self.api == "invoke":
-            return self._invoke(system, messages)
+            return self._invoke(system, messages, structured=structured)
         return self._converse(system, messages)
 
     def _complete(self, system: str, messages: list, structured: bool,
@@ -220,7 +282,7 @@ class BedrockBrain(BaseBrain):
         if structured:
             system = system + JSON_INSTRUCTIONS
         messages = [{"role": m["role"], "content": m["content"]} for m in messages]
-        response = self._chat(system, messages)
+        response = self._chat(system, messages, structured=structured)
         text = self._text_of(response)
         usage = self._usage_of(response)
         stop = response.get("stopReason") or "end_turn"
@@ -246,7 +308,7 @@ class BedrockBrain(BaseBrain):
                             f"That was not a valid JSON object ({e}). Reply again with "
                             f"ONLY the JSON object, fields {JSON_FIELDS}."},
                     ]
-                    response = self._chat(system, messages)
+                    response = self._chat(system, messages, structured=True)
                     text = self._text_of(response)
                     more = self._usage_of(response)
                     usage = {k: usage.get(k, 0) + more.get(k, 0) for k in usage}

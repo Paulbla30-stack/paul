@@ -194,6 +194,14 @@ and the rule planner covers the gap. Use an instruction-tuned checkpoint:
 the planner asks for a JSON decision and a base model that has not been
 instruction-tuned will not reliably produce one.
 
+Reasoning checkpoints such as Qwen3 think out loud in a `<think>` block
+before answering. The brain strips that block from every reply, always
+asks for a plan with thinking pre-filled off (the empty think block Qwen3's
+own template uses for `enable_thinking=False`, so the JSON fits the token
+budget), and by default (`llm.bedrock.thinking: auto`) lets chat and
+`--ask` think until the first think block is seen, then turns it off for
+those too. Set `on` to keep chat thinking, `off` to never allow it.
+
 Open models do not have Claude's structured outputs, adaptive thinking or
 refusal fallbacks, so the brain asks for JSON in the prompt, extracts and
 validates it, and re-asks once with the parse error (`llm.bedrock.json_retries`).

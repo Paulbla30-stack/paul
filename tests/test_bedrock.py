@@ -8,7 +8,8 @@ from unittest import mock
 from openclaw.agent.core import AgentCore
 from openclaw.agent.planner import TaskType
 from openclaw.brain import build_brain
-from openclaw.brain.bedrock import BedrockBrain, JSON_INSTRUCTIONS, render_prompt, guess_template
+from openclaw.brain.bedrock import (BedrockBrain, JSON_INSTRUCTIONS, NO_THINK_PREFILL,
+                                    render_prompt, guess_template, strip_thinking)
 from openclaw.brain.llm import BaseBrain, ClaudeBrain
 from openclaw.main import OpenClawSystem, load_config
 
@@ -240,7 +241,8 @@ class TestImportedModelInvoke(unittest.TestCase):
         self.assertEqual(body["max_tokens"], 4096)
         self.assertTrue(body["prompt"].startswith("<|im_start|>system\n"))
         self.assertIn(JSON_INSTRUCTIONS.strip(), body["prompt"])
-        self.assertTrue(body["prompt"].endswith("<|im_start|>assistant\n"))
+        # plans are always asked with thinking off (Qwen3-style prefill)
+        self.assertTrue(body["prompt"].endswith("<|im_start|>assistant\n" + NO_THINK_PREFILL))
         self.assertEqual(brain.stats["input_tokens"], 210)
         self.assertEqual(brain.stats["output_tokens"], 40)
 
@@ -275,6 +277,66 @@ class TestImportedModelInvoke(unittest.TestCase):
         prompt = fake.invoke_calls[0]["body"]["prompt"]
         self.assertIn("<|im_start|>assistant\nhello<|im_end|>", prompt)
         self.assertNotIn(JSON_INSTRUCTIONS.strip(), prompt)
+        # chat in "auto" mode leaves the first call natural (no prefill)
+        self.assertTrue(prompt.endswith("<|im_start|>assistant\n"))
+
+    def test_strip_thinking(self):
+        self.assertEqual(strip_thinking("<think>\nplan...\n</think>\n\n{\"a\": 1}"), ('{"a": 1}', True, False))
+        self.assertEqual(strip_thinking("plain"), ("plain", False, False))
+        self.assertEqual(strip_thinking("<think>never closed"), ("", True, True))
+        self.assertEqual(strip_thinking(""), ("", False, False))
+
+    def test_think_block_is_stripped_before_plan_parse(self):
+        text = "<think>\nThe disk goal is open.\n</think>\n\n" + json.dumps(plan(task_type="observation", command=""))
+        brain, fake = make_brain([{"choices": [{"text": text, "finish_reason": "stop"}]}], model=self.ARN)
+        decision = brain.plan(make_agent(brain), {})
+        self.assertEqual(decision.task.task_type, TaskType.OBSERVATION)
+        self.assertEqual(len(fake.invoke_calls), 1)  # no JSON re-ask needed
+
+    def test_unfinished_think_block_counts_as_truncated(self):
+        brain, fake = make_brain([{"generation": "<think>still reasoning about", "stop_reason": "length"}], model=self.ARN)
+        self.assertIsNone(brain.plan(make_agent(brain), {}))
+        self.assertEqual(brain.stats["truncated"], 1)
+        # an unclosed think block with stop=stop is still an empty answer -> truncated, not re-asked
+        brain, fake = make_brain([{"generation": "<think>oops", "stop_reason": "stop"}], model=self.ARN)
+        self.assertIsNone(brain.plan(make_agent(brain), {}))
+        self.assertEqual(len(fake.invoke_calls), 1)
+
+    def test_thinking_modes(self):
+        turns = [{"role": "user", "content": "hi"}]
+        # off: every call gets the prefill
+        brain, fake = make_brain([{"generation": "hey", "stop_reason": "stop"}], model=self.ARN, bedrock={"thinking": "off"})
+        self.assertEqual(brain.think_mode, "off")
+        make_agent(brain).chat(turns)
+        self.assertTrue(fake.invoke_calls[0]["body"]["prompt"].endswith(NO_THINK_PREFILL))
+        # on: chat is never prefilled, output think block stripped, plans still forced off
+        brain, fake = make_brain([{"generation": "<think>x</think>\nhey", "stop_reason": "stop"},
+                                  {"generation": json.dumps(plan(task_type="none", command="")), "stop_reason": "stop"},
+                                  {"generation": "again", "stop_reason": "stop"}],
+                                 model=self.ARN, bedrock={"thinking": True})
+        self.assertEqual(brain.think_mode, "on")
+        agent = make_agent(brain)
+        self.assertEqual(agent.chat(turns), "hey")
+        self.assertFalse(fake.invoke_calls[0]["body"]["prompt"].endswith(NO_THINK_PREFILL))
+        brain.plan(agent, {})
+        self.assertTrue(fake.invoke_calls[1]["body"]["prompt"].endswith(NO_THINK_PREFILL))
+        agent.chat(turns)
+        self.assertFalse(fake.invoke_calls[2]["body"]["prompt"].endswith(NO_THINK_PREFILL))
+        # auto: first chat natural; once a think block is seen, later chats are prefilled
+        brain, fake = make_brain([{"generation": "<think>x</think>\nhey", "stop_reason": "stop"},
+                                  {"generation": "again", "stop_reason": "stop"}], model=self.ARN)
+        self.assertEqual(brain.think_mode, "auto")
+        agent = make_agent(brain)
+        self.assertEqual(agent.chat(turns), "hey")
+        self.assertFalse(fake.invoke_calls[0]["body"]["prompt"].endswith(NO_THINK_PREFILL))
+        agent.chat(turns)
+        self.assertTrue(fake.invoke_calls[1]["body"]["prompt"].endswith(NO_THINK_PREFILL))
+        self.assertEqual(brain.status()["thinking"], "auto")
+        # non-chatml templates never get the prefill
+        brain, fake = make_brain([{"generation": json.dumps(plan()), "stop_reason": "stop"}],
+                                 model=self.ARN, bedrock={"chat_template": "llama3", "thinking": "off"})
+        brain.plan(make_agent(brain), {})
+        self.assertNotIn("<think>", fake.invoke_calls[0]["body"]["prompt"])
 
 
 class TestFactory(unittest.TestCase):

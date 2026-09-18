@@ -151,7 +151,8 @@ def load_config(path, extra_paths=()):
             "provider": "anthropic",       # anthropic | bedrock
             "model": "claude-opus-5",      # bedrock: a model id, inference profile or imported-model ARN
             "region": None,                # bedrock: defaults to the instance region / AWS_REGION
-            "bedrock": {"temperature": 0.2, "json_retries": 1, "not_ready_backoff": 45},
+            "bedrock": {"temperature": 0.2, "json_retries": 1, "not_ready_backoff": 45,
+                        "thinking": "auto"},  # imported reasoning models: auto | on | off
             "effort": "medium",
             "thinking": "adaptive",
             "max_tokens": 4096,

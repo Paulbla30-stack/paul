@@ -71,6 +71,7 @@ llm:
   bedrock:
     temperature: 0.2
     json_retries: 1          # re-ask once when the plan is not valid JSON
+    thinking: auto           # Qwen3-style <think> blocks: auto | on | off (plans are always off)
     not_ready_backoff: 45    # seconds to wait while an imported model loads
   effort: medium             # low | medium | high (xhigh/max need max_tokens >= 64000)
   thinking: adaptive         # adaptive | disabled (ignored on models without adaptive thinking)
