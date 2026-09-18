@@ -21,7 +21,8 @@ openclaw:
   llm:
     enabled: true
     provider: bedrock
-    model: openai.gpt-oss-120b-1:0
+    model: arn:aws:bedrock:us-west-2:485964361844:imported-model/xxnmq5w0nsck   # Qwen2.5-7B-Instruct, Custom Model Import
+    # model: openai.gpt-oss-120b-1:0                                            # catalog fallback
     max_calls_per_hour: 60
     shell:
       enabled: true
