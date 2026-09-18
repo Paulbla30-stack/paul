@@ -16,6 +16,15 @@ and re-asked once with the parse error if it was not usable. Imported
 models are unloaded when idle and can answer ``ModelNotReadyException`` on
 the first call after a pause; that is treated as a short backoff, not an
 outage.
+
+Two transports:
+
+- ``converse`` (catalog models and inference profiles): the Converse API.
+- ``invoke`` (Custom Model Import ARNs, which Converse rejects): InvokeModel
+  with the conversation rendered through the model's chat template
+  (``llm.bedrock.chat_template``: chatml for Qwen, llama3, mistral) and a
+  ``{"prompt", "max_tokens", "temperature"}`` body. Both response shapes
+  Bedrock uses for imported models are understood.
 """
 
 import json
@@ -34,6 +43,58 @@ except ImportError:  # pragma: no cover - exercised only without boto3
     BotoCoreError = ClientError = NoCredentialsError = NoRegionError = Exception
 
 DEFAULT_BEDROCK_MODEL = "meta.llama3-3-70b-instruct-v1:0"
+
+# Chat templates for InvokeModel on imported models. Each renders a system
+# text and [{role, content}] turns into a single prompt ending with the
+# assistant cue; the model's own EOS token ends generation.
+CHAT_TEMPLATES = {
+    "chatml": {   # Qwen 2/2.5/3, many fine-tunes
+        "system": "<|im_start|>system\n{content}<|im_end|>\n",
+        "user": "<|im_start|>user\n{content}<|im_end|>\n",
+        "assistant": "<|im_start|>assistant\n{content}<|im_end|>\n",
+        "cue": "<|im_start|>assistant\n",
+    },
+    "llama3": {   # Llama 3.x instruct
+        "system": "<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\n{content}<|eot_id|>",
+        "user": "<|start_header_id|>user<|end_header_id|>\n\n{content}<|eot_id|>",
+        "assistant": "<|start_header_id|>assistant<|end_header_id|>\n\n{content}<|eot_id|>",
+        "cue": "<|start_header_id|>assistant<|end_header_id|>\n\n",
+    },
+    "mistral": {  # Mistral / Mixtral instruct (system folded into first user turn)
+        "system": "",
+        "user": "[INST] {content} [/INST]",
+        "assistant": " {content}</s>",
+        "cue": "",
+    },
+}
+
+
+def render_prompt(template: str, system: str, messages: list) -> str:
+    """Render system + turns with a named chat template."""
+    t = CHAT_TEMPLATES.get(template) or CHAT_TEMPLATES["chatml"]
+    parts = []
+    turns = [dict(m) for m in messages]
+    if template == "mistral" and system:
+        # No system slot: prepend to the first user message.
+        for m in turns:
+            if m["role"] == "user":
+                m["content"] = system + "\n\n" + m["content"]
+                break
+    elif system:
+        parts.append(t["system"].format(content=system))
+    for m in turns:
+        parts.append(t[m["role"]].format(content=m["content"]))
+    parts.append(t["cue"])
+    return "".join(parts)
+
+
+def guess_template(model: str) -> str:
+    m = (model or "").lower()
+    if "llama" in m:
+        return "llama3"
+    if "mistral" in m or "mixtral" in m:
+        return "mistral"
+    return "chatml"
 JSON_FIELDS = ", ".join(f'"{k}"' for k in PLAN_SCHEMA["required"])
 
 JSON_INSTRUCTIONS = (
@@ -61,6 +122,12 @@ class BedrockBrain(BaseBrain):
         self.temperature = float(bedrock_cfg.get("temperature", 0.2))
         self.json_retries = max(0, int(bedrock_cfg.get("json_retries", 1)))
         self.not_ready_backoff = float(bedrock_cfg.get("not_ready_backoff", 45))
+        model = cfg.get("model") or self.default_model
+        api = str(bedrock_cfg.get("api") or "auto").lower()
+        if api == "auto":
+            api = "invoke" if ":imported-model/" in model else "converse"
+        self.api = api if api in ("converse", "invoke") else "converse"
+        self.chat_template = str(bedrock_cfg.get("chat_template") or guess_template(model)).lower()
         super().__init__(cfg, logger, client=client, cycle_interval=cycle_interval)
         self.key_source = f"instance-role/bedrock:{self.region or 'no-region'}"
 
@@ -92,6 +159,9 @@ class BedrockBrain(BaseBrain):
         out = super().status()
         out["provider"] = "bedrock"
         out["region"] = self.region
+        out["api"] = self.api
+        if self.api == "invoke":
+            out["chat_template"] = self.chat_template
         return out
 
     # ---- transport ----------------------------------------------------------
@@ -100,7 +170,7 @@ class BedrockBrain(BaseBrain):
         return self.client.converse(
             modelId=self.model,
             system=[{"text": system}],
-            messages=messages,
+            messages=[{"role": m["role"], "content": [{"text": m["content"]}]} for m in messages],
             inferenceConfig={"maxTokens": self.max_tokens, "temperature": self.temperature},
         )
 
@@ -115,12 +185,42 @@ class BedrockBrain(BaseBrain):
         return {"input_tokens": int(u.get("inputTokens", 0) or 0),
                 "output_tokens": int(u.get("outputTokens", 0) or 0)}
 
+    def _invoke(self, system: str, messages: list) -> dict:
+        """InvokeModel for imported models; normalised to the converse shape."""
+        body = {"prompt": render_prompt(self.chat_template, system, messages),
+                "max_tokens": self.max_tokens, "temperature": self.temperature}
+        raw = self.client.invoke_model(modelId=self.model, body=json.dumps(body),
+                                       contentType="application/json", accept="application/json")
+        payload = raw.get("body")
+        data = json.loads(payload.read() if hasattr(payload, "read") else payload or "{}")
+        # Shape A (OpenAI-style completion): choices[0].text, usage.prompt_tokens
+        # Shape B (Llama-style): generation, prompt_token_count, generation_token_count
+        if isinstance(data.get("choices"), list) and data["choices"]:
+            choice = data["choices"][0]
+            text = choice.get("text", "")
+            finish = choice.get("finish_reason") or choice.get("stop_reason") or "stop"
+            usage = data.get("usage") or {}
+            in_tok, out_tok = usage.get("prompt_tokens", 0), usage.get("completion_tokens", 0)
+        else:
+            text = data.get("generation", "")
+            finish = data.get("stop_reason") or "stop"
+            in_tok, out_tok = data.get("prompt_token_count", 0), data.get("generation_token_count", 0)
+        stop = "max_tokens" if str(finish).lower() in ("length", "max_tokens") else "end_turn"
+        return {"output": {"message": {"content": [{"text": text}]}},
+                "stopReason": stop,
+                "usage": {"inputTokens": int(in_tok or 0), "outputTokens": int(out_tok or 0)}}
+
+    def _chat(self, system: str, messages: list) -> dict:
+        if self.api == "invoke":
+            return self._invoke(system, messages)
+        return self._converse(system, messages)
+
     def _complete(self, system: str, messages: list, structured: bool,
                   cache: bool = True) -> Completion:
         if structured:
             system = system + JSON_INSTRUCTIONS
-        messages = [{"role": m["role"], "content": [{"text": m["content"]}]} for m in messages]
-        response = self._converse(system, messages)
+        messages = [{"role": m["role"], "content": m["content"]} for m in messages]
+        response = self._chat(system, messages)
         text = self._text_of(response)
         usage = self._usage_of(response)
         stop = response.get("stopReason") or "end_turn"
@@ -141,12 +241,12 @@ class BedrockBrain(BaseBrain):
                     attempts += 1
                     self.log.info("Bedrock plan was not valid JSON (%s); re-asking", e)
                     messages = messages + [
-                        {"role": "assistant", "content": [{"text": text or "(empty)"}]},
-                        {"role": "user", "content": [{"text":
+                        {"role": "assistant", "content": text or "(empty)"},
+                        {"role": "user", "content":
                             f"That was not a valid JSON object ({e}). Reply again with "
-                            f"ONLY the JSON object, fields {JSON_FIELDS}."}]},
+                            f"ONLY the JSON object, fields {JSON_FIELDS}."},
                     ]
-                    response = self._converse(system, messages)
+                    response = self._chat(system, messages)
                     text = self._text_of(response)
                     more = self._usage_of(response)
                     usage = {k: usage.get(k, 0) + more.get(k, 0) for k in usage}

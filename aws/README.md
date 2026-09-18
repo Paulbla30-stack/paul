@@ -182,8 +182,13 @@ Bedrock, `openclaw-model-fetcher` for the temporary instance); create them
 once with the snippet in the script's docstring or let an operator with
 IAM rights run it first.
 
-Put that ARN in `llm.model`. Imported models are unloaded when idle and the
-first call after a pause returns `ModelNotReadyException` while it loads;
+Put that ARN in `llm.model`. Bedrock's Converse API does not serve
+imported models, so the brain switches to InvokeModel for any
+`imported-model` ARN and renders the conversation with the model's chat
+template: `chatml` for Qwen (the default), `llama3`, or `mistral`, guessed
+from the model name or set with `llm.bedrock.chat_template`. Imported
+models are unloaded when idle and the first call after a pause returns
+`ModelNotReadyException` while it loads (about a minute for a 7B model);
 the brain treats that as a short backoff (`llm.bedrock.not_ready_backoff`)
 and the rule planner covers the gap. Use an instruction-tuned checkpoint:
 the planner asks for a JSON decision and a base model that has not been

@@ -8,7 +8,7 @@ from unittest import mock
 from openclaw.agent.core import AgentCore
 from openclaw.agent.planner import TaskType
 from openclaw.brain import build_brain
-from openclaw.brain.bedrock import BedrockBrain, JSON_INSTRUCTIONS
+from openclaw.brain.bedrock import BedrockBrain, JSON_INSTRUCTIONS, render_prompt, guess_template
 from openclaw.brain.llm import BaseBrain, ClaudeBrain
 from openclaw.main import OpenClawSystem, load_config
 
@@ -37,11 +37,12 @@ def converse_response(text, stop="end_turn", in_tok=100, out_tok=30):
 
 
 class FakeBedrock:
-    """Stands in for boto3's bedrock-runtime client."""
+    """Stands in for boto3's bedrock-runtime client (converse and invoke_model)."""
 
     def __init__(self, responses):
         self.responses = list(responses)
         self.calls = []
+        self.invoke_calls = []
 
     def converse(self, **kwargs):
         self.calls.append(kwargs)
@@ -49,6 +50,14 @@ class FakeBedrock:
         if isinstance(item, Exception):
             raise item
         return item
+
+    def invoke_model(self, **kwargs):
+        import io
+        self.invoke_calls.append({**kwargs, "body": json.loads(kwargs["body"])})
+        item = self.responses.pop(0) if self.responses else {"generation": json.dumps(plan()), "stop_reason": "stop"}
+        if isinstance(item, Exception):
+            raise item
+        return {"body": io.BytesIO(json.dumps(item).encode()), "contentType": "application/json"}
 
 
 def client_error(code, message="boom"):
@@ -156,16 +165,18 @@ class TestBedrockBrain(unittest.TestCase):
     @needs_boto
     def test_imported_model_not_ready_then_ready(self):
         brain, fake = make_brain([client_error("ModelNotReadyException"),
-                                  converse_response(json.dumps(plan()))],
+                                  {"generation": json.dumps(plan()), "stop_reason": "stop"}],
                                  model="arn:aws:bedrock:eu-west-2:1:imported-model/abc",
                                  bedrock={"not_ready_backoff": 0})
         agent = make_agent(brain, shell={"enabled": True})
         first = agent.run_cycle()
         self.assertTrue(first["action"].startswith("Goal step:"))  # rule planner while loading
+        self.assertIn("loading", brain.last_error)
         second = agent.run_cycle()
         self.assertEqual(second["action"], "Measure root usage")
         self.assertIn("bedrock", second["result"]["output"]["stdout"])
-        self.assertEqual(fake.calls[-1]["modelId"], "arn:aws:bedrock:eu-west-2:1:imported-model/abc")
+        self.assertEqual(fake.calls, [])  # imported models never go through Converse
+        self.assertEqual(fake.invoke_calls[-1]["modelId"], "arn:aws:bedrock:eu-west-2:1:imported-model/abc")
 
     def test_ask(self):
         brain, fake = make_brain([converse_response("All quiet.")])
@@ -184,6 +195,86 @@ class TestBedrockBrain(unittest.TestCase):
             brain = BedrockBrain({"model": "x", "region": "eu-west-2"}, LOG)
         self.assertIsNone(brain.client)
         self.assertIn("boto3", brain.status()["disabled_reason"])
+
+
+class TestImportedModelInvoke(unittest.TestCase):
+    ARN = "arn:aws:bedrock:us-west-2:1:imported-model/abc123"
+
+    def test_render_prompt_templates(self):
+        msgs = [{"role": "user", "content": "hi"}, {"role": "assistant", "content": "hello"},
+                {"role": "user", "content": "plan"}]
+        chatml = render_prompt("chatml", "SYS", msgs)
+        self.assertTrue(chatml.startswith("<|im_start|>system\nSYS<|im_end|>\n<|im_start|>user\nhi<|im_end|>\n"))
+        self.assertTrue(chatml.endswith("<|im_start|>user\nplan<|im_end|>\n<|im_start|>assistant\n"))
+        llama = render_prompt("llama3", "SYS", msgs)
+        self.assertIn("<|start_header_id|>system<|end_header_id|>\n\nSYS<|eot_id|>", llama)
+        self.assertTrue(llama.endswith("<|start_header_id|>assistant<|end_header_id|>\n\n"))
+        mistral = render_prompt("mistral", "SYS", msgs)
+        self.assertTrue(mistral.startswith("[INST] SYS\n\nhi [/INST] hello</s>[INST] plan [/INST]"))
+        self.assertEqual(guess_template("arn:aws:bedrock:us-west-2:1:imported-model/x"), "chatml")
+        self.assertEqual(guess_template("my-llama-3-1-8b"), "llama3")
+        self.assertEqual(guess_template("Mixtral-8x7B"), "mistral")
+
+    def test_auto_selects_invoke_for_imported_arn(self):
+        brain, fake = make_brain([], model=self.ARN)
+        self.assertEqual(brain.api, "invoke")
+        self.assertEqual(brain.chat_template, "chatml")
+        self.assertEqual(brain.status()["api"], "invoke")
+        catalog, _ = make_brain([])
+        self.assertEqual(catalog.api, "converse")
+        forced, _ = make_brain([], model=self.ARN, bedrock={"api": "converse", "chat_template": "llama3"})
+        self.assertEqual((forced.api, forced.chat_template), ("converse", "llama3"))
+
+    def test_plan_via_invoke_openai_shape(self):
+        resp = {"choices": [{"text": json.dumps(plan(task_type="observation", command="")),
+                             "finish_reason": "stop"}],
+                "usage": {"prompt_tokens": 210, "completion_tokens": 40}}
+        brain, fake = make_brain([resp], model=self.ARN)
+        agent = make_agent(brain)
+        decision = brain.plan(agent, agent.observe())
+        self.assertEqual(decision.task.task_type, TaskType.OBSERVATION)
+        self.assertEqual(fake.calls, [])  # converse never used
+        call = fake.invoke_calls[0]
+        self.assertEqual(call["modelId"], self.ARN)
+        body = call["body"]
+        self.assertEqual(body["max_tokens"], 4096)
+        self.assertTrue(body["prompt"].startswith("<|im_start|>system\n"))
+        self.assertIn(JSON_INSTRUCTIONS.strip(), body["prompt"])
+        self.assertTrue(body["prompt"].endswith("<|im_start|>assistant\n"))
+        self.assertEqual(brain.stats["input_tokens"], 210)
+        self.assertEqual(brain.stats["output_tokens"], 40)
+
+    def test_plan_via_invoke_llama_shape_and_truncation(self):
+        brain, fake = make_brain([{"generation": json.dumps(plan()), "prompt_token_count": 5,
+                                   "generation_token_count": 7, "stop_reason": "stop"}], model=self.ARN)
+        agent = make_agent(brain, shell={"enabled": True})
+        result = agent.run_cycle()
+        self.assertEqual(result["action"], "Measure root usage")
+        self.assertEqual(brain.stats["input_tokens"], 5)
+        brain, fake = make_brain([{"generation": '{"reasoning": "cut', "stop_reason": "length"}], model=self.ARN)
+        self.assertIsNone(brain.plan(make_agent(brain), {}))
+        self.assertEqual(brain.stats["truncated"], 1)
+        self.assertEqual(len(fake.invoke_calls), 1)  # truncated replies are not re-asked
+
+    def test_invoke_re_asks_with_rendered_history(self):
+        brain, fake = make_brain([{"generation": "Let me think...", "stop_reason": "stop"},
+                                  {"generation": json.dumps(plan(task_type="none", command="")), "stop_reason": "stop"}],
+                                 model=self.ARN)
+        decision = brain.plan(make_agent(brain), {})
+        self.assertTrue(decision.idle)
+        self.assertEqual(len(fake.invoke_calls), 2)
+        second = fake.invoke_calls[1]["body"]["prompt"]
+        self.assertIn("<|im_start|>assistant\nLet me think...<|im_end|>", second)
+        self.assertIn("not a valid JSON object", second)
+
+    def test_chat_via_invoke(self):
+        brain, fake = make_brain([{"choices": [{"text": "All fine.", "finish_reason": "stop"}]}], model=self.ARN)
+        agent = make_agent(brain)
+        self.assertEqual(agent.chat([{"role": "user", "content": "hi"}, {"role": "assistant", "content": "hello"},
+                                     {"role": "user", "content": "status?"}]), "All fine.")
+        prompt = fake.invoke_calls[0]["body"]["prompt"]
+        self.assertIn("<|im_start|>assistant\nhello<|im_end|>", prompt)
+        self.assertNotIn(JSON_INSTRUCTIONS.strip(), prompt)
 
 
 class TestFactory(unittest.TestCase):
