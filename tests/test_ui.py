@@ -178,7 +178,7 @@ class TestUiListener(unittest.TestCase):
                         call(base, "/uploads", headers={"Authorization": "Bearer wrong"})
                     except urllib.error.HTTPError as e:
                         codes.append(e.code)
-                self.assertEqual(codes, [401, 401, 401, 429, 429])
+                self.assertEqual(codes, [401, 401, 429, 429, 429])  # locked from the Nth failure
                 # even the right token is refused while locked out
                 with self.assertRaises(urllib.error.HTTPError) as cm:
                     call(base, "/uploads", headers={"Authorization": "Bearer t0k"})

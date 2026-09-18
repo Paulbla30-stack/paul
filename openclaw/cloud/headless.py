@@ -120,7 +120,7 @@ class HeadlessRunner:
         self._ui_server: Optional[ThreadingHTTPServer] = None
         self._ui_thread: Optional[threading.Thread] = None
         # Brute-force guard for the token: per client address, failures in
-        # the last window; over the limit means 429 until the window passes.
+        # the last window; from the Nth failure on, 429 until the window passes.
         self._auth_failures: dict = {}
         self.auth_failure_limit = int(ui.get("auth_failure_limit") or 10)
         self.auth_failure_window = float(ui.get("auth_failure_window") or 300)
