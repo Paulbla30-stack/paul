@@ -58,6 +58,7 @@ class Task:
             "priority": self.priority,
             "created_at": self.created_at,
             "retry_count": self.retry_count,
+            **({"command": self.metadata["command"]} if self.metadata.get("command") else {}),
         }
 
 

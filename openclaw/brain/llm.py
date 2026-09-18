@@ -148,6 +148,10 @@ install software, add repositories or enable services: use the task types above 
 already on the machine. If something you need is missing, say so in a note and choose none.
 - A task that just failed will fail again if repeated unchanged. After a failure, change \
 approach or choose none; never repeat the same command.
+- A task that just succeeded has already given you its result (see recent_history): do not \
+run it again to "confirm" or "refresh" it. A recurring goal (once an hour, daily) stays open \
+and is satisfied for now once its task has run this period: do not list it in completed_goals \
+and do not repeat its task until the clock says the period has passed; choose none instead.
 - When the evidence shows a goal is satisfied, list it in completed_goals, copied \
 character-for-character from goals[].description; the same rule applies to the "goal" field.
 - Goals and tasks carry a priority from 0 (most urgent) to 10 (background); lower runs first.
@@ -492,6 +496,8 @@ class BaseBrain:
                 "reasoning": str(last.get("reasoning", ""))[:400],
                 "task": (last.get("task") or {}).get("description") if last.get("task") else "idle",
             }
+            if last.get("skipped"):
+                context["last_decision"]["skipped"] = str(last["skipped"])[:300]
         cloud = agent.memory.recall("cloud_instance", 1) or agent.memory.recall("cloud_probe", 1)
         if cloud:
             context["cloud"] = _truncate(cloud[-1].get("data"), 200)

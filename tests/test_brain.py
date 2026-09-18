@@ -517,6 +517,53 @@ class TestAgentWithBrain(unittest.TestCase):
             agent.run_cycle()
             self.assertEqual(len(api.requests), calls + 1)
 
+    def test_repeat_of_just_successful_task_is_skipped(self):
+        with FakeClaude() as api:
+            brain = make_brain(api.url)
+            agent = make_agent(brain, shell={"enabled": True, "timeout": 5})
+            first = agent.run_cycle()
+            self.assertTrue(first["result"]["success"])
+            self.assertEqual(agent.task_history[-1]["task"]["command"], "echo hello-from-brain")
+            # FakeClaude answers the same plan every time: the second cycle is
+            # an identical shell command right after a success -> idle, not re-run.
+            second = agent.run_cycle()
+            self.assertEqual(second.get("action", "idle"), "idle")
+            self.assertEqual(len(agent.task_history), 1)
+            self.assertIn("repeat of the task that just succeeded", agent.last_thought["skipped"])
+            ctx = brain.build_context(agent, {})
+            self.assertEqual(ctx["last_decision"]["task"], "idle")
+            self.assertIn("repeat", ctx["last_decision"]["skipped"])
+            # a failed task is not a "success" to guard: the brain may retry it
+            agent.task_history[-1]["result"] = {"success": False, "error": "boom"}
+            third = agent.run_cycle()
+            self.assertEqual(third["action"], "Measure root filesystem usage")
+
+    def test_repeat_guard_keys(self):
+        agent = make_agent(None)
+        def hist(kind, desc, ok=True, command=None):
+            t = {"type": kind, "description": desc}
+            if command: t["command"] = command
+            agent.task_history = [{"task": t, "result": {"success": ok}, "timestamp": 0}]
+        def task(kind, desc, command=None):
+            md = {"source": "llm", **({"command": command} if command else {})}
+            return Task(priority=5, description=desc, task_type=kind, metadata=md)
+        hist("security_scan", "Run security scan")
+        self.assertTrue(agent._repeats_last_success(task(TaskType.SECURITY_SCAN, "Scan again, differently worded")))
+        self.assertFalse(agent._repeats_last_success(task(TaskType.SYSTEM_CHECK, "cpu")))
+        hist("security_scan", "Run security scan", ok=False)
+        self.assertFalse(agent._repeats_last_success(task(TaskType.SECURITY_SCAN, "retry")))
+        hist("shell_command", "df", command="df -h /")
+        self.assertTrue(agent._repeats_last_success(task(TaskType.SHELL_COMMAND, "again", command="df -h /")))
+        self.assertFalse(agent._repeats_last_success(task(TaskType.SHELL_COMMAND, "other", command="du -sh /var")))
+        hist("maintenance", "Storage housekeeping")
+        self.assertTrue(agent._repeats_last_success(task(TaskType.MAINTENANCE, "tidy the storage")))
+        self.assertFalse(agent._repeats_last_success(task(TaskType.MAINTENANCE, "free memory")))
+        hist("goal_step", "Note progress on disk goal")
+        self.assertTrue(agent._repeats_last_success(task(TaskType.GOAL_STEP, "note  progress on disk goal")))
+        self.assertFalse(agent._repeats_last_success(task(TaskType.GOAL_STEP, "note progress on security goal")))
+        agent.task_history = []
+        self.assertFalse(agent._repeats_last_success(task(TaskType.SECURITY_SCAN, "x")))
+
     def test_think_runs_the_brain_task_even_with_queued_work(self):
         with FakeClaude() as api:
             brain = make_brain(api.url)

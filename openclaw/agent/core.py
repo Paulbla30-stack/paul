@@ -10,7 +10,7 @@ import logging
 from collections import deque
 from typing import Any, Optional
 
-from openclaw.agent.planner import TaskPlanner, Task, TaskStatus
+from openclaw.agent.planner import TaskPlanner, Task, TaskStatus, TaskType
 from openclaw.agent.executor import TaskExecutor
 from openclaw.agent.memory import AgentMemory
 
@@ -150,6 +150,16 @@ class AgentCore:
         if decision.task is None:
             self.log.info("Brain: idle. %s", decision.reasoning)
             return None
+        if self._repeats_last_success(decision.task):
+            # Same probe or command as the task that just succeeded: its result
+            # is already in the model's history, so running it again only
+            # spends a call and a cycle. Idle instead and tell the model why.
+            self.log.info("Brain chose the task that just succeeded again (%s); idling this "
+                          "cycle instead", decision.task.description)
+            self.last_thought["task"] = None
+            self.last_thought["skipped"] = ("repeat of the task that just succeeded: "
+                                            + decision.task.description)
+            return None
         self.memory.store(category="llm_plan", data={
             "cycle": self.cycle_count,
             "reasoning": decision.reasoning,
@@ -160,6 +170,25 @@ class AgentCore:
         # for the current situation.
         decision.task.status = TaskStatus.RUNNING
         return decision.task
+
+    def _repeats_last_success(self, task: Task) -> bool:
+        """True when task would redo the most recent task, which succeeded."""
+        if not self.task_history:
+            return False
+        last = self.task_history[-1]
+        prev, result = last.get("task") or {}, last.get("result") or {}
+        if not result.get("success") or prev.get("type") != task.task_type.value:
+            return False
+        if task.task_type == TaskType.SHELL_COMMAND:
+            return (prev.get("command") or "") == (task.metadata.get("command") or "")
+        if task.task_type in (TaskType.MAINTENANCE, TaskType.GOAL_STEP):
+            def key(text):
+                text = (text or "").lower()
+                if task.task_type == TaskType.MAINTENANCE:
+                    return "memory" if "memory" in text else "storage"
+                return " ".join(text.split())
+            return key(prev.get("description")) == key(task.description)
+        return True  # same probe as the one that just ran
 
     def act(self, task: Task) -> dict:
         """Execute a task and return the result."""
