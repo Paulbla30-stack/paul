@@ -30,7 +30,9 @@ aws/
    boot tasks (IMDS probe, memory, storage, security scan) and then keeps
    cycling every `cloud.cycle_interval` seconds. Its log goes to the
    journal and the EC2 serial console.
-4. A status endpoint listens on `127.0.0.1:8471` and a snapshot is kept at
+4. If an Anthropic API key is available, the **LLM brain** plans each cycle
+   (see below); otherwise the rule planner runs and the journal says why.
+5. A status endpoint listens on `127.0.0.1:8471` and a snapshot is kept at
    `/run/openclaw/status.json`. `openclaw --status` reads either.
 
 ## Building the AMI
@@ -85,6 +87,41 @@ Or launch by hand from the console or CLI. The only things that matter:
 - **IAM role** with `AmazonSSMManagedInstanceCore` if you want to reach
   the box without opening port 22.
 
+## Giving the agent a brain
+
+The AMI profile has `llm.enabled: true` with `claude-opus-5`; the only thing
+missing at build time is the key. Store it once in SSM Parameter Store and
+tell the instance where it is:
+
+```bash
+aws ssm put-parameter --name /openclaw/anthropic-api-key \
+    --type SecureString --value "$ANTHROPIC_API_KEY"
+```
+
+Then either keep the default `llm.api_key_ssm_parameter: /openclaw/anthropic-api-key`
+in the user data (as in the bundled example), or tag the instance
+`openclaw:llm-key-parameter = /openclaw/anthropic-api-key`. The Terraform
+example grants `ssm:GetParameter` on that name to the instance role
+(`-var anthropic_api_key_ssm_parameter=...`, empty to skip). At every boot
+the bootstrap service reads the parameter with the instance role and writes
+`/etc/openclaw/anthropic.key` (0600). The key never appears in user data,
+cloud.yaml or the journal. An inline `llm.api_key` in user data also works
+for quick tests, but user data is readable by anyone on the instance.
+
+What the brain may do is set by `llm.shell` in `/etc/openclaw/config.yaml`
+(on in the AMI profile, deny-list guarded) and by the goals you give it.
+Budget it with `llm.max_calls_per_hour` (60 by default, so at the default
+30 s cycle it plans at most every minute when busy) and `llm.effort`.
+
+```bash
+openclaw --status                       # includes brain model, budget and last reasoning
+curl -s localhost:8471/brain            # full brain status + last thought
+curl -s -X POST localhost:8471/goal -d 'Find out why disk fills up nightly'
+curl -s -X POST localhost:8471/think    # plan one step now and run it
+curl -s -X POST localhost:8471/ask -d 'What have you changed today?'
+openclaw --ask 'Is anything wrong with this box?' --no-hardware
+```
+
 ## Talking to the agent
 
 ```bash
@@ -111,5 +148,6 @@ regenerated and should not be edited by hand.
 | Boot tasks         | Hardware enumeration first        | IMDS identity first, then memory, storage, scan |
 | Configuration      | `config.yaml` + kernel cmdline    | `config.yaml` + `cloud.yaml` from user data and tags |
 | Status             | Console commands                  | `openclaw --status`, HTTP on loopback  |
+| LLM brain          | Off unless `llm.enabled` is set   | On; key from SSM Parameter Store        |
 
 Both profiles run the same `openclaw` package; the ISO build is untouched.

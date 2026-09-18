@@ -32,9 +32,11 @@ import sys
 from typing import Optional
 
 from openclaw.cloud.imds import IMDSClient
+from openclaw.brain.credentials import (DEFAULT_KEY_FILE, fetch_ssm_parameter,
+                                        install_key_file)
 
 DEFAULT_OUTPUT = "/etc/openclaw/cloud.yaml"
-CONFIG_KEYS = ("agent", "goals", "cloud", "security", "hardware")
+CONFIG_KEYS = ("agent", "goals", "cloud", "security", "hardware", "llm")
 
 
 def _load_yaml_or_json(text: str) -> Optional[dict]:
@@ -122,10 +124,44 @@ def build_cloud_config(imds: IMDSClient) -> dict:
 
     if tags.get("openclaw:name"):
         config.setdefault("agent", {})["name"] = tags["openclaw:name"]
+    if tags.get("openclaw:llm-key-parameter"):
+        config.setdefault("llm", {})["api_key_ssm_parameter"] = tags["openclaw:llm-key-parameter"]
     if instance:
         config["agent"] = config.get("agent", {})
         config["agent"].setdefault("profile", "cloud")
     return config
+
+
+def provision_llm_key(config: dict, key_file: str = DEFAULT_KEY_FILE,
+                      fetch=fetch_ssm_parameter) -> str:
+    """Move any LLM API key out of the overlay and into a 0600 key file.
+
+    Sources, in order: an inline ``llm.api_key`` from user data (removed
+    from the overlay so it never lands in the world-readable cloud.yaml),
+    then ``llm.api_key_ssm_parameter`` fetched with the instance role.
+    Returns a short description of what happened for the boot log.
+    """
+    llm = config.get("llm")
+    if not isinstance(llm, dict):
+        return "no llm section"
+    key_file = llm.get("api_key_file") or key_file
+    inline = llm.pop("api_key", None)
+    if isinstance(inline, str) and inline.strip():
+        install_key_file(inline, key_file)
+        llm["api_key_file"] = key_file
+        llm.setdefault("enabled", True)
+        return f"inline key moved to {key_file}"
+    param = llm.get("api_key_ssm_parameter")
+    if param:
+        region = (config.get("cloud", {}).get("instance") or {}).get("region")
+        value = fetch(param, region)
+        if value:
+            install_key_file(value, key_file)
+            llm["api_key_file"] = key_file
+            llm.setdefault("enabled", True)
+            return f"key fetched from SSM {param} -> {key_file}"
+        return f"SSM parameter {param} not readable (role permissions? awscli?)"
+    return "no key configured"
 
 
 def dump_config(config: dict) -> str:
@@ -159,10 +195,20 @@ def main(argv=None):
                         help="Override the IMDS endpoint (testing)")
     parser.add_argument("--print", action="store_true", dest="print_only",
                         help="Print the overlay instead of writing it")
+    parser.add_argument("--key-file", default=DEFAULT_KEY_FILE,
+                        help="Where to store an LLM API key found in user data / SSM")
+    parser.add_argument("--skip-llm-key", action="store_true",
+                        help="Do not resolve or write the LLM API key")
     args = parser.parse_args(argv)
 
     imds = IMDSClient(base_url=args.imds_url)
     config = build_cloud_config(imds)
+
+    key_note = "skipped"
+    if not args.skip_llm_key and not args.print_only:
+        key_note = provision_llm_key(config, args.key_file)
+    elif args.print_only and isinstance(config.get("llm"), dict):
+        config["llm"].pop("api_key", None)  # never print secrets
 
     if args.print_only:
         sys.stdout.write(dump_config(config))
@@ -177,6 +223,7 @@ def main(argv=None):
     else:
         print(f"[bootstrap] IMDS not reachable; wrote defaults -> {path}")
     print(f"[bootstrap] goals: {len(config['goals'])}")
+    print(f"[bootstrap] llm key: {key_note}")
     return 0
 
 

@@ -5,12 +5,74 @@ Executes planned tasks by interacting with hardware and system interfaces.
 """
 
 import os
+import re
 import subprocess
 import logging
-from typing import Any
+from typing import Any, Optional
 
 from openclaw.agent.planner import Task, TaskType, TaskStatus
 from openclaw.agent.memory import AgentMemory
+
+
+# Guard rails for LLM-planned shell commands. This is a deny-list, not a
+# sandbox: the agent runs with full access by design, these just stop the
+# obviously catastrophic or self-defeating commands from ever running.
+DEFAULT_SHELL_DENY_PATTERNS = [
+    r"\brm\s+(-[a-zA-Z]*\s+)*(/|/\*|~|\$HOME|/etc|/usr|/var|/boot|/bin|/sbin|/lib\S*)(\s|$)",
+    r"\bmkfs(\.|\s)",
+    r"\bdd\b.*\bof=/dev/",
+    r">\s*/dev/(sd|nvme|xvd|vd|hd|mem|kmem)",
+    r"\b(shutdown|reboot|halt|poweroff)\b",
+    r"\binit\s+[06]\b",
+    r"\bsystemctl\s+(stop|disable|mask|kill)\s+.*openclaw",
+    r"\b(pkill|killall)\s+.*(openclaw|python)",
+    r":\(\)\s*\{",
+    r"\bchmod\s+(-R\s+)?[0-7]*777\s+/(\s|$)",
+    r"\b(curl|wget)\b.*\|\s*(sudo\s+)?(ba|z|da)?sh\b",
+    r"\b(iptables|nft)\b.*(-F|flush)",
+    r"\bpasswd\b|\buseradd\b|\buserdel\b|/etc/shadow|/etc/sudoers",
+    r"\bcrontab\s+-r\b",
+]
+
+DEFAULT_SHELL_POLICY = {
+    "enabled": False,
+    "timeout": 60,
+    "max_output": 4000,
+    "cwd": "/",
+    "deny_patterns": DEFAULT_SHELL_DENY_PATTERNS,
+}
+
+
+def normalise_shell_policy(policy: Optional[dict]) -> dict:
+    """Fill in defaults; a missing or falsy policy means shell is disabled."""
+    merged = dict(DEFAULT_SHELL_POLICY)
+    if isinstance(policy, dict):
+        merged.update({k: v for k, v in policy.items() if v is not None})
+    patterns = merged.get("deny_patterns")
+    if not isinstance(patterns, list):
+        patterns = list(DEFAULT_SHELL_DENY_PATTERNS)
+    merged["deny_patterns"] = [str(p) for p in patterns]
+    merged["enabled"] = bool(merged.get("enabled"))
+    merged["timeout"] = max(1, int(merged.get("timeout") or 60))
+    merged["max_output"] = max(200, int(merged.get("max_output") or 4000))
+    return merged
+
+
+def check_command_allowed(command: str, policy: dict) -> Optional[str]:
+    """Return a reason string when ``command`` must not run, else ``None``."""
+    if not policy.get("enabled"):
+        return "shell execution disabled by policy (llm.shell.enabled)"
+    if not command or not command.strip():
+        return "empty command"
+    if "\x00" in command:
+        return "command contains NUL byte"
+    for pattern in policy.get("deny_patterns", []):
+        try:
+            if re.search(pattern, command, flags=re.IGNORECASE):
+                return f"command matches deny pattern: {pattern}"
+        except re.error:
+            continue
+    return None
 
 
 class TaskExecutor:
@@ -21,10 +83,12 @@ class TaskExecutor:
     during task execution.
     """
 
-    def __init__(self, hardware: dict, memory: AgentMemory, logger: logging.Logger):
+    def __init__(self, hardware: dict, memory: AgentMemory, logger: logging.Logger,
+                 shell_policy: Optional[dict] = None):
         self.hardware = hardware
         self.memory = memory
         self.log = logger.getChild("executor")
+        self.shell_policy = normalise_shell_policy(shell_policy)
 
         # Map task types to handlers
         self._handlers = {
@@ -36,6 +100,7 @@ class TaskExecutor:
             TaskType.OBSERVATION: self._handle_observation,
             TaskType.GOAL_STEP: self._handle_goal_step,
             TaskType.CLOUD_PROBE: self._handle_cloud_probe,
+            TaskType.SHELL_COMMAND: self._handle_shell_command,
         }
 
     def execute(self, task: Task) -> dict:
@@ -214,6 +279,53 @@ class TaskExecutor:
             info["available"] = True
         self.memory.store(category="cloud_probe", data=info)
         return {"success": True, "output": info}
+
+    def _handle_shell_command(self, task: Task) -> dict:
+        """Run a planner-chosen shell command under the shell policy."""
+        command = str(task.metadata.get("command") or "")
+        denied = check_command_allowed(command, self.shell_policy)
+        record = {"command": command, "goal": task.metadata.get("goal")}
+        if denied:
+            self.log.warning("Shell command refused (%s): %s", denied, command)
+            record["denied"] = denied
+            self.memory.store(category="shell_command", data=record)
+            return {"success": False, "error": denied, "output": record}
+
+        timeout = self.shell_policy["timeout"]
+        limit = self.shell_policy["max_output"]
+        self.log.info("Shell: %s", command)
+        try:
+            proc = subprocess.run(
+                ["/bin/sh", "-c", command],
+                capture_output=True, text=True, timeout=timeout,
+                cwd=self.shell_policy.get("cwd") or None,
+                env={**os.environ, "OPENCLAW_TASK": "1"},
+            )
+        except subprocess.TimeoutExpired:
+            record["timeout"] = timeout
+            self.memory.store(category="shell_command", data=record)
+            return {"success": False, "error": f"timed out after {timeout}s", "output": record}
+        except (FileNotFoundError, OSError) as e:
+            record["error"] = str(e)
+            self.memory.store(category="shell_command", data=record)
+            return {"success": False, "error": str(e), "output": record}
+
+        def clip(text: str) -> str:
+            if len(text) <= limit:
+                return text
+            return text[:limit] + f"\n...[{len(text) - limit} more chars truncated]"
+
+        record.update({
+            "returncode": proc.returncode,
+            "stdout": clip(proc.stdout),
+            "stderr": clip(proc.stderr),
+        })
+        self.memory.store(category="shell_command", data=record)
+        if proc.returncode != 0:
+            return {"success": False,
+                    "error": f"exit status {proc.returncode}",
+                    "output": record}
+        return {"success": True, "output": record}
 
     def _handle_goal_step(self, task: Task) -> dict:
         """Execute a step toward a goal."""

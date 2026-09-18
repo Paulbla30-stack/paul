@@ -3,7 +3,7 @@
 
 SHELL := /bin/bash
 .PHONY: all iso rootfs clean test scan qemu lint help \
-        headless status ami-bundle ami-init ami-validate ami ami-fmt tf-init tf-validate
+        headless status ask ami-bundle ami-init ami-validate ami ami-fmt tf-init tf-validate
 
 # Directories
 BUILD_DIR    := build
@@ -133,6 +133,10 @@ headless: ## Run the agent headless locally for a few cycles (no hardware)
 		--config rootfs/etc/openclaw/config-aws.yaml \
 		--max-cycles $(or $(CYCLES),5) --cycle-interval 1 \
 		--status-port 8471 --status-file $(BUILD_DIR)/status.json
+
+ask: ## Ask the LLM brain about this machine: make ask Q="what is using memory?"
+	PYTHONPATH=. $(PYTHON) -m openclaw.main --no-hardware --llm \
+		--config rootfs/etc/openclaw/config-aws.yaml --ask "$(Q)"
 
 status: ## Query a running headless agent
 	PYTHONPATH=. $(PYTHON) -m openclaw.main --status \

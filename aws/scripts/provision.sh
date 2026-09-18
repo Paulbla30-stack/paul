@@ -31,16 +31,16 @@ fi
 if command -v dnf >/dev/null 2>&1; then
     log "Installing packages with dnf (Amazon Linux / Fedora family)"
     dnf -y update --security || true
-    dnf -y install python3 python3-pyyaml pciutils usbutils util-linux \
-                   amazon-ssm-agent 2>/dev/null || \
-    dnf -y install python3 python3-pyyaml pciutils usbutils util-linux
+    dnf -y install python3 python3-pip python3-pyyaml pciutils usbutils util-linux \
+                   amazon-ssm-agent awscli 2>/dev/null || \
+    dnf -y install python3 python3-pip python3-pyyaml pciutils usbutils util-linux
     systemctl enable amazon-ssm-agent 2>/dev/null || true
 elif command -v apt-get >/dev/null 2>&1; then
     log "Installing packages with apt (Ubuntu / Debian family)"
     export DEBIAN_FRONTEND=noninteractive
     apt-get update -y
-    apt-get install -y --no-install-recommends python3 python3-yaml \
-                       pciutils usbutils util-linux
+    apt-get install -y --no-install-recommends python3 python3-pip python3-yaml \
+                       pciutils usbutils util-linux awscli
     # SSM agent is a snap on Ubuntu cloud images and already present.
 else
     echo "[provision] unsupported distro: need dnf or apt-get" >&2
@@ -54,6 +54,14 @@ if ! python3 -c 'import yaml' 2>/dev/null; then
     python3 -m ensurepip --upgrade 2>/dev/null || true
     python3 -m pip install --no-cache-dir pyyaml
 fi
+
+# The LLM planner uses the official Anthropic SDK.
+log "Installing the anthropic SDK"
+python3 -m pip install --no-cache-dir --upgrade "anthropic>=1.6" \
+    || python3 -m pip install --no-cache-dir --upgrade --break-system-packages "anthropic>=1.6"
+python3 -c 'import anthropic; print("[provision] anthropic", anthropic.__version__)'
+command -v aws >/dev/null 2>&1 && log "aws cli: $(aws --version 2>&1 | head -1)" \
+    || log "WARNING: aws cli missing; llm.api_key_ssm_parameter will not work"
 
 # ---- 2. Agent code -------------------------------------------------------
 log "Installing OpenClaw to $PREFIX"
@@ -109,9 +117,9 @@ net.ipv4.ip_forward = 0
 SYSCTL
 
 # ---- 6. Sanity check inside the build instance --------------------------
-log "Running self-test (3 headless cycles, no IMDS required)"
+log "Running self-test (3 headless cycles, no IMDS or API key required)"
 PYTHONPATH="$PREFIX" python3 -m openclaw.main \
-    --config "$CONF_DIR/config.yaml" --no-hardware --headless \
+    --config "$CONF_DIR/config.yaml" --no-hardware --headless --no-llm \
     --max-cycles 3 --cycle-interval 0 --status-port 0 \
     --status-file /tmp/openclaw-selftest.json >/tmp/openclaw-selftest.log 2>&1 \
     || { cat /tmp/openclaw-selftest.log; echo "[provision] self-test failed" >&2; exit 1; }

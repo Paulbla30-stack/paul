@@ -28,6 +28,7 @@ class TaskType(Enum):
     OBSERVATION = "observation"
     GOAL_STEP = "goal_step"
     CLOUD_PROBE = "cloud_probe"
+    SHELL_COMMAND = "shell_command"
 
 
 # Boot-task profiles: what the agent should look at first depends on
@@ -83,6 +84,24 @@ class TaskPlanner:
             "created_at": time.time(),
             "completed": False,
         })
+
+    def complete_goal(self, description: str) -> bool:
+        """Mark a goal complete by exact (case-insensitive) or substring match."""
+        wanted = (description or "").strip().lower()
+        if not wanted:
+            return False
+        for goal in self.goals:
+            if goal["completed"]:
+                continue
+            have = goal["description"].strip().lower()
+            if have == wanted or wanted in have or have in wanted:
+                goal["completed"] = True
+                goal["completed_at"] = time.time()
+                return True
+        return False
+
+    def open_goals(self) -> list:
+        return [g for g in self.goals if not g["completed"]]
 
     def add_task(self, task: Task):
         """Add a task to the priority queue."""

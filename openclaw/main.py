@@ -73,6 +73,22 @@ def parse_args():
         "--status", action="store_true",
         help="Print the status of a running headless agent and exit"
     )
+    parser.add_argument(
+        "--llm", dest="llm", action="store_true", default=None,
+        help="Enable the LLM planner (overrides llm.enabled)"
+    )
+    parser.add_argument(
+        "--no-llm", dest="llm", action="store_false",
+        help="Disable the LLM planner for this run"
+    )
+    parser.add_argument(
+        "--model", default=None,
+        help="Claude model id for the LLM planner (default from config)"
+    )
+    parser.add_argument(
+        "--ask", metavar="QUESTION", default=None,
+        help="Ask the LLM brain a question about this machine and exit"
+    )
     return parser.parse_args()
 
 
@@ -119,6 +135,31 @@ def load_config(path, extra_paths=()):
             "status_file": "/run/openclaw/status.json",
         },
         "goals": [],
+        "llm": {
+            "enabled": False,
+            "provider": "anthropic",
+            "model": "claude-opus-5",
+            "effort": "medium",
+            "thinking": "adaptive",
+            "max_tokens": 4096,
+            "fallbacks": True,
+            "api_key": None,
+            "api_key_file": "/etc/openclaw/anthropic.key",
+            "api_key_ssm_parameter": None,
+            "base_url": None,
+            "timeout": 120,
+            "max_retries": 2,
+            "max_calls_per_hour": 60,
+            "plan_every_n_cycles": 1,
+            "history_window": 10,
+            "shell": {
+                "enabled": False,
+                "timeout": 60,
+                "max_output": 4000,
+                "cwd": "/",
+                "deny_patterns": None,
+            },
+        },
     }
 
     for cfg_path in (path, *extra_paths):
@@ -137,6 +178,10 @@ def load_config(path, extra_paths=()):
         config["agent"]["debug"] = True
     if os.environ.get("OPENCLAW_HEADLESS") == "1":
         config["cloud"]["headless"] = True
+    if os.environ.get("OPENCLAW_LLM") in ("0", "1"):
+        config["llm"]["enabled"] = os.environ["OPENCLAW_LLM"] == "1"
+    if os.environ.get("OPENCLAW_MODEL"):
+        config["llm"]["model"] = os.environ["OPENCLAW_MODEL"]
 
     return config
 
@@ -235,6 +280,26 @@ class OpenClawSystem:
         )
         return report
 
+    def build_brain(self):
+        """Construct the LLM planner when enabled; None when it cannot run."""
+        llm_cfg = self.config.get("llm") or {}
+        if not llm_cfg.get("enabled"):
+            self.log.info("LLM brain disabled (llm.enabled=false); rule planner only")
+            return None
+        try:
+            from openclaw.brain.llm import ClaudeBrain
+        except Exception as e:  # pragma: no cover - import guard
+            self.log.warning("LLM brain unavailable: %s", e)
+            return None
+        brain = ClaudeBrain(llm_cfg, self.log)
+        if brain.client is None:
+            self.log.warning("LLM brain configured but not usable; rule planner only")
+            return None
+        self.log.info("LLM brain ready: model=%s effort=%s key=%s shell=%s",
+                      brain.model, brain.effort, brain.key_source,
+                      "on" if (llm_cfg.get("shell") or {}).get("enabled") else "off")
+        return brain
+
     def build_agent(self):
         """Construct the AgentCore and seed it with configured goals."""
         hardware = {
@@ -244,10 +309,13 @@ class OpenClawSystem:
             "storage": self.storage,
         }
 
+        llm_cfg = self.config.get("llm") or {}
         self.agent = AgentCore(
             config=self.config["agent"],
             hardware=hardware,
             logger=self.log,
+            brain=self.build_brain(),
+            shell_policy=llm_cfg.get("shell"),
         )
         for goal in self.config.get("goals") or []:
             if isinstance(goal, str):
@@ -343,6 +411,19 @@ def print_status(status, source):
     if runner:
         print(f"  Uptime:          {runner.get('uptime_seconds')}s")
         print(f"  Last action:     {runner.get('last_action')}")
+    goals = status.get("goals") or {}
+    if goals:
+        print(f"  Goals:           {goals.get('open')} open / {goals.get('total')} total")
+    brain = status.get("brain")
+    if brain:
+        state = "available" if brain.get("available") else (brain.get("disabled_reason")
+                                                            or "backing off")
+        print(f"  Brain:           {brain.get('model')} ({state}), "
+              f"{brain.get('calls_last_hour')}/{brain.get('max_calls_per_hour')} calls this hour")
+        if brain.get("last_reasoning"):
+            print(f"  Last reasoning:  {brain['last_reasoning'][:200]}")
+    else:
+        print("  Brain:           off (rule planner)")
     current = status.get("current_task")
     if current:
         print(f"  Current task:    {current.get('description')}")
@@ -351,6 +432,13 @@ def print_status(status, source):
 def apply_cli_overrides(config, args):
     """Command-line flags win over every config file."""
     cloud = config["cloud"]
+    llm = config["llm"]
+    if getattr(args, "llm", None) is not None:
+        llm["enabled"] = bool(args.llm)
+    if getattr(args, "model", None):
+        llm["model"] = args.model
+    if getattr(args, "ask", None):
+        llm["enabled"] = True
     if args.headless:
         cloud["headless"] = True
     if args.cycle_interval is not None:
@@ -378,6 +466,21 @@ def main():
             print("OpenClaw agent is not running (no status endpoint or file).")
             sys.exit(3)
         print_status(status, source)
+        return
+
+    if args.ask:
+        # One-shot question: build the agent (hardware optional), ask, exit.
+        system = OpenClawSystem(config, logger)
+        if not args.no_hardware:
+            try:
+                system.initialize_hardware()
+            except Exception as e:
+                logger.warning("Hardware initialization partial failure: %s", e)
+        system.build_agent()
+        try:
+            print(system.agent.ask(args.ask))
+        finally:
+            system.shutdown()
         return
 
     logger.info("OpenClaw Agent v%s starting...", "1.0.0")

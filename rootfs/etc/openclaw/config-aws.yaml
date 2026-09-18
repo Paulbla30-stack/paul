@@ -41,3 +41,30 @@ cloud:
   status_file: "/run/openclaw/status.json"
 
 goals: []                    # add goals via user data or the openclaw:goal tag
+
+# LLM planner. Enabled here, but it only runs when a key is available:
+#   - /etc/openclaw/anthropic.key (0600), written at boot by
+#     openclaw-bootstrap from llm.api_key_ssm_parameter (user data or the
+#     openclaw:llm-key-parameter tag), or
+#   - ANTHROPIC_API_KEY in the service environment.
+# Without a key the agent falls back to the rule-based planner and says so
+# in the journal.
+llm:
+  enabled: true
+  provider: anthropic
+  model: claude-opus-5
+  effort: medium             # low | medium | high | xhigh | max
+  thinking: adaptive
+  max_tokens: 4096
+  fallbacks: true            # server-side refusal fallbacks (Claude API only)
+  api_key_file: /etc/openclaw/anthropic.key
+  api_key_ssm_parameter: null   # e.g. /openclaw/anthropic-api-key (SecureString)
+  max_calls_per_hour: 60     # hard budget; rule planner takes over beyond it
+  plan_every_n_cycles: 1
+  history_window: 10
+  shell:
+    enabled: true            # let the brain run commands (deny-list guarded)
+    timeout: 60
+    max_output: 4000
+    cwd: /
+    deny_patterns: null      # null = built-in list (see openclaw/agent/executor.py)

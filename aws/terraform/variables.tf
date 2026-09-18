@@ -63,3 +63,9 @@ variable "tags" {
   type    = map(string)
   default = {}
 }
+
+variable "anthropic_api_key_ssm_parameter" {
+  type        = string
+  default     = "/openclaw/anthropic-api-key"
+  description = "SSM SecureString holding the Anthropic API key for the LLM planner. Empty disables the grant (rule planner only)."
+}

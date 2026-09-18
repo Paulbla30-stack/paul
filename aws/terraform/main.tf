@@ -68,6 +68,28 @@ resource "aws_iam_role_policy_attachment" "ssm" {
   policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
 }
 
+# Read access to the Anthropic API key stored as an SSM SecureString.
+# Put it there once (never in Terraform state):
+#   aws ssm put-parameter --name /openclaw/anthropic-api-key \
+#       --type SecureString --value "$ANTHROPIC_API_KEY"
+data "aws_caller_identity" "current" {}
+
+resource "aws_iam_role_policy" "llm_key" {
+  count = var.anthropic_api_key_ssm_parameter != "" ? 1 : 0
+  name  = "openclaw-llm-key"
+  role  = aws_iam_role.openclaw.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect   = "Allow"
+      Action   = ["ssm:GetParameter"]
+      Resource = "arn:aws:ssm:${var.region}:${data.aws_caller_identity.current.account_id}:parameter${var.anthropic_api_key_ssm_parameter}"
+    }]
+    # A SecureString under the default aws/ssm key needs nothing more; a
+    # customer-managed KMS key also needs kms:Decrypt on that key.
+  })
+}
+
 resource "aws_iam_instance_profile" "openclaw" {
   name_prefix = "${var.name}-"
   role        = aws_iam_role.openclaw.name
@@ -127,8 +149,13 @@ resource "aws_instance" "openclaw" {
     encrypted   = true
   }
 
-  tags = merge(local.tags, {
-    Name            = var.name
-    "openclaw:name" = var.name
-  }, var.agent_goal != "" ? { "openclaw:goal" = var.agent_goal } : {})
+  tags = merge(
+    local.tags,
+    {
+      Name            = var.name
+      "openclaw:name" = var.name
+    },
+    var.agent_goal != "" ? { "openclaw:goal" = var.agent_goal } : {},
+    var.anthropic_api_key_ssm_parameter != "" ? { "openclaw:llm-key-parameter" = var.anthropic_api_key_ssm_parameter } : {},
+  )
 }

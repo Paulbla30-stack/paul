@@ -25,7 +25,8 @@ class AgentCore:
     4. Reflects on results and updates memory
     """
 
-    def __init__(self, config: dict, hardware: dict, logger: logging.Logger):
+    def __init__(self, config: dict, hardware: dict, logger: logging.Logger,
+                 brain=None, shell_policy: Optional[dict] = None):
         self.config = config
         self.hardware = hardware
         self.log = logger.getChild("agent")
@@ -36,7 +37,13 @@ class AgentCore:
         # Sub-components
         self.memory = AgentMemory(max_entries=1000)
         self.planner = TaskPlanner(self.memory, profile=self.profile)
-        self.executor = TaskExecutor(hardware, self.memory, self.log)
+        self.executor = TaskExecutor(hardware, self.memory, self.log,
+                                     shell_policy=shell_policy)
+        # Optional LLM planner (openclaw.brain.ClaudeBrain). When present it
+        # is consulted before the rule-based planner; when it cannot answer
+        # the rule-based planner takes over for that cycle.
+        self.brain = brain
+        self.last_thought: dict = {}
 
         # State
         self.running = False
@@ -82,17 +89,59 @@ class AgentCore:
         return observations
 
     def plan(self, observations: dict) -> Optional[Task]:
-        """Generate a task plan based on current observations."""
+        """Generate a task plan based on current observations.
+
+        The LLM brain decides first when it is configured and within budget.
+        A ``None`` from the brain means "could not decide" and hands the
+        cycle to the rule-based planner; an explicit idle decision is
+        respected as-is.
+        """
         if len(self.planner.pending_tasks) >= self.max_tasks:
             self.log.warning("Task queue full (%d tasks), skipping planning",
                              self.max_tasks)
             return None
+
+        if self.brain is not None and self.brain.should_plan(self.cycle_count):
+            decision = self.brain.plan(self, observations)
+            if decision is not None:
+                return self._apply_decision(decision)
 
         task = self.planner.generate_task(observations)
         if task:
             self.log.debug("Planned task: %s (priority=%d)",
                            task.description, task.priority)
         return task
+
+    def _apply_decision(self, decision) -> Optional[Task]:
+        """Turn a brain Decision into agent state: goals, notes, task."""
+        for goal in decision.completed_goals:
+            if self.planner.complete_goal(goal):
+                self.log.info("Goal completed: %s", goal)
+                self.memory.store(category="goal_completed",
+                                  data={"description": goal, "cycle": self.cycle_count})
+        if decision.note:
+            self.memory.store(category="llm_note",
+                              data={"note": decision.note, "cycle": self.cycle_count})
+        self.last_thought = {
+            "cycle": self.cycle_count,
+            "reasoning": decision.reasoning,
+            "task": decision.task.to_dict() if decision.task else None,
+            "completed_goals": list(decision.completed_goals),
+            "timestamp": time.time(),
+        }
+        self.memory.store(category="llm_plan", data={
+            "cycle": self.cycle_count,
+            "reasoning": decision.reasoning,
+            "task": decision.task.description if decision.task else "idle",
+        })
+        if decision.task is None:
+            self.log.info("Brain: idle. %s", decision.reasoning)
+            return None
+        self.log.info("Brain: %s -> %s", decision.reasoning, decision.task.description)
+        self.planner.add_task(decision.task)
+        # Return it through the queue so status/priority bookkeeping matches
+        # every other task.
+        return self.planner.get_next_task()
 
     def act(self, task: Task) -> dict:
         """Execute a task and return the result."""
@@ -164,6 +213,45 @@ class AgentCore:
             data={"description": description, "priority": priority},
         )
 
+    def complete_goal(self, description: str) -> bool:
+        """Mark a goal as satisfied (operator or brain)."""
+        done = self.planner.complete_goal(description)
+        if done:
+            self.memory.store(category="goal_completed",
+                              data={"description": description, "cycle": self.cycle_count})
+        return done
+
+    def think(self) -> dict:
+        """Force one LLM planning step and run the chosen task immediately."""
+        if self.brain is None:
+            return {"error": "no LLM brain configured (llm.enabled)"}
+        if not self.brain.available():
+            return {"error": "LLM brain unavailable: "
+                             + (self.brain.last_error or self.brain.status().get("disabled_reason")
+                                or "backing off")}
+        self.cycle_count += 1
+        observations = self.observe()
+        decision = self.brain.plan(self, observations)
+        if decision is None:
+            return {"cycle": self.cycle_count, "error": self.brain.last_error or "no decision"}
+        task = self._apply_decision(decision)
+        out = {"cycle": self.cycle_count, "reasoning": decision.reasoning,
+               "completed_goals": list(decision.completed_goals), "note": decision.note,
+               "action": task.description if task else "idle"}
+        if task is not None:
+            result = self.act(task)
+            self.reflect(task, result)
+            out["result"] = result
+        return out
+
+    def ask(self, question: str) -> str:
+        """Answer an operator question with the agent's context."""
+        if self.brain is None:
+            return "No LLM brain configured (set llm.enabled and an API key)."
+        answer = self.brain.ask(self, question, self.observe())
+        return answer or ("Brain could not answer: "
+                          + (self.brain.last_error or "unavailable"))
+
     def get_status(self) -> dict:
         """Return the current agent status."""
         return {
@@ -179,6 +267,12 @@ class AgentCore:
             "hardware": {
                 k: v is not None for k, v in self.hardware.items()
             },
+            "goals": {
+                "open": len(self.planner.open_goals()),
+                "total": len(self.planner.goals),
+            },
+            "brain": self.brain.status() if self.brain is not None else None,
+            "last_thought": self.last_thought or None,
         }
 
     def shutdown(self):

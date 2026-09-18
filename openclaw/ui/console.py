@@ -39,6 +39,11 @@ class ConsoleUI:
             "scan": (self._cmd_scan, "Run security scan"),
             "harden": (self._cmd_harden, "Apply security hardening"),
             "goal": (self._cmd_goal, "Add a goal for the agent"),
+            "goals": (self._cmd_goals, "List goals and their state"),
+            "done": (self._cmd_done, "Mark a goal as completed"),
+            "think": (self._cmd_think, "Let the LLM brain plan and run one task"),
+            "ask": (self._cmd_ask, "Ask the LLM brain about this machine"),
+            "brain": (self._cmd_brain, "Show LLM brain status"),
             "cycle": (self._cmd_cycle, "Run one agent cycle"),
             "run": (self._cmd_run, "Run agent continuously"),
             "stop": (self._cmd_stop, "Stop continuous execution"),
@@ -173,6 +178,85 @@ class ConsoleUI:
             return
         self.agent.add_goal(args)
         print(f"Goal added: {args}")
+
+    def _cmd_goals(self, args):
+        goals = self.agent.planner.goals
+        if not goals:
+            print("No goals. Add one with: goal <description>")
+            return
+        print(f"\nGoals ({len(goals)}):")
+        for g in goals:
+            mark = "x" if g.get("completed") else " "
+            print(f"  [{mark}] P{g['priority']} {g['description']}")
+        print()
+
+    def _cmd_done(self, args):
+        if not args:
+            print("Usage: done <goal text>")
+            return
+        if self.agent.complete_goal(args):
+            print(f"Goal completed: {args}")
+        else:
+            print("No open goal matched.")
+
+    def _cmd_think(self, args):
+        print("Thinking...")
+        out = self.agent.think()
+        if "error" in out:
+            print(f"  {out['error']}")
+            return
+        print(f"  Cycle #{out['cycle']}")
+        print(f"  Reasoning: {out.get('reasoning')}")
+        if out.get("completed_goals"):
+            print(f"  Completed goals: {', '.join(out['completed_goals'])}")
+        if out.get("note"):
+            print(f"  Note: {out['note']}")
+        print(f"  Action: {out.get('action')}")
+        result = out.get("result")
+        if result is not None:
+            print(f"  Success: {result.get('success')}")
+            if result.get("error"):
+                print(f"  Error: {result['error']}")
+            output = result.get("output")
+            if isinstance(output, dict) and "stdout" in output:
+                print("  --- stdout ---")
+                print(output["stdout"].rstrip())
+                if output.get("stderr"):
+                    print("  --- stderr ---")
+                    print(output["stderr"].rstrip())
+        print()
+
+    def _cmd_ask(self, args):
+        if not args:
+            print("Usage: ask <question>")
+            return
+        print("Asking...")
+        print()
+        print(self.agent.ask(args))
+        print()
+
+    def _cmd_brain(self, args):
+        brain = self.agent.brain
+        if brain is None:
+            print("LLM brain: off (set llm.enabled: true and an API key)")
+            return
+        status = brain.status()
+        print(f"\nLLM brain: {status['model']} (effort={status['effort']})")
+        print(f"  Available:     {status['available']}")
+        if status.get("disabled_reason"):
+            print(f"  Disabled:      {status['disabled_reason']}")
+        print(f"  Key source:    {status.get('key_source')}")
+        print(f"  Calls/hour:    {status['calls_last_hour']} / {status['max_calls_per_hour']}")
+        stats = status["stats"]
+        print(f"  Calls:         {stats['calls']} ok={stats['ok']} errors={stats['errors']} "
+              f"refusals={stats['refusals']} truncated={stats['truncated']}")
+        print(f"  Tokens:        in={stats['input_tokens']} out={stats['output_tokens']} "
+              f"cache_read={stats['cache_read_input_tokens']}")
+        if status.get("last_error"):
+            print(f"  Last error:    {status['last_error']}")
+        if status.get("last_reasoning"):
+            print(f"  Last thought:  {status['last_reasoning']}")
+        print()
 
     def _cmd_cycle(self, args):
         print("Running agent cycle...")

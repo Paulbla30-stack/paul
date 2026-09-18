@@ -8,10 +8,15 @@ HTTP endpoint so operators (or other agents) can ask "what are you doing?"
 without a terminal.
 
 Endpoints (default 127.0.0.1:8471):
-    GET /health   -> {"ok": true, ...}
-    GET /status   -> agent.get_status() plus runner info
-    GET /memory   -> agent memory summary
-    GET /history  -> last 20 task results
+    GET  /health   -> {"ok": true, ...}
+    GET  /status   -> agent.get_status() plus runner info
+    GET  /memory   -> agent memory summary
+    GET  /history  -> last 20 task results
+    GET  /brain    -> LLM brain status (or {"brain": null})
+    GET  /goals    -> goals with completion state
+    POST /goal     -> body is the goal text (optional "?priority=N"); adds a goal
+    POST /think    -> one LLM planning step, executed; returns the outcome
+    POST /ask      -> body is a question; returns {"answer": ...}
 """
 
 import json
@@ -41,6 +46,8 @@ class HeadlessRunner:
         self.status_file = status_file
         self.started_at = time.time()
         self._stop = threading.Event()
+        # Serialises agent cycles between the loop and HTTP-triggered work.
+        self._lock = threading.RLock()
         self._server: Optional[ThreadingHTTPServer] = None
         self._server_thread: Optional[threading.Thread] = None
         self.last_cycle: dict = {}
@@ -102,6 +109,48 @@ class HeadlessRunner:
                     self._send(200, runner.agent.memory.get_summary())
                 elif path == "/history":
                     self._send(200, runner.agent.task_history[-20:])
+                elif path == "/brain":
+                    brain = runner.agent.brain
+                    self._send(200, {"brain": brain.status() if brain else None,
+                                     "last_thought": runner.agent.last_thought or None})
+                elif path == "/goals":
+                    self._send(200, runner.agent.planner.goals)
+                else:
+                    self._send(404, {"error": "not found"})
+
+            def _body(self) -> str:
+                length = int(self.headers.get("Content-Length") or 0)
+                return self.rfile.read(length).decode("utf-8", errors="replace") if length else ""
+
+            def do_POST(self):
+                raw_path, _, query = self.path.partition("?")
+                path = raw_path.rstrip("/") or "/"
+                body = self._body().strip()
+                if path == "/goal":
+                    if not body:
+                        return self._send(400, {"error": "goal text required in body"})
+                    priority = 5
+                    for part in query.split("&"):
+                        if part.startswith("priority="):
+                            try:
+                                priority = max(0, min(int(part[9:]), 10))
+                            except ValueError:
+                                pass
+                    runner.agent.add_goal(body, priority)
+                    runner._write_status_file()
+                    self._send(200, {"added": body, "priority": priority,
+                                     "open_goals": len(runner.agent.planner.open_goals())})
+                elif path == "/think":
+                    with runner._lock:
+                        out = runner.agent.think()
+                    runner._write_status_file()
+                    self._send(200 if "error" not in out else 409, out)
+                elif path == "/ask":
+                    if not body:
+                        return self._send(400, {"error": "question required in body"})
+                    with runner._lock:
+                        answer = runner.agent.ask(body)
+                    self._send(200, {"question": body, "answer": answer})
                 else:
                     self._send(404, {"error": "not found"})
 
@@ -150,7 +199,8 @@ class HeadlessRunner:
                       self.interval, self.max_cycles or "unlimited")
         try:
             while not self._stop.is_set():
-                result = self.agent.run_cycle()
+                with self._lock:
+                    result = self.agent.run_cycle()
                 result["timestamp"] = time.time()
                 self.last_cycle = result
                 cycles += 1
