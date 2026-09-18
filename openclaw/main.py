@@ -133,6 +133,8 @@ def load_config(path, extra_paths=()):
             "status_port": 8471,
             "status_host": "127.0.0.1",
             "status_file": "/run/openclaw/status.json",
+            "status_token": None,
+            "status_token_file": "/run/openclaw/token",
         },
         "goals": [],
         "llm": {
@@ -157,7 +159,8 @@ def load_config(path, extra_paths=()):
                 "timeout": 60,
                 "max_output": 4000,
                 "cwd": "/",
-                "deny_patterns": None,
+                "deny_patterns": None,          # extra patterns, added to the defaults
+                "replace_deny_patterns": False,
             },
         },
     }
@@ -291,7 +294,10 @@ class OpenClawSystem:
         except Exception as e:  # pragma: no cover - import guard
             self.log.warning("LLM brain unavailable: %s", e)
             return None
-        brain = ClaudeBrain(llm_cfg, self.log)
+        cloud = self.config.get("cloud") or {}
+        brain = ClaudeBrain(llm_cfg, self.log,
+                            cycle_interval=(cloud.get("cycle_interval")
+                                            if cloud.get("headless") else None))
         if brain.client is None:
             self.log.warning("LLM brain configured but not usable; rule planner only")
             return None
@@ -349,6 +355,8 @@ class OpenClawSystem:
                 status_port=(int(port) if port else None),
                 status_host=cloud.get("status_host", "127.0.0.1"),
                 status_file=cloud.get("status_file"),
+                token=cloud.get("status_token") or None,
+                token_file=cloud.get("status_token_file"),
             )
             self.runner.run()
         else:
@@ -420,6 +428,8 @@ def print_status(status, source):
                                                             or "backing off")
         print(f"  Brain:           {brain.get('model')} ({state}), "
               f"{brain.get('calls_last_hour')}/{brain.get('max_calls_per_hour')} calls this hour")
+        if not brain.get("available") and brain.get("unavailable_reason"):
+            print(f"  Brain reason:    {brain['unavailable_reason']}")
         if brain.get("last_reasoning"):
             print(f"  Last reasoning:  {brain['last_reasoning'][:200]}")
     else:

@@ -36,7 +36,9 @@ from openclaw.brain.credentials import (DEFAULT_KEY_FILE, fetch_ssm_parameter,
                                         install_key_file)
 
 DEFAULT_OUTPUT = "/etc/openclaw/cloud.yaml"
+DEFAULT_BASE_CONFIG = "/etc/openclaw/config.yaml"
 CONFIG_KEYS = ("agent", "goals", "cloud", "security", "hardware", "llm")
+LLM_DEFAULT_KEYS = ("api_key_ssm_parameter", "api_key_file")
 
 
 def _load_yaml_or_json(text: str) -> Optional[dict]:
@@ -132,6 +134,37 @@ def build_cloud_config(imds: IMDSClient) -> dict:
     return config
 
 
+def apply_base_llm_defaults(config: dict, base_config_path: Optional[str]) -> None:
+    """Take llm.api_key_ssm_parameter / api_key_file defaults from the
+    installed config.yaml when the overlay does not set them, so the knob
+    in config-aws.yaml is honoured as documented."""
+    doc = _load_yaml_or_json(_read(base_config_path)) if base_config_path else None
+    base_llm = (doc or {}).get("llm") if isinstance(doc, dict) else None
+    if not isinstance(base_llm, dict):
+        return
+    llm = config.setdefault("llm", {})
+    if not isinstance(llm, dict):
+        return
+    for key in LLM_DEFAULT_KEYS:
+        if not llm.get(key) and base_llm.get(key):
+            llm[key] = base_llm[key]
+
+
+def _read(path: str) -> str:
+    try:
+        with open(path) as f:
+            return f.read()
+    except OSError:
+        return ""
+
+
+def strip_secrets(config: dict) -> None:
+    """Never let an inline API key reach the world-readable overlay."""
+    llm = config.get("llm")
+    if isinstance(llm, dict):
+        llm.pop("api_key", None)
+
+
 def provision_llm_key(config: dict, key_file: str = DEFAULT_KEY_FILE,
                       fetch=fetch_ssm_parameter) -> str:
     """Move any LLM API key out of the overlay and into a 0600 key file.
@@ -199,16 +232,19 @@ def main(argv=None):
                         help="Where to store an LLM API key found in user data / SSM")
     parser.add_argument("--skip-llm-key", action="store_true",
                         help="Do not resolve or write the LLM API key")
+    parser.add_argument("--config", default=DEFAULT_BASE_CONFIG,
+                        help="Installed config.yaml; its llm.api_key_ssm_parameter / "
+                             "api_key_file are used when user data does not set them")
     args = parser.parse_args(argv)
 
     imds = IMDSClient(base_url=args.imds_url)
     config = build_cloud_config(imds)
+    apply_base_llm_defaults(config, args.config)
 
     key_note = "skipped"
     if not args.skip_llm_key and not args.print_only:
         key_note = provision_llm_key(config, args.key_file)
-    elif args.print_only and isinstance(config.get("llm"), dict):
-        config["llm"].pop("api_key", None)  # never print secrets
+    strip_secrets(config)  # whatever happened above, the overlay never carries a key
 
     if args.print_only:
         sys.stdout.write(dump_config(config))

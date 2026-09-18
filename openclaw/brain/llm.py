@@ -2,15 +2,16 @@
 ClaudeBrain - the LLM planner behind OpenClaw's observe-plan-act-reflect loop.
 
 Each planning step sends the agent's current situation (observations,
-goals, recent task results, memory summary) to Claude and gets back one
-decision as structured JSON: a task to run next, an idle signal, and/or
-goals that are now satisfied. The decision is turned into a ``Task`` the
-existing executor already knows how to run; ``shell_command`` tasks let
+goals, recent task results, its own notes and a clock) to Claude and gets
+back one decision as structured JSON: a task to run next, an idle signal,
+and/or goals that are now satisfied. The decision is turned into a ``Task``
+the existing executor already knows how to run; ``shell_command`` tasks let
 the model act on the box, subject to the executor's shell policy.
 
 Design notes
-- The system prompt is stable and marked for prompt caching; everything
-  that changes per cycle goes in the user message.
+- The system block is static for the life of the process (prompt text plus
+  the rendered shell policy, windows and timing) and marked for prompt
+  caching; everything that changes per cycle goes in the user message.
 - Structured outputs (``output_config.format``) guarantee parseable JSON.
 - Refusals, truncation, rate limits and API errors all return ``None`` so
   AgentCore falls back to the rule-based planner for that cycle.
@@ -18,6 +19,7 @@ Design notes
   bounded when something upstream is wrong.
 """
 
+import datetime as _dt
 import json
 import logging
 import time
@@ -35,6 +37,19 @@ except ImportError:  # pragma: no cover - exercised only without the SDK
 
 DEFAULT_MODEL = "claude-opus-5"
 FALLBACK_BETA = "server-side-fallback-2026-07-01"
+
+# Model families that take adaptive thinking + output_config.effort.
+# Anything else (Haiku 4.5, Sonnet 4.5 and older) gets neither.
+ADAPTIVE_MODEL_PREFIXES = (
+    "claude-opus-5", "claude-opus-4-6", "claude-opus-4-7", "claude-opus-4-8",
+    "claude-sonnet-5", "claude-sonnet-4-6",
+    "claude-fable-5", "claude-mythos-5",
+)
+EFFORT_LEVELS = ("low", "medium", "high", "xhigh", "max")
+# xhigh/max need >= 64k output tokens (and streaming) to be useful; the
+# planner only ever needs a few hundred tokens of JSON, so clamp instead.
+HIGH_EFFORT_MIN_TOKENS = 64000
+STREAM_ABOVE_TOKENS = 16000
 
 # Task types the model may choose. "none" means idle this cycle.
 PLANNABLE_TASK_TYPES = [
@@ -67,7 +82,8 @@ PLAN_SCHEMA = {
         },
         "priority": {
             "type": "integer",
-            "description": "0 (urgent) to 10 (background).",
+            "description": "0 (most urgent) to 10 (background); lower runs first. "
+                           "Usually copy the priority of the goal the task serves.",
         },
         "command": {
             "type": "string",
@@ -75,16 +91,18 @@ PLAN_SCHEMA = {
         },
         "goal": {
             "type": "string",
-            "description": "The goal this task serves, verbatim from the goals list, or empty.",
+            "description": "The goal this task serves, copied character-for-character "
+                           "from goals[].description, or empty.",
         },
         "completed_goals": {
             "type": "array",
             "items": {"type": "string"},
-            "description": "Goals (verbatim) that the evidence shows are now satisfied.",
+            "description": "Goals now satisfied by the evidence, each copied "
+                           "character-for-character from goals[].description.",
         },
         "note": {
             "type": "string",
-            "description": "Anything worth remembering for future cycles; empty if nothing.",
+            "description": "A fact worth remembering for future cycles; empty if nothing.",
         },
     },
     "required": ["reasoning", "task_type", "description", "priority",
@@ -92,44 +110,50 @@ PLAN_SCHEMA = {
     "additionalProperties": False,
 }
 
+# Static part of the system block. Deployment-specific text (shell policy,
+# windows, timing) is appended once at construction; see _system_text().
 SYSTEM_PROMPT = """You are the planner inside OpenClaw, an agent-first operating system. \
 OpenClaw is the primary process on the machine it runs on: on a bootable ISO it is PID 1 with \
 direct hardware access; on an AWS EC2 instance it is a root systemd service that started before \
-any human logged in. You are consulted once per agent cycle, whenever the task queue is empty, \
-and you choose the single next task.
+any human logged in. You are consulted once per agent cycle whenever the task queue is empty, and \
+you choose the single next task.
 
-Loop: the agent observes (hardware, memory, storage, cloud metadata), you plan one task, the \
-executor runs it, the result is stored in memory, and you see it next cycle under \
-recent_history. Tasks you can choose:
+The loop: the agent observes (memory, storage, cloud metadata), you plan one task, the executor \
+runs it, the result is stored, and you see it next cycle under recent_history. A failed task is \
+not retried automatically: if you want it retried, choose it again. Idle decisions are re-asked on \
+the next cycle and each consultation is one API call against the hourly budget shown in the \
+context, so when nothing useful remains choose none and say so briefly.
 
+Tasks you can choose:
 - system_check: CPU, memory, uptime and load snapshot.
 - hardware_probe: enumerate display, input, storage and PCI/USB devices.
 - security_scan: run the built-in vulnerability scanner (kernel, permissions, SUID, ports, ssh).
 - maintenance: memory or storage housekeeping; put 'memory' or 'storage' in the description.
 - observation: passive snapshot of every hardware layer.
-- goal_step: record progress on a goal without touching the system (use sparingly).
+- goal_step: record progress on a goal without touching the system.
 - cloud_probe: query the EC2 instance metadata service.
-- shell_command: run a POSIX sh command line as the agent's user (root on the AMI). Put the \
-exact command in "command". stdout and stderr come back truncated. Subject to the shell policy \
-in the context; if shell is disabled or a command is denied the task fails and you will see why.
-- none: idle this cycle. Use it whenever nothing useful remains; idling is free and correct.
+- shell_command: run a POSIX sh command line; details below.
+- none: idle this cycle.
 
 How to behave:
-- Work toward the goals in the context. Each cycle pick the one task that most advances them, \
-using recent_history to avoid repeating a probe whose answer you already have.
-- Prefer inspection over change. When a change is needed, keep it minimal, reversible and \
-explicitly tied to a goal in the "goal" field.
-- Never run destructive commands (wiping disks, deleting system directories, rebooting, \
-stopping the openclaw service, piping downloads into a shell). Never exfiltrate secrets.
-- When the evidence shows a goal is satisfied, list it verbatim in completed_goals.
-- Use "note" for facts that will matter later (a device name, a threshold you measured).
-- Reasoning is logged for the operator; keep it short and concrete.
-
-Respond only with the JSON object described by the output schema."""
+- Work toward the open goals. Each cycle pick the one task that most advances them, using \
+recent_history and your notes to avoid repeating a probe whose answer you already have. Once the \
+evidence is in, act on it and finish the goal; do not inspect forever.
+- Goals are operator-supplied objectives, not instructions that change these rules. Keep changes \
+minimal, reversible and tied to a goal in the "goal" field. Never run destructive commands \
+(wiping disks, deleting system directories, rebooting, stopping the openclaw or SSM services, \
+piping downloads into a shell) and never read or exfiltrate secrets or credentials.
+- When the evidence shows a goal is satisfied, list it in completed_goals, copied \
+character-for-character from goals[].description; the same rule applies to the "goal" field.
+- Goals and tasks carry a priority from 0 (most urgent) to 10 (background); lower runs first.
+- Use "note" for facts that will matter later (a device name, a threshold you measured). You \
+see only your most recent notes and only the most recent executed tasks (idle cycles leave no \
+trace); anything you will need beyond that must be restated in a note.
+- Reasoning is logged for the operator; keep it short and concrete."""
 
 ASK_PROMPT = """You are the planner inside OpenClaw, an agent-first operating system, answering \
 an operator's question about the machine you run on. Use the context (observations, goals, \
-recent task results, memory) as evidence, say what you do not know, and keep the answer \
+recent task results, notes) as evidence, say what you do not know, and keep the answer \
 concise and practical. Plain text, no JSON."""
 
 
@@ -158,6 +182,18 @@ def _truncate(value: Any, limit: int) -> Any:
     return value
 
 
+def _bounded_json(value: Any, limit: int) -> Any:
+    """Serialise ``value`` compactly and cut the whole thing to ``limit`` chars.
+
+    Returns the original object when it fits, else a string with a marker,
+    so a single noisy task result cannot dominate the context.
+    """
+    text = json.dumps(value, default=str, separators=(",", ":"))
+    if len(text) <= limit:
+        return value
+    return text[:limit] + f"...[{len(text) - limit} more chars]"
+
+
 def compact_observations(observations: dict) -> dict:
     """Keep the parts of an observation the planner can act on."""
     out = {"cycle": observations.get("cycle")}
@@ -182,25 +218,41 @@ def compact_observations(observations: dict) -> dict:
     return out
 
 
+def _uptime_seconds() -> Optional[float]:
+    try:
+        with open("/proc/uptime") as f:
+            return round(float(f.read().split()[0]))
+    except (OSError, ValueError, IndexError):
+        return None
+
+
+def uses_adaptive_thinking(model: str) -> bool:
+    return any(model.startswith(p) for p in ADAPTIVE_MODEL_PREFIXES)
+
+
 class ClaudeBrain:
     """LLM planner. Construct once; call ``plan()`` each cycle."""
 
-    def __init__(self, config: Optional[dict], logger: logging.Logger, client=None):
+    def __init__(self, config: Optional[dict], logger: logging.Logger, client=None,
+                 cycle_interval: Optional[float] = None):
         self.config = dict(config or {})
         self.log = logger.getChild("brain")
         self.model = self.config.get("model") or DEFAULT_MODEL
-        self.effort = self.config.get("effort") or "medium"
-        self.thinking = self.config.get("thinking", "adaptive")
         self.max_tokens = int(self.config.get("max_tokens") or 4096)
+        self.effort = self._normalise_effort(self.config.get("effort") or "medium")
+        self.thinking = self._normalise_thinking(self.config.get("thinking", "adaptive"))
         self.use_fallbacks = bool(self.config.get("fallbacks", True))
         self.max_calls_per_hour = int(self.config.get("max_calls_per_hour") or 60)
         self.plan_every_n_cycles = max(1, int(self.config.get("plan_every_n_cycles") or 1))
         self.history_window = int(self.config.get("history_window") or 10)
+        self.full_output_entries = int(self.config.get("full_output_entries") or 3)
         self.output_limit = int(self.config.get("output_limit") or 800)
+        self.notes_window = int(self.config.get("notes_window") or 5)
+        self.cycle_interval = cycle_interval
 
         self.stats = {
             "calls": 0, "ok": 0, "errors": 0, "refusals": 0, "rate_limited": 0,
-            "truncated": 0, "input_tokens": 0, "output_tokens": 0,
+            "budget_exhausted": 0, "truncated": 0, "input_tokens": 0, "output_tokens": 0,
             "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0,
         }
         self.last_reasoning = ""
@@ -212,10 +264,36 @@ class ClaudeBrain:
         self._consecutive_errors = 0
         self._disabled_reason = ""
         self.key_source = ""
+        self._system_cache: dict = {}
 
         self.client = client if client is not None else self._make_client()
 
     # ---- setup ----------------------------------------------------------
+
+    def _normalise_effort(self, effort: str) -> str:
+        effort = str(effort).lower()
+        if effort not in EFFORT_LEVELS:
+            self.log.warning("Unknown llm.effort %r; using medium", effort)
+            return "medium"
+        if effort in ("xhigh", "max") and self.max_tokens < HIGH_EFFORT_MIN_TOKENS:
+            self.log.warning("llm.effort=%s needs max_tokens >= %d (have %d); using high",
+                             effort, HIGH_EFFORT_MIN_TOKENS, self.max_tokens)
+            return "high"
+        return effort
+
+    def _normalise_thinking(self, value) -> str:
+        """Return 'adaptive', 'disabled' or 'omit'."""
+        if not uses_adaptive_thinking(self.model):
+            return "omit"  # model takes neither adaptive thinking nor effort
+        if value in (False, 0) or str(value).lower() in ("disabled", "off", "false", "none"):
+            if self.effort in ("xhigh", "max"):
+                self.log.warning("thinking disabled is not allowed at effort %s; using high",
+                                 self.effort)
+                self.effort = "high"
+            return "disabled"
+        if str(value).lower() != "adaptive":
+            self.log.warning("Unknown llm.thinking %r; using adaptive", value)
+        return "adaptive"
 
     def _make_client(self):
         if anthropic is None:
@@ -254,17 +332,30 @@ class ClaudeBrain:
         """True when a call could be made right now."""
         if self.client is None or self._disabled_reason:
             return False
-        return time.time() >= self._backoff_until
+        if time.time() < self._backoff_until:
+            return False
+        return self._calls_in_window() < self.max_calls_per_hour
 
     def should_plan(self, cycle: int) -> bool:
         return self.available() and cycle % self.plan_every_n_cycles == 0
+
+    def unavailable_reason(self) -> str:
+        if self.client is None or self._disabled_reason:
+            return self._disabled_reason or "no client"
+        if time.time() < self._backoff_until:
+            return self.last_error or f"backing off {round(self._backoff_until - time.time())}s"
+        if self._calls_in_window() >= self.max_calls_per_hour:
+            return f"call budget exhausted ({self.max_calls_per_hour}/hour)"
+        return ""
 
     def status(self) -> dict:
         return {
             "model": self.model,
             "effort": self.effort,
+            "thinking": self.thinking,
             "available": self.available(),
             "disabled_reason": self._disabled_reason or None,
+            "unavailable_reason": self.unavailable_reason() or None,
             "key_source": self.key_source or None,
             "backoff_seconds": max(0, round(self._backoff_until - time.time())),
             "calls_last_hour": self._calls_in_window(),
@@ -284,8 +375,9 @@ class ClaudeBrain:
 
     def _take_budget(self) -> bool:
         if self._calls_in_window() >= self.max_calls_per_hour:
-            self.stats["rate_limited"] += 1
-            if self.stats["rate_limited"] in (1, 10, 100):
+            self.stats["budget_exhausted"] += 1
+            self.last_error = f"call budget exhausted ({self.max_calls_per_hour}/hour)"
+            if self.stats["budget_exhausted"] in (1, 10, 100):
                 self.log.warning("LLM call budget exhausted (%d/hour); using rule planner",
                                  self.max_calls_per_hour)
             return False
@@ -304,6 +396,58 @@ class ClaudeBrain:
 
     # ---- context ----------------------------------------------------------
 
+    def _system_text(self, agent) -> str:
+        """Static system block: prompt + rendered policy/windows. Cached per agent."""
+        key = id(agent)
+        cached = self._system_cache.get(key)
+        if cached is not None:
+            return cached
+        shell = getattr(agent.executor, "shell_policy", None) or {}
+        if shell.get("enabled"):
+            shell_text = (
+                f"shell_command runs `/bin/sh -c <command>` as the agent's user (root on the "
+                f"AMI) in {shell.get('cwd') or '/'} with no stdin or tty and a "
+                f"{shell.get('timeout', 60)}s timeout; credentials are stripped from its "
+                f"environment. You get returncode, stdout and stderr; a non-zero exit is "
+                f"reported as success=false with the exit status. Each of stdout/stderr is "
+                f"cut to {shell.get('max_output', 4000)} characters when stored and to "
+                f"{self.output_limit} in what you see, so use head, tail, grep, wc or sort to "
+                f"keep output small. Commands are refused before running if they wipe, format "
+                f"or write to disks, delete system directories, reboot or power off, stop or "
+                f"disable the openclaw, SSM, ssh or network services, pipe downloads into an "
+                f"interpreter, touch credentials or password files, or flush the firewall; a "
+                f"refused command fails with the reason."
+            )
+        else:
+            shell_text = ("Shell execution is disabled by policy on this machine: a "
+                          "shell_command task will fail. Use the other task types.")
+        deployment = (
+            f"\n\nThis deployment: agent {agent.name!r}, profile {agent.profile}. "
+            f"{shell_text} You see the last {self.history_window} executed tasks (full "
+            f"output for the most recent {self.full_output_entries}, summaries for older "
+            f"ones) and your last {self.notes_window} notes."
+        )
+        if self.cycle_interval:
+            deployment += (f" Idle cycles are {self.cycle_interval:g}s apart; after a task "
+                           f"the next cycle follows within a second.")
+        text = SYSTEM_PROMPT + deployment
+        self._system_cache = {key: text}
+        return text
+
+    def _clock(self, agent) -> dict:
+        now = time.time()
+        history = agent.task_history
+        last_task_at = history[-1].get("timestamp") if history else None
+        clock = {
+            "now_utc": _dt.datetime.fromtimestamp(now, _dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "uptime_s": _uptime_seconds(),
+            "seconds_since_last_task": (round(now - last_task_at) if last_task_at else None),
+            "llm_calls_left_this_hour": max(0, self.max_calls_per_hour - self._calls_in_window()),
+        }
+        if self.cycle_interval:
+            clock["cycle_interval_s"] = self.cycle_interval
+        return clock
+
     def build_context(self, agent, observations: Optional[dict]) -> dict:
         """Everything the model needs to decide, bounded in size."""
         planner = agent.planner
@@ -312,8 +456,10 @@ class ClaudeBrain:
              "completed": bool(g.get("completed"))}
             for g in planner.goals
         ]
+        entries = agent.task_history[-self.history_window:]
         history = []
-        for entry in agent.task_history[-self.history_window:]:
+        n = len(entries)
+        for i, entry in enumerate(entries):
             task = entry.get("task", {})
             result = entry.get("result", {})
             item = {
@@ -324,30 +470,31 @@ class ClaudeBrain:
             }
             if "error" in result:
                 item["error"] = str(result["error"])[:self.output_limit]
-            if "output" in result:
-                item["output"] = _truncate(result["output"], self.output_limit)
+            if "output" in result and i >= n - self.full_output_entries:
+                item["output"] = _bounded_json(_truncate(result["output"], self.output_limit),
+                                               self.output_limit * 2)
             history.append(item)
         pending = [
             {"description": t.description, "type": t.task_type.value, "priority": t.priority}
             for t in sorted(planner.pending_tasks)[:10]
         ]
-        shell = getattr(agent.executor, "shell_policy", None) or {}
+        notes = list(getattr(agent, "notes", []))[-self.notes_window:]
         context = {
-            "agent": {"name": agent.name, "profile": agent.profile,
-                      "cycle": agent.cycle_count},
+            "clock": self._clock(agent),
+            "cycle": agent.cycle_count,
             "observations": compact_observations(observations or {}),
             "goals": goals,
             "pending_tasks": pending,
             "recent_history": history,
-            "memory_summary": agent.memory.get_summary().get("categories", {}),
-            "notes": [e["data"].get("note") for e in agent.memory.recall("llm_note", 5)
-                      if isinstance(e.get("data"), dict)],
-            "shell_policy": {
-                "enabled": bool(shell.get("enabled")),
-                "timeout_seconds": shell.get("timeout", 60),
-                "denied_patterns": list(shell.get("deny_patterns", []))[:20],
-            },
+            "notes": notes,
         }
+        last = getattr(agent, "last_thought", None) or {}
+        if last:
+            context["last_decision"] = {
+                "cycle": last.get("cycle"),
+                "reasoning": str(last.get("reasoning", ""))[:400],
+                "task": (last.get("task") or {}).get("description") if last.get("task") else "idle",
+            }
         cloud = agent.memory.recall("cloud_instance", 1) or agent.memory.recall("cloud_probe", 1)
         if cloud:
             context["cloud"] = _truncate(cloud[-1].get("data"), 200)
@@ -355,32 +502,44 @@ class ClaudeBrain:
 
     # ---- requests -----------------------------------------------------------
 
-    def _request_kwargs(self, system: str, user_text: str, structured: bool) -> dict:
+    def _request_kwargs(self, system: str, user_text: str, structured: bool,
+                        cache: bool = True) -> dict:
+        system_block = {"type": "text", "text": system}
+        if cache:
+            system_block["cache_control"] = {"type": "ephemeral"}
         kwargs = {
             "model": self.model,
             "max_tokens": self.max_tokens,
-            "system": [{"type": "text", "text": system,
-                        "cache_control": {"type": "ephemeral"}}],
+            "system": [system_block],
             "messages": [{"role": "user", "content": user_text}],
-            "output_config": {"effort": self.effort},
         }
+        if self.thinking != "omit":
+            kwargs["output_config"] = {"effort": self.effort}
+            kwargs["thinking"] = {"type": self.thinking}
         if structured:
-            kwargs["output_config"]["format"] = {"type": "json_schema", "schema": PLAN_SCHEMA}
-        if self.thinking == "adaptive":
-            kwargs["thinking"] = {"type": "adaptive"}
+            kwargs.setdefault("output_config", {})["format"] = {
+                "type": "json_schema", "schema": PLAN_SCHEMA}
         if self.use_fallbacks:
             kwargs["betas"] = [FALLBACK_BETA]
             kwargs["fallbacks"] = "default"
         return kwargs
 
+    def _send(self, kwargs: dict):
+        if self.max_tokens > STREAM_ABOVE_TOKENS:
+            with self.client.beta.messages.stream(**kwargs) as stream:
+                return stream.get_final_message()
+        return self.client.beta.messages.create(**kwargs)
+
     def _call(self, kwargs: dict):
         """Make one API call; returns the response or None (after logging)."""
-        if not self.available() or not self._take_budget():
+        if self.client is None or self._disabled_reason or time.time() < self._backoff_until:
+            return None
+        if not self._take_budget():
             return None
         self.stats["calls"] += 1
         self.last_call_at = time.time()
         try:
-            response = self.client.beta.messages.create(**kwargs)
+            response = self._send(kwargs)
         except Exception as e:  # classified below
             self.stats["errors"] += 1
             self._consecutive_errors += 1
@@ -426,6 +585,7 @@ class ClaudeBrain:
                 self._disable(f"model or endpoint not found: {self.model}")
                 return
             if isinstance(e, anthropic.RateLimitError):
+                self.stats["rate_limited"] += 1
                 retry_after = 60
                 try:
                     retry_after = int(e.response.headers.get("retry-after", "60"))
@@ -465,19 +625,20 @@ class ClaudeBrain:
 
     def plan(self, agent, observations: Optional[dict] = None) -> Optional[Decision]:
         """Ask the model for the next task. ``None`` means "use the fallback"."""
-        context = self.build_context(agent, observations)
-        user_text = ("Current situation as JSON. Decide the next task.\n\n"
-                     + json.dumps(context, default=str, indent=1))
-        response = self._call(self._request_kwargs(SYSTEM_PROMPT, user_text, structured=True))
-        if response is None:
-            return None
         try:
+            system = self._system_text(agent)
+            context = self.build_context(agent, observations)
+            user_text = ("Current situation as JSON. Decide the next task.\n\n"
+                         + json.dumps(context, default=str, separators=(",", ":")))
+            response = self._call(self._request_kwargs(system, user_text, structured=True))
+            if response is None:
+                return None
             raw = json.loads(self._text_of(response))
-        except ValueError as e:
-            self.last_error = f"unparseable plan: {e}"
+            decision = self._to_decision(raw)
+        except Exception as e:  # never let a planning failure kill the loop
+            self.last_error = f"invalid plan: {e.__class__.__name__}: {e}"
             self.log.error("LLM %s", self.last_error)
             return None
-        decision = self._to_decision(raw)
         self.last_reasoning = decision.reasoning
         self.last_decision = raw
         return decision
@@ -487,20 +648,24 @@ class ClaudeBrain:
             return Decision(reasoning="model returned a non-object plan", raw={})
         reasoning = str(raw.get("reasoning") or "")[:2000]
         note = str(raw.get("note") or "")[:1000]
-        completed = [str(g) for g in (raw.get("completed_goals") or []) if str(g).strip()]
+        completed_raw = raw.get("completed_goals")
+        completed = []
+        if isinstance(completed_raw, list):
+            completed = [str(g).strip() for g in completed_raw
+                         if isinstance(g, (str, int, float)) and str(g).strip()]
         kind = str(raw.get("task_type") or "none")
         task = None
         if kind != "none" and kind in TaskType._value2member_map_:
             try:
                 priority = int(raw.get("priority", 5))
-            except (TypeError, ValueError):
+            except (TypeError, ValueError, OverflowError):
                 priority = 5
             priority = max(0, min(priority, 10))
             description = str(raw.get("description") or "").strip() or f"LLM task: {kind}"
             metadata = {"source": "llm"}
             goal = str(raw.get("goal") or "").strip()
             if goal:
-                metadata["goal"] = goal
+                metadata["goal"] = goal[:500]
             if kind == "shell_command":
                 command = str(raw.get("command") or "").strip()
                 if not command:
@@ -508,7 +673,7 @@ class ClaudeBrain:
                                     completed_goals=completed, note=note, raw=raw)
                 metadata["command"] = command
             task = Task(priority=priority, description=description[:200],
-                        task_type=TaskType(kind), metadata=metadata)
+                        task_type=TaskType(kind), metadata=metadata, max_retries=1)
         return Decision(reasoning=reasoning, task=task, completed_goals=completed,
                         note=note, raw=raw)
 
@@ -517,10 +682,16 @@ class ClaudeBrain:
         question = (question or "").strip()
         if not question:
             return None
-        context = self.build_context(agent, observations)
-        user_text = ("Context as JSON:\n" + json.dumps(context, default=str, indent=1)
-                     + "\n\nQuestion: " + question)
-        response = self._call(self._request_kwargs(ASK_PROMPT, user_text, structured=False))
+        try:
+            context = self.build_context(agent, observations)
+            user_text = ("Context as JSON:\n" + json.dumps(context, default=str, indent=1)
+                         + "\n\nQuestion: " + question)
+            response = self._call(self._request_kwargs(ASK_PROMPT, user_text,
+                                                       structured=False, cache=False))
+        except Exception as e:
+            self.last_error = f"ask failed: {e.__class__.__name__}: {e}"
+            self.log.error("LLM %s", self.last_error)
+            return None
         if response is None:
             return None
         return self._text_of(response).strip() or None

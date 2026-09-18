@@ -351,10 +351,18 @@ class TestHeadlessRunner(unittest.TestCase):
         os.environ["OPENCLAW_IMDS_URL"] = "http://127.0.0.1:9"
         try:
             agent = self._agent()
-            runner = HeadlessRunner(agent, logging.getLogger("test"),
-                                    interval=0, max_cycles=0, status_port=0)
-            port = runner.start_status_server()
-            self.assertIsNotNone(port)
+            with tempfile.TemporaryDirectory() as tmp:
+                token_file = os.path.join(tmp, "token")
+                runner = HeadlessRunner(agent, logging.getLogger("test"),
+                                        interval=0, max_cycles=0, status_port=0,
+                                        token_file=token_file)
+                port = runner.start_status_server()
+                self.assertIsNotNone(port)
+                with open(token_file) as f:
+                    token = f.read().strip()
+                self.assertEqual(token, runner.token)
+                self.assertEqual(oct(os.stat(token_file).st_mode & 0o777), "0o600")
+            auth = {"Authorization": f"Bearer {token}"}
             try:
                 agent.run_cycle()
                 base = f"http://127.0.0.1:{port}"
@@ -362,12 +370,21 @@ class TestHeadlessRunner(unittest.TestCase):
                     health = json.loads(r.read())
                 with urllib.request.urlopen(base + "/status", timeout=2) as r:
                     status = json.loads(r.read())
-                with urllib.request.urlopen(base + "/history", timeout=2) as r:
+                with urllib.request.urlopen(
+                        urllib.request.Request(base + "/history", headers=auth), timeout=2) as r:
                     history = json.loads(r.read())
-                with urllib.request.urlopen(base + "/memory", timeout=2) as r:
+                with urllib.request.urlopen(
+                        urllib.request.Request(base + "/memory", headers=auth), timeout=2) as r:
                     memory = json.loads(r.read())
+                for path in ("/history", "/memory", "/brain", "/goals"):
+                    try:
+                        urllib.request.urlopen(base + path, timeout=2)
+                        self.fail("expected 401 for " + path)
+                    except urllib.error.HTTPError as e:
+                        self.assertEqual(e.code, 401)
                 try:
-                    urllib.request.urlopen(base + "/nope", timeout=2)
+                    urllib.request.urlopen(
+                        urllib.request.Request(base + "/nope", headers=auth), timeout=2)
                     self.fail("expected 404")
                 except urllib.error.HTTPError as e:
                     self.assertEqual(e.code, 404)

@@ -81,7 +81,11 @@ def install_key_file(key: str, path: str = DEFAULT_KEY_FILE) -> str:
     if directory:
         os.makedirs(directory, exist_ok=True)
     tmp = path + ".tmp"
-    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    try:
+        os.unlink(tmp)  # stale or planted leftovers; never write through them
+    except FileNotFoundError:
+        pass
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
     try:
         with os.fdopen(fd, "w") as f:
             f.write(key.strip() + "\n")

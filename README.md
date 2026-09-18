@@ -119,17 +119,30 @@ PYTHONPATH=. python3 -m openclaw.main --no-hardware --llm   # console: think / a
 Key points:
 
 - **Model**: `claude-opus-5` by default (`llm.model`, `--model`, `OPENCLAW_MODEL`).
-  Adaptive thinking is on; `llm.effort` (default `medium`) sets how hard it thinks.
+  Adaptive thinking is on (`llm.thinking: adaptive` or `disabled`); `llm.effort`
+  (default `medium`) sets how hard it thinks. `xhigh` and `max` need
+  `llm.max_tokens` of at least 64000 and are clamped to `high` otherwise. Models
+  without adaptive thinking (Haiku 4.5 and older) get neither thinking nor effort.
   Server-side refusal fallbacks are enabled so a declined request is re-run on
   Anthropic's recommended substitute; set `llm.fallbacks: false` to turn that off.
 - **Cost control**: `llm.max_calls_per_hour` (default 60) is a hard budget and
   `llm.plan_every_n_cycles` thins the calls; beyond either the rule planner runs.
-  The system prompt is cached, so per-cycle cost is mostly the changing context.
+  The system block (prompt plus rendered shell policy and windows) is static and
+  cached, so per-cycle cost is mostly the changing context, which is bounded:
+  full output for the last three tasks, summaries for older ones.
 - **Acting**: `llm.shell.enabled` lets the brain run commands as the agent's user.
-  A built-in deny list blocks wiping disks, rebooting, stopping the agent, piping
-  downloads into a shell and similar; it is a guard rail, not a sandbox.
-  Timeouts and output limits are configurable. It is off by default and on in
-  the AMI profile.
+  A built-in deny list blocks wiping or formatting disks, deleting system
+  directories, rebooting, stopping the agent or the SSM, ssh or network
+  services, piping downloads into an interpreter, touching credentials and
+  flushing the firewall. Commands run in their own process group (a timeout kills
+  everything they started) with credentials scrubbed from the environment.
+  `llm.shell.deny_patterns` adds to the built-in list; set
+  `replace_deny_patterns: true` to use only your own. It is a guard rail, not a
+  sandbox. Off by default and on in the AMI profile.
+- **A failed brain task is not retried** by the agent: the brain sees the failure
+  next cycle and decides. Goals given through user data, tags, `POST /goal` or the
+  console are treated as instructions from the operator, so anyone who can set
+  them can steer a root shell; protect those channels accordingly.
 - **Credentials**: `ANTHROPIC_API_KEY`, then `llm.api_key`, then the 0600 file
   `llm.api_key_file`. On AWS the bootstrap fetches `llm.api_key_ssm_parameter`
   from SSM Parameter Store with the instance role. No key means the brain is
@@ -158,7 +171,13 @@ Flags: `--cycle-interval`, `--max-cycles`, `--status-port` (0 disables),
 
 The status endpoint also accepts `POST /goal` (body is the goal text),
 `POST /think` (one LLM planning step, executed) and `POST /ask`, and serves
-`GET /brain` and `GET /goals`.
+`GET /brain`, `GET /goals`, `GET /history` and `GET /memory`. Everything
+except `/health` and `/status` needs the runner token, generated at start and
+written 0600 to `cloud.status_token_file` (default `/run/openclaw/token`):
+
+```bash
+curl -s -H "Authorization: Bearer $(sudo cat /run/openclaw/token)" localhost:8471/brain
+```
 
 ## Configuration
 

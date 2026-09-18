@@ -39,6 +39,8 @@ cloud:
   status_host: "127.0.0.1"   # loopback only; use SSM/SSH to reach it
   status_port: 8471
   status_file: "/run/openclaw/status.json"
+  status_token: null         # null = generated at start and written to the file below
+  status_token_file: "/run/openclaw/token"   # 0600; needed for every call but /health, /status
 
 goals: []                    # add goals via user data or the openclaw:goal tag
 
@@ -53,12 +55,14 @@ llm:
   enabled: true
   provider: anthropic
   model: claude-opus-5
-  effort: medium             # low | medium | high | xhigh | max
-  thinking: adaptive
+  effort: medium             # low | medium | high (xhigh/max need max_tokens >= 64000)
+  thinking: adaptive         # adaptive | disabled (ignored on models without adaptive thinking)
   max_tokens: 4096
   fallbacks: true            # server-side refusal fallbacks (Claude API only)
   api_key_file: /etc/openclaw/anthropic.key
-  api_key_ssm_parameter: null   # e.g. /openclaw/anthropic-api-key (SecureString)
+  api_key_ssm_parameter: null   # e.g. /openclaw/anthropic-api-key (SecureString); the
+                                # bootstrap reads this as the default when user data
+                                # and the openclaw:llm-key-parameter tag set nothing
   max_calls_per_hour: 60     # hard budget; rule planner takes over beyond it
   plan_every_n_cycles: 1
   history_window: 10
@@ -67,4 +71,5 @@ llm:
     timeout: 60
     max_output: 4000
     cwd: /
-    deny_patterns: null      # null = built-in list (see openclaw/agent/executor.py)
+    deny_patterns: null      # extra patterns, ADDED to the built-in list
+    replace_deny_patterns: false   # true = use only deny_patterns (not recommended)

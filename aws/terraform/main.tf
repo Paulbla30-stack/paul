@@ -83,7 +83,7 @@ resource "aws_iam_role_policy" "llm_key" {
     Statement = [{
       Effect   = "Allow"
       Action   = ["ssm:GetParameter"]
-      Resource = "arn:aws:ssm:${var.region}:${data.aws_caller_identity.current.account_id}:parameter${var.anthropic_api_key_ssm_parameter}"
+      Resource = "arn:aws:ssm:${var.region}:${data.aws_caller_identity.current.account_id}:parameter/${trimprefix(var.anthropic_api_key_ssm_parameter, "/")}"
     }]
     # A SecureString under the default aws/ssm key needs nothing more; a
     # customer-managed KMS key also needs kms:Decrypt on that key.

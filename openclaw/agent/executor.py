@@ -17,21 +17,60 @@ from openclaw.agent.memory import AgentMemory
 # Guard rails for LLM-planned shell commands. This is a deny-list, not a
 # sandbox: the agent runs with full access by design, these just stop the
 # obviously catastrophic or self-defeating commands from ever running.
+# Patterns are matched case-insensitively against the whole command line
+# and against each simple command after splitting on ; && || | and newlines.
+_FLAGS = r"(?:--?[\w=.,-]+\s+)*"          # any run of short/long options
+_CMD = r"(?:^|[;&|(]\s*)(?:sudo\s+(?:-\S+\s+)*)?(?:\S*/)?"  # command position
+_SYS_DIRS = (r"/(?:etc|usr|var|boot|bin|sbin|lib\S*|root|home|opt|proc|sys|dev|srv"
+             r"|etc/openclaw|etc/systemd\S*|usr/lib/openclaw)?")
+_ROOT_TARGET = r"(?:['\"]?)(?:" + _SYS_DIRS + r"|~|\$HOME|/\*)(?:/\*?)?(?:['\"]?)(?=[\s;&|>)]|$)"
+_BLOCK_DEV = r"/dev/(?:sd|nvme|xvd|vd|hd|mapper/|md|disk/|loop|mem\b|kmem\b|port\b)"
+_PROTECTED_UNITS = (r"(?:openclaw|openclaw-bootstrap|amazon-ssm-agent|snap\.amazon-ssm-agent\S*"
+                    r"|sshd?|systemd-networkd|systemd-resolved|NetworkManager|cloud-init\S*)")
+
 DEFAULT_SHELL_DENY_PATTERNS = [
-    r"\brm\s+(-[a-zA-Z]*\s+)*(/|/\*|~|\$HOME|/etc|/usr|/var|/boot|/bin|/sbin|/lib\S*)(\s|$)",
-    r"\bmkfs(\.|\s)",
-    r"\bdd\b.*\bof=/dev/",
-    r">\s*/dev/(sd|nvme|xvd|vd|hd|mem|kmem)",
-    r"\b(shutdown|reboot|halt|poweroff)\b",
-    r"\binit\s+[06]\b",
-    r"\bsystemctl\s+(stop|disable|mask|kill)\s+.*openclaw",
-    r"\b(pkill|killall)\s+.*(openclaw|python)",
-    r":\(\)\s*\{",
-    r"\bchmod\s+(-R\s+)?[0-7]*777\s+/(\s|$)",
-    r"\b(curl|wget)\b.*\|\s*(sudo\s+)?(ba|z|da)?sh\b",
-    r"\b(iptables|nft)\b.*(-F|flush)",
-    r"\bpasswd\b|\buseradd\b|\buserdel\b|/etc/shadow|/etc/sudoers",
-    r"\bcrontab\s+-r\b",
+    # --- filesystem wipes ---
+    _CMD + r"rm\s+" + _FLAGS + _ROOT_TARGET,
+    r"--no-preserve-root",
+    _CMD + r"find\s+" + _ROOT_TARGET.replace(r"(?=[\s;&|>)]|$)", r"(?=\s)") + r".*(?:-delete|-exec\s+\S*rm\b)",
+    _CMD + r"(?:chmod|chown|chgrp)\s+" + _FLAGS + r".*?-R.*?\s" + _ROOT_TARGET,
+    _CMD + r"(?:chmod|chown|chgrp)\s+-R\s",
+    # --- block devices ---
+    _CMD + r"(?:mkfs\S*|mke2fs|mkswap|wipefs|blkdiscard|sgdisk|sfdisk|parted|fdisk|shred|badblocks)\b",
+    _CMD + r"dd\b.*\bof=" + _BLOCK_DEV,
+    r">{1,2}\s*['\"]?" + _BLOCK_DEV,
+    _CMD + r"(?:cat|cp|tee|mv|install)\b.*\s['\"]?" + _BLOCK_DEV,
+    # --- boot / critical files ---
+    r">{1,2}\s*['\"]?/(?:boot/|etc/fstab|etc/ld\.so\.preload|proc/sysrq-trigger|proc/sys/kernel/)",
+    _CMD + r"(?:sed\s+-i|tee|truncate|cp|mv)\b.*\s['\"]?/(?:boot/|etc/fstab|etc/ld\.so\.preload)",
+    r"/proc/sysrq-trigger",
+    # --- power / init / agent ---
+    _CMD + r"(?:shutdown|reboot|halt|poweroff|telinit)\b",
+    _CMD + r"init\s+[06]\b",
+    _CMD + r"systemctl\s+(?:-\S+\s+)*(?:reboot|poweroff|halt|kexec|rescue|emergency|isolate)\b",
+    _CMD + r"systemctl\s+(?:-\S+\s+)*(?:stop|disable|mask|kill|restart)\s+(?:-\S+\s+)*" + _PROTECTED_UNITS + r"\b",
+    _CMD + r"(?:pkill|killall)\b.*\b(?:openclaw|python\S*|amazon-ssm-agent|ssm-agent|sshd)\b",
+    _CMD + r"kill\s+(?:-\S+\s+)*(?:1|-1|\$\$|\$PPID|\$\(\s*pidof\s+\S*python)\b",
+    r":\s*\(\s*\)\s*\{",
+    # --- remote code / obfuscation ---
+    r"\b(?:curl|wget|fetch)\b.*\|\s*(?:\S*/)?(?:sudo\s+)?(?:busybox\s+)?(?:(?:ba|z|da|k|a|c|tc|fi)?sh|python[0-9.]*|perl|ruby|node|php)\b",
+    r"(?:\$\(|<\(|`)\s*(?:curl|wget|fetch)\b",
+    r"\bbase64\s+(?:-d|--decode)\b.*\|\s*(?:\S*/)?(?:(?:ba|z|da|k|a)?sh|python[0-9.]*|perl)\b",
+    r"\b(?:ba|z|da|k)?sh\s+-c\s+['\"]?\$\(",
+    r"\beval\s+['\"]?\$\(",
+    # --- network / firewall lockout ---
+    r"\b(?:iptables|ip6tables|nft)\b.*(?:\s-F\b|\bflush\b|-P\s+(?:INPUT|OUTPUT)\s+DROP|\bdrop\b.*\b(?:input|output)\b)",
+    _CMD + r"ip\s+link\s+set\s+\S+\s+down\b",
+    _CMD + r"(?:ifdown|ifconfig\s+\S+\s+down)\b",
+    _CMD + r"ip\s+route\s+(?:del|flush)\b",
+    # --- credentials / accounts ---
+    _CMD + r"(?:passwd|chpasswd|useradd|userdel|usermod|adduser|deluser|visudo)\b",
+    r"/etc/(?:shadow|gshadow|sudoers)",
+    r"/etc/openclaw/anthropic\.key|/proc/\S*/environ",
+    r"\baws\s+ssm\s+get-parameter",
+    r"~?/\.(?:ssh|aws|config/anthropic)\b",
+    _CMD + r"crontab\s+(?:-\S+\s+)*-r\b",
+    _CMD + r"cloud-init\s+clean\b",
 ]
 
 DEFAULT_SHELL_POLICY = {
@@ -39,23 +78,56 @@ DEFAULT_SHELL_POLICY = {
     "timeout": 60,
     "max_output": 4000,
     "cwd": "/",
-    "deny_patterns": DEFAULT_SHELL_DENY_PATTERNS,
+    "deny_patterns": None,          # extra patterns, added to the defaults
+    "replace_deny_patterns": False,  # True = use only the configured list
 }
 
+# Environment variables never handed to a planner-chosen shell command.
+_SECRET_ENV = re.compile(r"(ANTHROPIC_|AWS_(SECRET|SESSION|ACCESS)|.*(KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL)\w*$)",
+                         re.IGNORECASE)
 
-def normalise_shell_policy(policy: Optional[dict]) -> dict:
-    """Fill in defaults; a missing or falsy policy means shell is disabled."""
+
+def scrub_env(env: dict) -> dict:
+    """Copy of ``env`` without anything that looks like a credential."""
+    return {k: v for k, v in env.items() if not _SECRET_ENV.match(k)}
+
+
+def _compile_patterns(patterns, log=None) -> list:
+    compiled = []
+    for pattern in patterns:
+        try:
+            compiled.append(re.compile(str(pattern), re.IGNORECASE))
+        except re.error as e:
+            msg = f"invalid shell deny pattern {pattern!r}: {e}"
+            (log or logging.getLogger("openclaw.executor")).error(msg)
+    return compiled
+
+
+def normalise_shell_policy(policy: Optional[dict], log=None) -> dict:
+    """Fill in defaults; a missing or falsy policy means shell is disabled.
+
+    Operator patterns are *added* to the built-in list unless
+    ``replace_deny_patterns`` is true. Invalid patterns are logged and
+    dropped, never silently ignored.
+    """
     merged = dict(DEFAULT_SHELL_POLICY)
     if isinstance(policy, dict):
         merged.update({k: v for k, v in policy.items() if v is not None})
-    patterns = merged.get("deny_patterns")
-    if not isinstance(patterns, list):
-        patterns = list(DEFAULT_SHELL_DENY_PATTERNS)
-    merged["deny_patterns"] = [str(p) for p in patterns]
+    extra = merged.get("deny_patterns")
+    extra = [str(p) for p in extra] if isinstance(extra, list) else []
+    if merged.get("replace_deny_patterns"):
+        patterns = extra
+    else:
+        patterns = list(DEFAULT_SHELL_DENY_PATTERNS) + extra
+    merged["deny_patterns"] = patterns
+    merged["_compiled"] = _compile_patterns(patterns, log)
     merged["enabled"] = bool(merged.get("enabled"))
     merged["timeout"] = max(1, int(merged.get("timeout") or 60))
     merged["max_output"] = max(200, int(merged.get("max_output") or 4000))
     return merged
+
+
+_SPLIT = re.compile(r"\s*(?:;|&&|\|\||\||\n)\s*")
 
 
 def check_command_allowed(command: str, policy: dict) -> Optional[str]:
@@ -66,12 +138,14 @@ def check_command_allowed(command: str, policy: dict) -> Optional[str]:
         return "empty command"
     if "\x00" in command:
         return "command contains NUL byte"
-    for pattern in policy.get("deny_patterns", []):
-        try:
-            if re.search(pattern, command, flags=re.IGNORECASE):
-                return f"command matches deny pattern: {pattern}"
-        except re.error:
-            continue
+    compiled = policy.get("_compiled")
+    if compiled is None:
+        compiled = _compile_patterns(policy.get("deny_patterns") or [])
+    candidates = [command] + [part for part in _SPLIT.split(command) if part]
+    for rx in compiled:
+        for text in candidates:
+            if rx.search(text):
+                return f"command matches deny pattern: {rx.pattern}"
     return None
 
 
@@ -88,7 +162,7 @@ class TaskExecutor:
         self.hardware = hardware
         self.memory = memory
         self.log = logger.getChild("executor")
-        self.shell_policy = normalise_shell_policy(shell_policy)
+        self.shell_policy = normalise_shell_policy(shell_policy, self.log)
 
         # Map task types to handlers
         self._handlers = {
@@ -294,21 +368,30 @@ class TaskExecutor:
         timeout = self.shell_policy["timeout"]
         limit = self.shell_policy["max_output"]
         self.log.info("Shell: %s", command)
+        env = scrub_env(os.environ)
+        env["OPENCLAW_TASK"] = "1"
         try:
-            proc = subprocess.run(
+            # New session so a timeout can kill the whole process group,
+            # not just /bin/sh (backgrounded or exec'd children included).
+            proc = subprocess.Popen(
                 ["/bin/sh", "-c", command],
-                capture_output=True, text=True, timeout=timeout,
-                cwd=self.shell_policy.get("cwd") or None,
-                env={**os.environ, "OPENCLAW_TASK": "1"},
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=subprocess.DEVNULL,
+                text=True, cwd=self.shell_policy.get("cwd") or None, env=env,
+                start_new_session=True,
             )
-        except subprocess.TimeoutExpired:
-            record["timeout"] = timeout
-            self.memory.store(category="shell_command", data=record)
-            return {"success": False, "error": f"timed out after {timeout}s", "output": record}
         except (FileNotFoundError, OSError) as e:
             record["error"] = str(e)
             self.memory.store(category="shell_command", data=record)
             return {"success": False, "error": str(e), "output": record}
+        try:
+            stdout, stderr = proc.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            self._kill_group(proc)
+            record["timeout"] = timeout
+            self.memory.store(category="shell_command", data=record)
+            return {"success": False, "error": f"timed out after {timeout}s", "output": record}
+        finally:
+            self._kill_group(proc, only_if_alive=True)
 
         def clip(text: str) -> str:
             if len(text) <= limit:
@@ -317,8 +400,8 @@ class TaskExecutor:
 
         record.update({
             "returncode": proc.returncode,
-            "stdout": clip(proc.stdout),
-            "stderr": clip(proc.stderr),
+            "stdout": clip(stdout or ""),
+            "stderr": clip(stderr or ""),
         })
         self.memory.store(category="shell_command", data=record)
         if proc.returncode != 0:
@@ -326,6 +409,30 @@ class TaskExecutor:
                     "error": f"exit status {proc.returncode}",
                     "output": record}
         return {"success": True, "output": record}
+
+    @staticmethod
+    def _kill_group(proc, only_if_alive=False):
+        """Kill the command's whole process group (stragglers included)."""
+        import signal
+        try:
+            pgid = os.getpgid(proc.pid)
+        except (ProcessLookupError, OSError):
+            return
+        if only_if_alive:
+            # Reap leftovers of a finished command: children that outlived sh.
+            try:
+                os.killpg(pgid, signal.SIGKILL)
+            except (ProcessLookupError, PermissionError, OSError):
+                pass
+            return
+        try:
+            os.killpg(pgid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError, OSError):
+            pass
+        try:
+            proc.communicate(timeout=5)
+        except Exception:
+            pass
 
     def _handle_goal_step(self, task: Task) -> dict:
         """Execute a step toward a goal."""

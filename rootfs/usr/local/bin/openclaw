@@ -25,8 +25,13 @@ else
     SCAN_FLAG=""
 fi
 
-# Check for Python
-if command -v python3 >/dev/null 2>&1; then
+# Check for Python (OPENCLAW_PYTHON wins; the AMI sets it in /etc/default/openclaw)
+if [ -z "$OPENCLAW_PYTHON" ] && [ -r /etc/default/openclaw ]; then
+    . /etc/default/openclaw
+fi
+if [ -n "$OPENCLAW_PYTHON" ] && [ -x "$OPENCLAW_PYTHON" ]; then
+    PYTHON="$OPENCLAW_PYTHON"
+elif command -v python3 >/dev/null 2>&1; then
     PYTHON=python3
 elif command -v python >/dev/null 2>&1; then
     PYTHON=python

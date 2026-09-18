@@ -28,40 +28,61 @@ fi
 [ -d "$SRC/openclaw" ] || { echo "[provision] source not found at $SRC" >&2; exit 1; }
 
 # ---- 1. Packages ---------------------------------------------------------
+# The anthropic SDK needs Python >= 3.10. Amazon Linux 2023's /usr/bin/python3
+# is 3.9 for the life of the release, so on dnf systems we install 3.11 and
+# point the agent at it via OPENCLAW_PYTHON (read by the launcher and units).
+PY=python3
 if command -v dnf >/dev/null 2>&1; then
     log "Installing packages with dnf (Amazon Linux / Fedora family)"
     dnf -y update --security || true
-    dnf -y install python3 python3-pip python3-pyyaml pciutils usbutils util-linux \
-                   amazon-ssm-agent awscli 2>/dev/null || \
-    dnf -y install python3 python3-pip python3-pyyaml pciutils usbutils util-linux
+    dnf -y install pciutils usbutils util-linux
+    dnf -y install amazon-ssm-agent || true      # preinstalled on AL2023
+    dnf -y install awscli-2 || dnf -y install awscli || true   # preinstalled on AL2023
     systemctl enable amazon-ssm-agent 2>/dev/null || true
+    if dnf -y install python3.11 python3.11-pip python3.11-pyyaml; then
+        PY=/usr/bin/python3.11
+    else
+        log "python3.11 not available; falling back to system python3"
+        dnf -y install python3 python3-pip python3-pyyaml
+    fi
 elif command -v apt-get >/dev/null 2>&1; then
     log "Installing packages with apt (Ubuntu / Debian family)"
     export DEBIAN_FRONTEND=noninteractive
     apt-get update -y
     apt-get install -y --no-install-recommends python3 python3-pip python3-yaml \
-                       pciutils usbutils util-linux awscli
+                       pciutils usbutils util-linux
+    apt-get install -y --no-install-recommends awscli || true
     # SSM agent is a snap on Ubuntu cloud images and already present.
 else
     echo "[provision] unsupported distro: need dnf or apt-get" >&2
     exit 1
 fi
+log "Agent interpreter: $PY ($($PY --version 2>&1))"
+$PY -c 'import sys; assert sys.version_info >= (3, 10), sys.version' \
+    || { echo "[provision] $PY is older than 3.10; the anthropic SDK needs 3.10+" >&2; exit 1; }
 
 # Make sure PyYAML really is importable (fall back to pip if the distro
 # package name differed).
-if ! python3 -c 'import yaml' 2>/dev/null; then
+if ! $PY -c 'import yaml' 2>/dev/null; then
     log "PyYAML missing from packages, installing with pip"
-    python3 -m ensurepip --upgrade 2>/dev/null || true
-    python3 -m pip install --no-cache-dir pyyaml
+    $PY -m ensurepip --upgrade 2>/dev/null || true
+    $PY -m pip install --no-cache-dir pyyaml \
+        || $PY -m pip install --no-cache-dir --break-system-packages pyyaml
 fi
 
 # The LLM planner uses the official Anthropic SDK.
 log "Installing the anthropic SDK"
-python3 -m pip install --no-cache-dir --upgrade "anthropic>=1.6" \
-    || python3 -m pip install --no-cache-dir --upgrade --break-system-packages "anthropic>=1.6"
-python3 -c 'import anthropic; print("[provision] anthropic", anthropic.__version__)'
+$PY -m pip install --no-cache-dir --upgrade "anthropic>=1.6" \
+    || $PY -m pip install --no-cache-dir --upgrade --break-system-packages "anthropic>=1.6"
+$PY -c 'import anthropic; print("[provision] anthropic", anthropic.__version__)'
 command -v aws >/dev/null 2>&1 && log "aws cli: $(aws --version 2>&1 | head -1)" \
     || log "WARNING: aws cli missing; llm.api_key_ssm_parameter will not work"
+
+# Tell the launcher and units which interpreter to use.
+cat > /etc/default/openclaw << EOD
+# Interpreter for the OpenClaw agent (set by aws/scripts/provision.sh).
+OPENCLAW_PYTHON=$PY
+EOD
 
 # ---- 2. Agent code -------------------------------------------------------
 log "Installing OpenClaw to $PREFIX"
@@ -69,7 +90,7 @@ rm -rf "$PREFIX"
 mkdir -p "$PREFIX"
 cp -r "$SRC/openclaw" "$PREFIX/openclaw"
 find "$PREFIX" -name '__pycache__' -type d -prune -exec rm -rf {} +
-python3 -m compileall -q "$PREFIX/openclaw" || true
+$PY -m compileall -q "$PREFIX/openclaw" || true
 chown -R root:root "$PREFIX"
 chmod -R go-w "$PREFIX"
 
@@ -118,12 +139,12 @@ SYSCTL
 
 # ---- 6. Sanity check inside the build instance --------------------------
 log "Running self-test (3 headless cycles, no IMDS or API key required)"
-PYTHONPATH="$PREFIX" python3 -m openclaw.main \
+PYTHONPATH="$PREFIX" $PY -m openclaw.main \
     --config "$CONF_DIR/config.yaml" --no-hardware --headless --no-llm \
     --max-cycles 3 --cycle-interval 0 --status-port 0 \
     --status-file /tmp/openclaw-selftest.json >/tmp/openclaw-selftest.log 2>&1 \
     || { cat /tmp/openclaw-selftest.log; echo "[provision] self-test failed" >&2; exit 1; }
-python3 -c 'import json,sys; d=json.load(open("/tmp/openclaw-selftest.json")); sys.exit(0 if d["cycle_count"]==3 else 1)'
+$PY -c 'import json,sys; d=json.load(open("/tmp/openclaw-selftest.json")); sys.exit(0 if d["cycle_count"]==3 else 1)'
 rm -f /tmp/openclaw-selftest.json /tmp/openclaw-selftest.log
 
 log "Done. OpenClaw $OPENCLAW_VERSION installed; agent starts on first boot."

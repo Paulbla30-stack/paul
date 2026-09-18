@@ -115,12 +115,26 @@ Budget it with `llm.max_calls_per_hour` (60 by default, so at the default
 
 ```bash
 openclaw --status                       # includes brain model, budget and last reasoning
-curl -s localhost:8471/brain            # full brain status + last thought
-curl -s -X POST localhost:8471/goal -d 'Find out why disk fills up nightly'
-curl -s -X POST localhost:8471/think    # plan one step now and run it
-curl -s -X POST localhost:8471/ask -d 'What have you changed today?'
-openclaw --ask 'Is anything wrong with this box?' --no-hardware
+T="Authorization: Bearer $(sudo cat /run/openclaw/token)"   # 0600, root only
+curl -s -H "$T" localhost:8471/brain    # full brain status + last thought
+curl -s -H "$T" -X POST localhost:8471/goal -d 'Find out why disk fills up nightly'
+curl -s -H "$T" -X POST localhost:8471/think    # plan one step now and run it
+curl -s -H "$T" -X POST localhost:8471/ask -d 'What have you changed today?'
+sudo openclaw --ask 'Is anything wrong with this box?' --no-hardware   # key file is root-only
 ```
+
+A goal is an instruction the root agent will act on with its shell, so the
+token is required for every call except `/health` and `/status`, and the
+goal channels (user data, the `openclaw:goal` tag, `POST /goal`) should be
+treated as root-equivalent: anyone with `ec2:CreateTags` on the instance can
+hand it work.
+
+### Interpreter on Amazon Linux 2023
+
+The Anthropic SDK needs Python 3.10 or newer and AL2023's system `python3` is
+3.9, so provisioning installs `python3.11` and records it in
+`/etc/default/openclaw` as `OPENCLAW_PYTHON`. The launcher and both units read
+that file; on Ubuntu 24.04 the system Python is used.
 
 ## Talking to the agent
 
@@ -128,7 +142,7 @@ openclaw --ask 'Is anything wrong with this box?' --no-hardware
 aws ssm start-session --target i-0123456789abcdef0   # or ssh
 openclaw --status                                     # summary
 curl -s localhost:8471/status | python3 -m json.tool  # full snapshot
-curl -s localhost:8471/history                        # last 20 task results
+curl -s -H "Authorization: Bearer $(sudo cat /run/openclaw/token)" localhost:8471/history   # last 20 task results
 journalctl -u openclaw -f                             # live log
 sudo systemctl restart openclaw                       # re-read config + user data
 ```

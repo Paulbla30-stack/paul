@@ -11,7 +11,9 @@ Type=oneshot
 RemainAfterExit=yes
 Environment=PYTHONPATH=/usr/lib/openclaw
 Environment=PYTHONUNBUFFERED=1
-ExecStart=/usr/bin/python3 -m openclaw.cloud.bootstrap --output /etc/openclaw/cloud.yaml
+Environment=OPENCLAW_PYTHON=/usr/bin/python3
+EnvironmentFile=-/etc/default/openclaw
+ExecStart=/bin/sh -c 'exec "$OPENCLAW_PYTHON" -m openclaw.cloud.bootstrap --output /etc/openclaw/cloud.yaml --config /etc/openclaw/config.yaml'
 TimeoutStartSec=90
 StandardOutput=journal+console
 StandardError=journal+console

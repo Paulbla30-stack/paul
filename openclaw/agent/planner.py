@@ -85,20 +85,34 @@ class TaskPlanner:
             "completed": False,
         })
 
+    @staticmethod
+    def _norm(text: str) -> str:
+        return " ".join((text or "").split()).lower()
+
     def complete_goal(self, description: str) -> bool:
-        """Mark a goal complete by exact (case-insensitive) or substring match."""
-        wanted = (description or "").strip().lower()
+        """Mark a goal complete.
+
+        Exact (case- and whitespace-insensitive) match first; otherwise a
+        substring match only when it identifies exactly one open goal and
+        the supplied text is long enough not to be accidental.
+        """
+        wanted = self._norm(description)
         if not wanted:
             return False
-        for goal in self.goals:
-            if goal["completed"]:
-                continue
-            have = goal["description"].strip().lower()
-            if have == wanted or wanted in have or have in wanted:
-                goal["completed"] = True
-                goal["completed_at"] = time.time()
-                return True
-        return False
+        open_goals = [g for g in self.goals if not g["completed"]]
+        exact = [g for g in open_goals if self._norm(g["description"]) == wanted]
+        match = exact[0] if exact else None
+        if match is None and len(wanted) >= 8:
+            partial = [g for g in open_goals
+                       if wanted in self._norm(g["description"])
+                       or self._norm(g["description"]) in wanted]
+            if len(partial) == 1:
+                match = partial[0]
+        if match is None:
+            return False
+        match["completed"] = True
+        match["completed_at"] = time.time()
+        return True
 
     def open_goals(self) -> list:
         return [g for g in self.goals if not g["completed"]]

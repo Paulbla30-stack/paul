@@ -7,9 +7,10 @@ maintains state/memory across interactions.
 
 import time
 import logging
+from collections import deque
 from typing import Any, Optional
 
-from openclaw.agent.planner import TaskPlanner, Task
+from openclaw.agent.planner import TaskPlanner, Task, TaskStatus
 from openclaw.agent.executor import TaskExecutor
 from openclaw.agent.memory import AgentMemory
 
@@ -44,6 +45,9 @@ class AgentCore:
         # the rule-based planner takes over for that cycle.
         self.brain = brain
         self.last_thought: dict = {}
+        # Brain notes live here, not in the evictable AgentMemory, so they
+        # survive however busy the loop gets.
+        self.notes = deque(maxlen=config.get("notes_limit", 20))
 
         # State
         self.running = False
@@ -102,7 +106,11 @@ class AgentCore:
             return None
 
         if self.brain is not None and self.brain.should_plan(self.cycle_count):
-            decision = self.brain.plan(self, observations)
+            try:
+                decision = self.brain.plan(self, observations)
+            except Exception as e:  # belt and braces: never kill the loop
+                self.log.error("Brain planning failed: %s", e)
+                decision = None
             if decision is not None:
                 return self._apply_decision(decision)
 
@@ -120,6 +128,7 @@ class AgentCore:
                 self.memory.store(category="goal_completed",
                                   data={"description": goal, "cycle": self.cycle_count})
         if decision.note:
+            self.notes.append(decision.note)
             self.memory.store(category="llm_note",
                               data={"note": decision.note, "cycle": self.cycle_count})
         self.last_thought = {
@@ -129,19 +138,19 @@ class AgentCore:
             "completed_goals": list(decision.completed_goals),
             "timestamp": time.time(),
         }
-        self.memory.store(category="llm_plan", data={
-            "cycle": self.cycle_count,
-            "reasoning": decision.reasoning,
-            "task": decision.task.description if decision.task else "idle",
-        })
         if decision.task is None:
             self.log.info("Brain: idle. %s", decision.reasoning)
             return None
+        self.memory.store(category="llm_plan", data={
+            "cycle": self.cycle_count,
+            "reasoning": decision.reasoning,
+            "task": decision.task.description,
+        })
         self.log.info("Brain: %s -> %s", decision.reasoning, decision.task.description)
-        self.planner.add_task(decision.task)
-        # Return it through the queue so status/priority bookkeeping matches
-        # every other task.
-        return self.planner.get_next_task()
+        # Run the brain's task now, ahead of anything queued: it was chosen
+        # for the current situation.
+        decision.task.status = TaskStatus.RUNNING
+        return decision.task
 
     def act(self, task: Task) -> dict:
         """Execute a task and return the result."""
@@ -175,8 +184,17 @@ class AgentCore:
         if not success:
             error = result.get("error", "Unknown error")
             self.log.warning("Task failed: %s - %s", task.description, error)
-            # Re-plan if task failed
-            self.planner.handle_failure(task, error)
+            if task.metadata.get("source") == "llm":
+                # The brain is the retry policy: it sees the failure next
+                # cycle and decides. Blind re-execution of a root shell
+                # command is never what we want.
+                task.status = TaskStatus.FAILED
+                self.memory.store(category="failed_task",
+                                  data={"description": task.description, "error": error,
+                                        "retries": 0, "source": "llm"})
+            else:
+                # Re-plan if task failed
+                self.planner.handle_failure(task, error)
 
     def run_cycle(self) -> dict:
         """Run a single observe-plan-act-reflect cycle."""
@@ -227,8 +245,7 @@ class AgentCore:
             return {"error": "no LLM brain configured (llm.enabled)"}
         if not self.brain.available():
             return {"error": "LLM brain unavailable: "
-                             + (self.brain.last_error or self.brain.status().get("disabled_reason")
-                                or "backing off")}
+                             + (self.brain.unavailable_reason() or "backing off")}
         self.cycle_count += 1
         observations = self.observe()
         decision = self.brain.plan(self, observations)
@@ -250,7 +267,8 @@ class AgentCore:
             return "No LLM brain configured (set llm.enabled and an API key)."
         answer = self.brain.ask(self, question, self.observe())
         return answer or ("Brain could not answer: "
-                          + (self.brain.last_error or "unavailable"))
+                          + (self.brain.unavailable_reason() or self.brain.last_error
+                             or "unavailable"))
 
     def get_status(self) -> dict:
         """Return the current agent status."""
