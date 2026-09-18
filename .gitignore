@@ -15,3 +15,7 @@ aws/terraform/.terraform.lock.hcl
 aws/terraform/*.tfstate
 aws/terraform/*.tfstate.*
 aws/terraform/*.tfvars
+
+# Terraform plan files are build artifacts
+aws/terraform/tfplan
+aws/terraform/*.tfplan
