@@ -42,7 +42,7 @@ variable "arch" {
   description = "AMI architecture: x86_64 or arm64."
   validation {
     condition     = contains(["x86_64", "arm64"], var.arch)
-    error_message = "arch must be x86_64 or arm64."
+    error_message = "The arch must be x86_64 or arm64."
   }
 }
 
@@ -52,7 +52,7 @@ variable "base" {
   description = "Base image family: al2023 (Amazon Linux 2023) or ubuntu (24.04)."
   validation {
     condition     = contains(["al2023", "ubuntu"], var.base)
-    error_message = "base must be al2023 or ubuntu."
+    error_message = "The base must be al2023 or ubuntu."
   }
 }
 
