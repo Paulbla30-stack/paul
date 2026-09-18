@@ -35,15 +35,18 @@ PY=python3
 if command -v dnf >/dev/null 2>&1; then
     log "Installing packages with dnf (Amazon Linux / Fedora family)"
     dnf -y update --security || true
-    dnf -y install pciutils usbutils util-linux
+    dnf -y install pciutils util-linux
+    dnf -y install usbutils || true               # not packaged on AL2023; ISO-only tool
     dnf -y install amazon-ssm-agent || true      # preinstalled on AL2023
     dnf -y install awscli-2 || dnf -y install awscli || true   # preinstalled on AL2023
     systemctl enable amazon-ssm-agent 2>/dev/null || true
-    if dnf -y install python3.11 python3.11-pip python3.11-pyyaml; then
+    if dnf -y install python3.11 python3.11-pip; then
         PY=/usr/bin/python3.11
+        dnf -y install python3.11-pyyaml || true  # else pip installs PyYAML below
     else
         log "python3.11 not available; falling back to system python3"
-        dnf -y install python3 python3-pip python3-pyyaml
+        dnf -y install python3 python3-pip
+        dnf -y install python3-pyyaml || true
     fi
 elif command -v apt-get >/dev/null 2>&1; then
     log "Installing packages with apt (Ubuntu / Debian family)"
