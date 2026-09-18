@@ -24,7 +24,7 @@ openclaw:
     model: arn:aws:bedrock:us-west-2:485964361844:imported-model/jfu3j2ssmqvx   # Qwen3-32B, Custom Model Import
     # model: arn:aws:bedrock:us-west-2:485964361844:imported-model/xxnmq5w0nsck # Qwen2.5-7B-Instruct (smaller, weaker planner)
     # model: openai.gpt-oss-120b-1:0                                            # catalog fallback
-    max_calls_per_hour: 60
+    max_calls_per_hour: 120   # planner + chat calls per hour; imported models bill per model-minute, not per call
     bedrock:
       thinking: off          # Qwen3: answer directly; plans are always asked without <think>
     shell:
