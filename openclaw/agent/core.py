@@ -48,6 +48,8 @@ class AgentCore:
         # Brain notes live here, not in the evictable AgentMemory, so they
         # survive however busy the loop gets.
         self.notes = deque(maxlen=config.get("notes_limit", 20))
+        # Files handed to the agent through the UI / API; the brain sees them.
+        self.uploads = deque(maxlen=50)
 
         # State
         self.running = False
@@ -263,12 +265,24 @@ class AgentCore:
 
     def ask(self, question: str) -> str:
         """Answer an operator question with the agent's context."""
+        return self.chat([{"role": "user", "content": question}])
+
+    def chat(self, turns) -> str:
+        """Continue an operator conversation with the agent's context."""
         if self.brain is None:
             return "No LLM brain configured (set llm.enabled and an API key)."
-        answer = self.brain.ask(self, question, self.observe())
+        answer = self.brain.chat(self, turns, self.observe())
         return answer or ("Brain could not answer: "
                           + (self.brain.unavailable_reason() or self.brain.last_error
                              or "unavailable"))
+
+    def record_upload(self, name: str, path: str, size: int) -> dict:
+        """Register an operator-uploaded file so the brain can act on it."""
+        entry = {"name": name, "path": path, "size": size, "uploaded_at": time.time()}
+        self.uploads.append(entry)
+        self.memory.store(category="upload", data=entry)
+        self.notes.append(f"Operator uploaded {name} ({size} bytes) at {path}")
+        return entry
 
     def get_status(self) -> dict:
         """Return the current agent status."""

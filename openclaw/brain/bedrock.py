@@ -115,11 +115,11 @@ class BedrockBrain(BaseBrain):
         return {"input_tokens": int(u.get("inputTokens", 0) or 0),
                 "output_tokens": int(u.get("outputTokens", 0) or 0)}
 
-    def _complete(self, system: str, user_text: str, structured: bool,
+    def _complete(self, system: str, messages: list, structured: bool,
                   cache: bool = True) -> Completion:
         if structured:
             system = system + JSON_INSTRUCTIONS
-        messages = [{"role": "user", "content": [{"text": user_text}]}]
+        messages = [{"role": m["role"], "content": [{"text": m["content"]}]} for m in messages]
         response = self._converse(system, messages)
         text = self._text_of(response)
         usage = self._usage_of(response)

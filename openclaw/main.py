@@ -135,6 +135,15 @@ def load_config(path, extra_paths=()):
             "status_file": "/run/openclaw/status.json",
             "status_token": None,
             "status_token_file": "/run/openclaw/token",
+            "ui": {
+                "enabled": False,          # web UI (chat, agent panel, uploads)
+                "host": "0.0.0.0",
+                "port": 8443,
+                "tls": True,               # self-signed cert generated at first start
+                "tls_dir": "/etc/openclaw/tls",
+                "upload_dir": "/var/lib/openclaw/uploads",
+                "max_upload_mb": 50,
+            },
         },
         "goals": [],
         "llm": {
@@ -361,6 +370,7 @@ class OpenClawSystem:
                 status_file=cloud.get("status_file"),
                 token=cloud.get("status_token") or None,
                 token_file=cloud.get("status_token_file"),
+                ui=cloud.get("ui"),
             )
             self.runner.run()
         else:

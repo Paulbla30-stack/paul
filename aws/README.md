@@ -191,6 +191,28 @@ The Anthropic SDK needs Python 3.10 or newer and AL2023's system `python3` is
 `/etc/default/openclaw` as `OPENCLAW_PYTHON`. The launcher and both units read
 that file; on Ubuntu 24.04 the system Python is used.
 
+## The web UI
+
+The agent serves its own UI: a chat grounded in what it can see and has
+done, an agent panel (goals, recent tasks with output, brain state, a
+"Think now" button), and file uploads the brain is told about. It listens
+on port 8443 with a self-signed certificate and logs you in with the
+runner token, so it is safe to reach from a phone without a tunnel.
+
+```bash
+terraform apply ... -var ui_cidr=203.0.113.4/32       # your public IP
+sudo cat /run/openclaw/token                          # via SSM; paste into the login box
+```
+
+Then open `https://<public ip>:8443/ui`, accept the certificate warning
+once, and paste the token. In chat, `/goal text` adds a goal and `/think`
+runs one planning step. Uploaded files go to `/var/lib/openclaw/uploads`
+and appear in the brain's context as `uploaded_files`, so "look at the CSV
+I just uploaded" works.
+
+Keep `ui_cidr` narrow: the token is the only login and anyone who has it
+can hand the root agent work.
+
 ## Talking to the agent
 
 ```bash

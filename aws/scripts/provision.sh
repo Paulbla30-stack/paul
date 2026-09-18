@@ -117,7 +117,9 @@ install -m 0755 "$SRC/rootfs/usr/local/bin/openclaw" /usr/local/bin/openclaw
 install -m 0644 "$SRC/aws/systemd/openclaw-bootstrap.service" /etc/systemd/system/
 install -m 0644 "$SRC/aws/systemd/openclaw.service" /etc/systemd/system/
 install -m 0644 "$SRC/aws/scripts/motd.sh" /etc/profile.d/openclaw.sh
-mkdir -p /var/log
+mkdir -p /var/log /var/lib/openclaw/uploads /etc/openclaw/tls
+chmod 750 /var/lib/openclaw/uploads
+chmod 700 /etc/openclaw/tls
 touch /var/log/openclaw.log /var/log/openclaw-security.log
 
 systemctl daemon-reload

@@ -160,6 +160,16 @@ Key points:
 The ISO profile leaves `llm.enabled` false; nothing changes there unless you
 set it.
 
+## Web UI
+
+`cloud.ui.enabled: true` starts a second listener (default 0.0.0.0:8443,
+TLS with a self-signed certificate) serving `/ui`: a chat with the agent,
+an agent panel with goals, recent tasks and a "Think now" button, and file
+uploads that land in `cloud.ui.upload_dir` and are handed to the brain as
+`uploaded_files`. Login is the runner token. The API behind it: `POST
+/chat` (multi-turn), `POST /upload` (raw body + `X-Filename`), `GET
+/uploads`, plus everything the loopback status server offers.
+
 ## Headless mode
 
 `openclaw --headless` runs the same agent loop without the console. It is

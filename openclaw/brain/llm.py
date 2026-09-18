@@ -149,6 +149,8 @@ character-for-character from goals[].description; the same rule applies to the "
 - Use "note" for facts that will matter later (a device name, a threshold you measured). You \
 see only your most recent notes and only the most recent executed tasks (idle cycles leave no \
 trace); anything you will need beyond that must be restated in a note.
+- Files the operator uploads appear under uploaded_files with their path on this machine; \
+inspect them with shell tools (head, wc, file, unzip -l) when a goal concerns them.
 - Reasoning is logged for the operator; keep it short and concrete."""
 
 ASK_PROMPT = """You are the planner inside OpenClaw, an agent-first operating system, answering \
@@ -472,6 +474,12 @@ class BaseBrain:
             "recent_history": history,
             "notes": notes,
         }
+        uploads = list(getattr(agent, "uploads", []))[-10:]
+        if uploads:
+            context["uploaded_files"] = [
+                {k: u.get(k) for k in ("name", "path", "size", "uploaded_at") if k in u}
+                for u in uploads
+            ]
         last = getattr(agent, "last_thought", None) or {}
         if last:
             context["last_decision"] = {
@@ -491,9 +499,12 @@ class BaseBrain:
     def _make_client(self):  # pragma: no cover - abstract
         raise NotImplementedError
 
-    def _complete(self, system: str, user_text: str, structured: bool,
+    def _complete(self, system: str, messages: list, structured: bool,
                   cache: bool = True) -> Completion:  # pragma: no cover - abstract
-        """One model call. Raise on transport/API errors; return a Completion."""
+        """One model call over ``messages`` ([{role, content: str}, ...]).
+
+        Raise on transport/API errors; return a Completion.
+        """
         raise NotImplementedError
 
     def _handle_error(self, e: Exception):  # pragma: no cover - abstract
@@ -501,9 +512,15 @@ class BaseBrain:
 
     # ---- shared call path -------------------------------------------------------
 
-    def _call(self, system: str, user_text: str, structured: bool,
+    def _call(self, system: str, messages, structured: bool,
               cache: bool = True) -> Optional[Completion]:
-        """Make one model call; returns the Completion or None (after logging)."""
+        """Make one model call; returns the Completion or None (after logging).
+
+        ``messages`` is a list of ``{"role", "content"}`` turns, or a plain
+        string for a single user turn.
+        """
+        if isinstance(messages, str):
+            messages = [{"role": "user", "content": messages}]
         if self.client is None or self._disabled_reason or time.time() < self._backoff_until:
             return None
         if not self._take_budget():
@@ -511,7 +528,7 @@ class BaseBrain:
         self.stats["calls"] += 1
         self.last_call_at = time.time()
         try:
-            completion = self._complete(system, user_text, structured, cache)
+            completion = self._complete(system, messages, structured, cache)
         except Exception as e:  # classified by the provider
             self.stats["errors"] += 1
             self._consecutive_errors += 1
@@ -547,7 +564,8 @@ class BaseBrain:
             context = self.build_context(agent, observations)
             user_text = ("Current situation as JSON. Decide the next task.\n\n"
                          + json.dumps(context, default=str, separators=(",", ":")))
-            completion = self._call(system, user_text, structured=True)
+            completion = self._call(system, [{"role": "user", "content": user_text}],
+                                    structured=True)
             if completion is None:
                 return None
             raw = self._parse_plan(completion.text)
@@ -633,13 +651,44 @@ class BaseBrain:
         question = (question or "").strip()
         if not question:
             return None
+        return self.chat(agent, [{"role": "user", "content": question}], observations)
+
+    @staticmethod
+    def _normalise_turns(turns, limit: int = 12) -> list:
+        """Keep the last ``limit`` turns, alternating and starting with user."""
+        clean = []
+        for t in turns or []:
+            if not isinstance(t, dict):
+                continue
+            role = "assistant" if str(t.get("role")) == "assistant" else "user"
+            content = str(t.get("content") or "").strip()
+            if not content:
+                continue
+            if clean and clean[-1]["role"] == role:
+                clean[-1]["content"] += "\n\n" + content  # merge same-role runs
+            else:
+                clean.append({"role": role, "content": content[:8000]})
+        clean = clean[-limit:]
+        while clean and clean[0]["role"] != "user":
+            clean.pop(0)
+        return clean
+
+    def chat(self, agent, turns, observations: Optional[dict] = None) -> Optional[str]:
+        """Multi-turn conversation with the operator, grounded in agent context.
+
+        ``turns`` is the transcript so far ([{role, content}, ...], last one
+        from the user). The context is attached to the first user turn.
+        """
+        messages = self._normalise_turns(turns)
+        if not messages or messages[-1]["role"] != "user":
+            return None
         try:
             context = self.build_context(agent, observations)
-            user_text = ("Context as JSON:\n" + json.dumps(context, default=str, indent=1)
-                         + "\n\nQuestion: " + question)
-            completion = self._call(ASK_PROMPT, user_text, structured=False, cache=False)
+            preface = "Context as JSON:\n" + json.dumps(context, default=str, indent=1) + "\n\n"
+            messages[0] = {"role": "user", "content": preface + messages[0]["content"]}
+            completion = self._call(ASK_PROMPT, messages, structured=False, cache=False)
         except Exception as e:
-            self.last_error = f"ask failed: {e.__class__.__name__}: {e}"
+            self.last_error = f"chat failed: {e.__class__.__name__}: {e}"
             self.log.error("LLM %s", self.last_error)
             return None
         if completion is None:
@@ -686,8 +735,10 @@ class ClaudeBrain(BaseBrain):
             self.log.warning("LLM brain disabled: %s", self._disabled_reason)
             return None
 
-    def _request_kwargs(self, system: str, user_text: str, structured: bool,
+    def _request_kwargs(self, system: str, messages, structured: bool,
                         cache: bool = True) -> dict:
+        if isinstance(messages, str):
+            messages = [{"role": "user", "content": messages}]
         system_block = {"type": "text", "text": system}
         if cache:
             system_block["cache_control"] = {"type": "ephemeral"}
@@ -695,7 +746,7 @@ class ClaudeBrain(BaseBrain):
             "model": self.model,
             "max_tokens": self.max_tokens,
             "system": [system_block],
-            "messages": [{"role": "user", "content": user_text}],
+            "messages": [{"role": m["role"], "content": m["content"]} for m in messages],
         }
         if self.thinking != "omit":
             kwargs["output_config"] = {"effort": self.effort}
@@ -714,9 +765,9 @@ class ClaudeBrain(BaseBrain):
                 return stream.get_final_message()
         return self.client.beta.messages.create(**kwargs)
 
-    def _complete(self, system: str, user_text: str, structured: bool,
+    def _complete(self, system: str, messages: list, structured: bool,
                   cache: bool = True) -> Completion:
-        response = self._send(self._request_kwargs(system, user_text, structured, cache))
+        response = self._send(self._request_kwargs(system, messages, structured, cache))
         usage = {}
         u = getattr(response, "usage", None)
         if u is not None:

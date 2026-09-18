@@ -17,6 +17,14 @@ Endpoints (default 127.0.0.1:8471):
     POST /goal     -> body is the goal text (optional "?priority=N"); adds a goal
     POST /think    -> one LLM planning step, executed; returns the outcome
     POST /ask      -> body is a question; returns {"answer": ...}
+    POST /chat     -> JSON {"messages": [{role, content}, ...]}; multi-turn answer
+    POST /upload   -> raw file body with X-Filename; saved under the upload dir
+    GET  /uploads  -> files the agent has been given
+    GET  /ui       -> the web UI (chat, agent panel, uploads)   (no token; the
+                      page asks for the token and sends it with every call)
+
+A second listener (``ui`` settings) can serve the same handler on a
+public address with TLS, so the UI works from a phone without a tunnel.
 
 Everything except /health and /status requires the runner token, sent as
 ``Authorization: Bearer <token>`` or ``X-OpenClaw-Token``. The token is
@@ -28,11 +36,20 @@ instruction once the brain has a shell, so the token is mandatory.
 
 import json
 import os
+import re
 import secrets
+import ssl
+import subprocess
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Optional
+
+UI_HTML_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                            "ui", "web", "index.html")
+DEFAULT_UPLOAD_DIR = "/var/lib/openclaw/uploads"
+DEFAULT_TLS_DIR = "/etc/openclaw/tls"
+_SAFE_NAME = re.compile(r"[^A-Za-z0-9._-]+")
 
 DEFAULT_STATUS_PORT = 8471
 DEFAULT_STATUS_FILE = "/run/openclaw/status.json"
@@ -81,7 +98,8 @@ class HeadlessRunner:
                  status_host: str = "127.0.0.1",
                  status_file: Optional[str] = None,
                  token: Optional[str] = None,
-                 token_file: Optional[str] = DEFAULT_TOKEN_FILE):
+                 token_file: Optional[str] = DEFAULT_TOKEN_FILE,
+                 ui: Optional[dict] = None):
         self.agent = agent
         self.log = logger.getChild("headless")
         self.interval = max(0.0, float(interval))
@@ -91,6 +109,21 @@ class HeadlessRunner:
         self.status_file = status_file
         self.token = token or secrets.token_urlsafe(32)
         self.token_file = token_file
+        ui = dict(ui or {})
+        self.ui_enabled = bool(ui.get("enabled"))
+        self.ui_host = ui.get("host") or "0.0.0.0"
+        self.ui_port = int(ui.get("port") or 8443)
+        self.ui_tls = bool(ui.get("tls", True))
+        self.tls_dir = ui.get("tls_dir") or DEFAULT_TLS_DIR
+        self.upload_dir = ui.get("upload_dir") or DEFAULT_UPLOAD_DIR
+        self.max_upload_bytes = int(float(ui.get("max_upload_mb") or 50) * 1024 * 1024)
+        self._ui_server: Optional[ThreadingHTTPServer] = None
+        self._ui_thread: Optional[threading.Thread] = None
+        # Brute-force guard for the token: per client address, failures in
+        # the last window; over the limit means 429 until the window passes.
+        self._auth_failures: dict = {}
+        self.auth_failure_limit = int(ui.get("auth_failure_limit") or 10)
+        self.auth_failure_window = float(ui.get("auth_failure_window") or 300)
         self.started_at = time.time()
         self._stop = threading.Event()
         # Serialises agent cycles between the loop and HTTP-triggered work.
@@ -147,23 +180,60 @@ class HeadlessRunner:
                 self.end_headers()
                 self.wfile.write(body)
 
+            def _client(self) -> str:
+                return self.client_address[0] if self.client_address else "?"
+
             def _authorised(self) -> bool:
+                if runner.auth_locked(self._client()):
+                    return False
                 header = self.headers.get("Authorization") or ""
                 supplied = header[7:].strip() if header.lower().startswith("bearer ") else ""
                 supplied = supplied or (self.headers.get("X-OpenClaw-Token") or "").strip()
-                return bool(supplied) and secrets.compare_digest(supplied, runner.token)
+                ok = bool(supplied) and secrets.compare_digest(supplied, runner.token)
+                if not ok and supplied:
+                    runner.auth_failed(self._client())
+                return ok
+
+            def _deny(self):
+                if runner.auth_locked(self._client()):
+                    self._send(429, {"error": "too many failed logins; try again later"})
+                else:
+                    self._send(401, {"error": "token required",
+                                     "hint": f"Authorization: Bearer $(cat {runner.token_file})"})
 
             def _require_token(self, path) -> bool:
                 if path in OPEN_PATHS or self._authorised():
                     return True
-                self._send(401, {"error": "token required",
-                                 "hint": f"Authorization: Bearer $(cat {runner.token_file})"})
+                self._deny()
                 return False
 
+            def _send_html(self, html: str):
+                body = html.encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Content-Length", str(len(body)))
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("X-Frame-Options", "DENY")
+                self.send_header("Referrer-Policy", "no-referrer")
+                self.end_headers()
+                self.wfile.write(body)
+
             def do_GET(self):
-                path = self.path.split("?", 1)[0].rstrip("/") or "/"
+                raw_path, _, query = self.path.partition("?")
+                path = raw_path.rstrip("/") or "/"
+                if path == "/ui":
+                    return self._send_html(runner.ui_html())
                 if not self._require_token(path):
                     return
+                if path == "/uploads":
+                    return self._send(200, runner.list_uploads())
+                limit = 20
+                for part in query.split("&"):
+                    if part.startswith("limit="):
+                        try:
+                            limit = max(1, min(int(part[6:]), 200))
+                        except ValueError:
+                            pass
                 with runner._lock:
                     if path in ("/", "/health"):
                         self._send(200, {"ok": True, "agent": runner.agent.name,
@@ -173,7 +243,7 @@ class HeadlessRunner:
                     elif path == "/memory":
                         self._send(200, runner.agent.memory.get_summary())
                     elif path == "/history":
-                        self._send(200, runner.agent.task_history[-20:])
+                        self._send(200, runner.agent.task_history[-limit:])
                     elif path == "/brain":
                         brain = runner.agent.brain
                         self._send(200, {"brain": brain.status() if brain else None,
@@ -191,8 +261,11 @@ class HeadlessRunner:
                 raw_path, _, query = self.path.partition("?")
                 path = raw_path.rstrip("/") or "/"
                 if not self._authorised():
-                    return self._send(401, {"error": "token required",
-                                            "hint": f"Authorization: Bearer $(cat {runner.token_file})"})
+                    return self._deny()
+                if path == "/upload":
+                    return self._handle_upload()
+                if int(self.headers.get("Content-Length") or 0) > 1_000_000:
+                    return self._send(413, {"error": "body too large"})
                 body = self._body().strip()
                 if path == "/goal":
                     if not body:
@@ -223,8 +296,45 @@ class HeadlessRunner:
                     with runner._lock:
                         answer = runner.agent.ask(body)
                     self._send(200, {"question": body, "answer": answer})
+                elif path == "/chat":
+                    try:
+                        payload = json.loads(body or "{}")
+                    except ValueError:
+                        return self._send(400, {"error": "body must be JSON"})
+                    turns = payload.get("messages") if isinstance(payload, dict) else None
+                    if not isinstance(turns, list) or not turns:
+                        return self._send(400, {"error": "messages list required"})
+                    with runner._lock:
+                        answer = runner.agent.chat(turns)
+                    self._send(200, {"answer": answer})
+                elif path == "/upload":
+                    self._handle_upload()
                 else:
                     self._send(404, {"error": "not found"})
+
+            def _body_raw(self, limit: int) -> Optional[bytes]:
+                length = int(self.headers.get("Content-Length") or 0)
+                if length > limit:
+                    return None
+                return self.rfile.read(length) if length else b""
+
+            def _handle_upload(self):
+                name = runner.safe_filename(self.headers.get("X-Filename") or "")
+                if not name:
+                    return self._send(400, {"error": "X-Filename header required"})
+                length = int(self.headers.get("Content-Length") or 0)
+                if length <= 0:
+                    return self._send(400, {"error": "empty upload"})
+                if length > runner.max_upload_bytes:
+                    return self._send(413, {"error": f"file over {runner.max_upload_bytes} bytes"})
+                try:
+                    path = runner.save_upload(name, self.rfile, length)
+                except OSError as e:
+                    return self._send(500, {"error": f"could not save upload: {e}"})
+                with runner._lock:
+                    entry = runner.agent.record_upload(name, path, length)
+                runner._write_status_file()
+                self._send(200, entry)
 
         return Handler
 
@@ -255,6 +365,120 @@ class HeadlessRunner:
             self._server.shutdown()
             self._server.server_close()
             self._server = None
+        if self._ui_server:
+            self._ui_server.shutdown()
+            self._ui_server.server_close()
+            self._ui_server = None
+
+    # ---- auth throttle ----------------------------------------------------------
+
+    def auth_locked(self, client: str) -> bool:
+        now = time.time()
+        stamps = [t for t in self._auth_failures.get(client, []) if now - t < self.auth_failure_window]
+        self._auth_failures[client] = stamps
+        return len(stamps) >= self.auth_failure_limit
+
+    def auth_failed(self, client: str):
+        self._auth_failures.setdefault(client, []).append(time.time())
+        if len(self._auth_failures[client]) == self.auth_failure_limit:
+            self.log.warning("Too many bad tokens from %s; locked out for %.0fs",
+                             client, self.auth_failure_window)
+
+    # ---- UI listener ----------------------------------------------------------
+
+    def ui_html(self) -> str:
+        try:
+            with open(UI_HTML_PATH, encoding="utf-8") as f:
+                return f.read()
+        except OSError:
+            return "<!doctype html><title>OpenClaw</title><p>UI page not installed.</p>"
+
+    def ensure_tls_files(self) -> Optional[tuple]:
+        """Self-signed cert/key for the UI listener, generated once with openssl."""
+        cert = os.path.join(self.tls_dir, "ui.crt")
+        key = os.path.join(self.tls_dir, "ui.key")
+        if os.path.exists(cert) and os.path.exists(key):
+            return cert, key
+        try:
+            os.makedirs(self.tls_dir, mode=0o700, exist_ok=True)
+            subprocess.run(
+                ["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-sha256",
+                 "-days", "3650", "-subj", f"/CN={self.agent.name or 'openclaw'}",
+                 "-keyout", key, "-out", cert],
+                check=True, capture_output=True, timeout=60)
+            os.chmod(key, 0o600)
+            return cert, key
+        except (OSError, subprocess.SubprocessError) as e:
+            self.log.warning("Could not create TLS files in %s: %s", self.tls_dir, e)
+            return None
+
+    def start_ui_server(self) -> Optional[int]:
+        """Serve the same API plus /ui on the UI address, with TLS by default."""
+        if not self.ui_enabled:
+            return None
+        try:
+            server = ThreadingHTTPServer((self.ui_host, self.ui_port), self._make_handler())
+        except OSError as e:
+            self.log.warning("UI listener unavailable on %s:%s: %s", self.ui_host, self.ui_port, e)
+            return None
+        scheme = "http"
+        if self.ui_tls:
+            files = self.ensure_tls_files()
+            if files is None:
+                self.log.warning("UI listener not started: TLS requested but unavailable")
+                server.server_close()
+                return None
+            ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+            ctx.minimum_version = ssl.TLSVersion.TLSv1_2
+            ctx.load_cert_chain(files[0], files[1])
+            server.socket = ctx.wrap_socket(server.socket, server_side=True)
+            scheme = "https"
+        server.daemon_threads = True
+        self._ui_server = server
+        self._ui_thread = threading.Thread(target=server.serve_forever, name="openclaw-ui",
+                                           daemon=True)
+        self._ui_thread.start()
+        port = server.server_address[1]
+        self.log.info("Web UI listening on %s://%s:%d/ui (login with the runner token)",
+                      scheme, self.ui_host, port)
+        return port
+
+    # ---- uploads ---------------------------------------------------------------
+
+    @staticmethod
+    def safe_filename(name: str) -> str:
+        name = os.path.basename((name or "").strip().replace("\\", "/"))
+        name = _SAFE_NAME.sub("_", name).strip("._")
+        return name[:120]
+
+    def save_upload(self, name: str, stream, length: int) -> str:
+        os.makedirs(self.upload_dir, mode=0o750, exist_ok=True)
+        base, ext = os.path.splitext(name)
+        path = os.path.join(self.upload_dir, name)
+        n = 1
+        while os.path.exists(path):
+            path = os.path.join(self.upload_dir, f"{base}-{n}{ext}")
+            n += 1
+        tmp = path + ".part"
+        remaining = length
+        with open(tmp, "wb") as f:
+            while remaining > 0:
+                chunk = stream.read(min(65536, remaining))
+                if not chunk:
+                    break
+                f.write(chunk)
+                remaining -= len(chunk)
+        if remaining > 0:
+            os.unlink(tmp)
+            raise OSError("upload truncated")
+        os.replace(tmp, path)
+        return path
+
+    def list_uploads(self) -> list:
+        entries = list(self.agent.uploads)
+        for e in entries:
+            e["exists"] = os.path.exists(e.get("path", ""))
+        return entries[-50:]
 
     # ---- loop ----------------------------------------------------------
 
@@ -266,6 +490,7 @@ class HeadlessRunner:
         """Run until stopped or max_cycles reached. Returns cycles run."""
         self.agent.running = True
         self.start_status_server()
+        self.start_ui_server()
         self._write_status_file()
         cycles = 0
         self.log.info("Headless loop started (interval=%.1fs, max_cycles=%s)",

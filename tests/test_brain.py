@@ -442,7 +442,7 @@ class TestClaudeBrain(unittest.TestCase):
             body = api.requests[-1]["body"]
             self.assertNotIn("format", body["output_config"])
             self.assertNotIn("cache_control", body["system"][0])  # too short to cache
-            self.assertIn("Question: how is memory?", body["messages"][0]["content"])
+            self.assertTrue(body["messages"][0]["content"].endswith("how is memory?"))
             self.assertIsNone(brain.ask(agent, "   "))
 
     def test_no_credentials_disables_at_construction(self):

@@ -91,3 +91,14 @@ variable "bedrock_model_arns" {
   default     = ["arn:aws:bedrock:*::foundation-model/*", "arn:aws:bedrock:*:*:inference-profile/*", "arn:aws:bedrock:*:*:imported-model/*"]
   description = "Resources the instance may invoke on Bedrock when llm_provider is bedrock. Narrow to your model or imported-model ARN in production."
 }
+
+variable "ui_cidr" {
+  type        = string
+  default     = ""
+  description = "CIDR allowed to reach the web UI (chat, agent panel, uploads) over HTTPS, e.g. 203.0.113.4/32. Empty = closed."
+}
+
+variable "ui_port" {
+  type    = number
+  default = 8443
+}

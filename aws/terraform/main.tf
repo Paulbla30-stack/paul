@@ -162,6 +162,17 @@ resource "aws_security_group" "openclaw" {
     }
   }
 
+  dynamic "ingress" {
+    for_each = var.ui_cidr != "" ? [var.ui_cidr] : []
+    content {
+      description = "OpenClaw web UI (HTTPS, token login)"
+      from_port   = var.ui_port
+      to_port     = var.ui_port
+      protocol    = "tcp"
+      cidr_blocks = [ingress.value]
+    }
+  }
+
   egress {
     description = "All outbound"
     from_port   = 0

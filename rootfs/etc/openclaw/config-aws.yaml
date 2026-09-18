@@ -41,6 +41,14 @@ cloud:
   status_file: "/run/openclaw/status.json"
   status_token: null         # null = generated at start and written to the file below
   status_token_file: "/run/openclaw/token"   # 0600; needed for every call but /health, /status
+  ui:                        # web UI: chat, agent panel, file uploads
+    enabled: true
+    host: "0.0.0.0"          # reachable only if the security group allows it (terraform ui_cidr)
+    port: 8443
+    tls: true                # self-signed certificate; the browser will warn once
+    tls_dir: /etc/openclaw/tls
+    upload_dir: /var/lib/openclaw/uploads
+    max_upload_mb: 50
 
 goals: []                    # add goals via user data or the openclaw:goal tag
 
