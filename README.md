@@ -141,9 +141,10 @@ Key points:
   services, piping downloads into an interpreter, touching credentials and
   flushing the firewall. Commands run in their own process group (a timeout kills
   everything they started) with credentials scrubbed from the environment.
-  `llm.shell.deny_patterns` adds to the built-in list; set
-  `replace_deny_patterns: true` to use only your own. It is a guard rail, not a
-  sandbox. Off by default and on in the AMI profile.
+  `llm.shell.deny_patterns` adds to the built-in list, which never shrinks by
+  configuration: the agent's own runner token, status API, UI port and ledger
+  are fenced off too. It is a guard rail, not a sandbox. Off by default and on
+  in the AMI profile.
 - **A failed brain task is not retried** by the agent: the brain sees the failure
   next cycle and decides. Goals given through user data, tags, `POST /goal` or the
   console are treated as instructions from the operator, so anyone who can set

@@ -185,8 +185,7 @@ def load_config(path, extra_paths=()):
                 "timeout": 60,
                 "max_output": 4000,
                 "cwd": "/",
-                "deny_patterns": None,          # extra patterns, added to the defaults
-                "replace_deny_patterns": False,
+                "deny_patterns": None,          # extra patterns, added to the defaults (the list never shrinks)
             },
         },
     }

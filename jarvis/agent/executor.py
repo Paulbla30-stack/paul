@@ -74,6 +74,10 @@ DEFAULT_SHELL_DENY_PATTERNS = [
     # --- the Glass Ledger: evidence about the agent, never context for it ---
     r"/(?:var/lib|etc)/jarvis/ledger",
     r"\bjarvis\.ledger\b",
+    # --- the agent's own control plane: its runner token, status API and UI ---
+    r"/run/jarvis\b",
+    r"(?<![\w.])(?:127\.0\.0\.1|localhost|0\.0\.0\.0|\[::1\]|::1)(?::|\s+)(?:8471|8443)\b",
+    r"\bAuthorization:\s*Bearer\b",
 ]
 
 # Installing software or enabling repositories as root is denied unless the
@@ -94,7 +98,6 @@ DEFAULT_SHELL_POLICY = {
     "max_output": 4000,
     "cwd": "/",
     "deny_patterns": None,          # extra patterns, added to the defaults
-    "replace_deny_patterns": False,  # True = use only the configured list
     "allow_package_install": False,  # True = let the planner install software
 }
 
@@ -122,21 +125,22 @@ def _compile_patterns(patterns, log=None) -> list:
 def normalise_shell_policy(policy: Optional[dict], log=None) -> dict:
     """Fill in defaults; a missing or falsy policy means shell is disabled.
 
-    Operator patterns are *added* to the built-in list unless
-    ``replace_deny_patterns`` is true. Invalid patterns are logged and
+    Operator patterns are *added* to the built-in list; the built-in
+    ceiling never shrinks by configuration (a ``replace_deny_patterns``
+    key is ignored with a warning). Invalid patterns are logged and
     dropped, never silently ignored.
     """
     merged = dict(DEFAULT_SHELL_POLICY)
     if isinstance(policy, dict):
         merged.update({k: v for k, v in policy.items() if v is not None})
+    if merged.pop("replace_deny_patterns", None):
+        (log or logging.getLogger("jarvis.executor")).warning(
+            "llm.shell.replace_deny_patterns is ignored: the built-in deny list never shrinks")
     extra = merged.get("deny_patterns")
     extra = [str(p) for p in extra] if isinstance(extra, list) else []
-    if merged.get("replace_deny_patterns"):
-        patterns = extra
-    else:
-        patterns = list(DEFAULT_SHELL_DENY_PATTERNS) + extra
-        if not merged.get("allow_package_install"):
-            patterns += PACKAGE_INSTALL_DENY_PATTERNS
+    patterns = list(DEFAULT_SHELL_DENY_PATTERNS) + extra
+    if not merged.get("allow_package_install"):
+        patterns += PACKAGE_INSTALL_DENY_PATTERNS
     merged["deny_patterns"] = patterns
     merged["_compiled"] = _compile_patterns(patterns, log)
     merged["enabled"] = bool(merged.get("enabled"))

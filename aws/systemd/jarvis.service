@@ -15,7 +15,7 @@ Environment=PYTHONUNBUFFERED=1
 Environment=JARVIS_HEADLESS=1
 EnvironmentFile=-/etc/default/jarvis
 RuntimeDirectory=jarvis
-RuntimeDirectoryMode=0755
+RuntimeDirectoryMode=0700
 ExecStart=/usr/local/bin/jarvis --headless --extra-config /etc/jarvis/cloud.yaml
 Restart=always
 RestartSec=5

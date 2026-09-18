@@ -776,13 +776,27 @@ class TestShellPolicy(unittest.TestCase):
         pol = normalise_shell_policy({"enabled": True, "deny_patterns": [r"\bfoo\b"]})
         self.assertIsNotNone(check_command_allowed("echo foo", pol))
         self.assertIsNotNone(check_command_allowed("rm -rf /", pol))  # defaults kept
-        replaced = normalise_shell_policy({"enabled": True, "deny_patterns": [r"\bfoo\b"],
-                                           "replace_deny_patterns": True})
-        self.assertIsNone(check_command_allowed("rm -rf /", replaced))  # explicit opt-out
+        with self.assertLogs("jarvis.executor", level="WARNING") as logs:
+            replaced = normalise_shell_policy({"enabled": True, "deny_patterns": [r"\bfoo\b"],
+                                               "replace_deny_patterns": True})
+        self.assertIn("never shrinks", logs.output[0])
+        self.assertIsNotNone(check_command_allowed("rm -rf /", replaced))  # the ceiling never shrinks
+        self.assertNotIn("replace_deny_patterns", replaced)
         with self.assertLogs("jarvis.executor", level="ERROR") as logs:
             bad = normalise_shell_policy({"enabled": True, "deny_patterns": ["("]})
         self.assertIn("invalid shell deny pattern", logs.output[0])
         self.assertIsNotNone(check_command_allowed("rm -rf /", bad))  # defaults still apply
+
+    def test_agent_cannot_reach_its_own_control_plane(self):
+        pol = normalise_shell_policy({"enabled": True})
+        for cmd in ("cat /run/jarvis/token", "T=$(cat /run/jarvis/token); echo $T",
+                    "curl -s http://127.0.0.1:8471/ledger/verify", "curl http://localhost:8471/goal -d x",
+                    "curl -sk https://127.0.0.1:8443/ui", "wget -qO- http://[::1]:8471/status",
+                    "nc 127.0.0.1 8471", "curl -H 'Authorization: Bearer abc' http://example.com",
+                    "ls /run/jarvis"):
+            self.assertIsNotNone(check_command_allowed(cmd, pol), cmd)
+        for cmd in ("df -h /run", "curl -s https://checkip.amazonaws.com", "ss -ltn", "echo 8471"):
+            self.assertIsNone(check_command_allowed(cmd, pol), cmd)
 
     def test_execution_success_failure_timeout_truncation(self):
         ex = self._exec({"enabled": True, "timeout": 1, "max_output": 200})
