@@ -67,6 +67,7 @@
   <button data-tab="chat" class="active">Chat</button>
   <button data-tab="agent">Agent</button>
   <button data-tab="files">Files</button>
+  <button data-tab="ledger">Ledger</button>
 </nav>
 
 <main>
@@ -127,6 +128,29 @@
       <ul id="uploads"></ul>
     </div>
   </section>
+
+  <section id="ledger">
+    <div class="card">
+      <h2>The Glass Ledger</h2>
+      <div class="grid">
+        <div class="stat"><b id="lSeq">-</b><span>head seq</span></div>
+        <div class="stat"><b id="lState">-</b><span>state</span></div>
+        <div class="stat"><b id="lSession">-</b><span>entries this run</span></div>
+        <div class="stat"><b id="lAnchor">-</b><span>witness copy</span></div>
+      </div>
+      <p id="lReason" class="small" style="margin:10px 0 0;color:var(--bad)"></p>
+      <p class="small muted" style="margin:8px 0 0">Every decision, action and outcome is signed and chained; the agent cannot rewrite it and never reads it. A verdict from this box is a convenience: the audit that counts runs from your machine against the witness copy with the public key you pinned.</p>
+      <p class="small" style="margin:8px 0 0;word-break:break-all">public key <code id="lPub">-</code></p>
+      <div class="row" style="margin-top:10px">
+        <button class="btn" id="verifyBtn" onclick="verifyLedger()">Verify on box</button>
+        <span id="lVerdict" class="small"></span>
+      </div>
+    </div>
+    <div class="card">
+      <h2>Latest entries</h2>
+      <ul id="ledgerEntries"></ul>
+    </div>
+  </section>
 </main>
 
 <div class="composer" id="composer">
@@ -182,6 +206,7 @@
     document.querySelectorAll("main section").forEach(s => s.classList.toggle("active", s.id === b.dataset.tab));
     $("composer").style.display = b.dataset.tab === "chat" ? "" : "none";
     if (b.dataset.tab === "files") loadUploads();
+    if (b.dataset.tab === "ledger") loadLedger();
   }));
 
   // ---- chat ----
@@ -254,6 +279,40 @@
       if (fromChat) pushTurn("assistant", line); else { $("lastThought").textContent = "Thinking: " + (r.reasoning || ""); }
     } catch (e) { if (fromChat) pushTurn("system", "Error: " + e.message); else alert(e.message); }
     refresh();
+  };
+
+  // ---- ledger ----
+  async function loadLedger() {
+    try {
+      const [st, tail] = await Promise.all([api("/ledger"), api("/ledger/tail?limit=40")]);
+      if (!st.enabled) { $("lState").textContent = "off"; $("lReason").textContent = "The ledger is not enabled on this agent (ledger.enabled)."; $("verifyBtn").disabled = true; return; }
+      $("lSeq").textContent = st.head ? st.head.seq : "-";
+      $("lState").textContent = st.available ? "recording" : "unavailable";
+      $("lSession").textContent = st.entries_this_session;
+      const a = st.anchor || {};
+      $("lAnchor").textContent = !a.enabled ? "none" : a.last_error ? "failing" : a.last_anchored ? ("seq " + a.last_anchored.seq) : "pending";
+      $("lReason").textContent = st.available ? (a.last_error ? "witness upload: " + a.last_error : "") : (st.reason || "") + (st.fail_closed ? " — fail-closed: the agent will not act until this is repaired by the operator." : "");
+      $("lPub").textContent = st.pubkey || "-";
+      $("verifyBtn").disabled = false;
+      const ul = $("ledgerEntries"); ul.innerHTML = "";
+      if (!tail.length) ul.innerHTML = '<li class="muted small">Nothing yet.</li>';
+      for (const e of tail.slice().reverse()) {
+        const li = document.createElement("li"); li.className = "task";
+        if (e.error) { li.innerHTML = '<span class="st" style="background:var(--bad)"></span><div class="small">' + escapeHtml(e.error) + '</div>'; ul.appendChild(li); continue; }
+        const b = e.body || {}; const colour = e.kind === "gate" ? "var(--bad)" : e.kind === "outcome" ? (b.success ? "var(--ok)" : "var(--bad)") : "var(--accent, #888)";
+        const line = b.description || b.reasoning || b.question || b.action || b.gate || (b.task && b.task.description) || "";
+        li.innerHTML = '<span class="st" style="background:' + colour + '"></span><div style="flex:1"><div><b>' + escapeHtml(e.kind) + '</b> <span class="small muted">#' + e.seq + ' · ' + escapeHtml(e.ts) + '</span></div>' +
+          (line ? '<div class="small">' + escapeHtml(String(line)) + '</div>' : '') +
+          '<details><summary class="small muted">entry</summary><pre>' + escapeHtml(JSON.stringify(b, null, 1)) + '\nprev ' + escapeHtml(e.prev_hash.slice(0, 16)) + '…\nhash ' + escapeHtml(e.entry_hash.slice(0, 16)) + '…\nsig  ' + escapeHtml(e.sig.slice(0, 16)) + '…</pre></details></div>';
+        ul.appendChild(li);
+      }
+    } catch (e) { if (e.message !== "unauthorised") console.warn(e); }
+  }
+  window.verifyLedger = async function () {
+    $("verifyBtn").disabled = true; $("lVerdict").textContent = "verifying…";
+    try { const r = await api("/ledger/verify"); $("lVerdict").textContent = r.summary || (r.ok ? "INTACT" : "BROKEN"); $("lVerdict").style.color = r.ok ? "var(--ok)" : "var(--bad)"; }
+    catch (e) { $("lVerdict").textContent = "Error: " + e.message; }
+    $("verifyBtn").disabled = false;
   };
 
   // ---- files ----

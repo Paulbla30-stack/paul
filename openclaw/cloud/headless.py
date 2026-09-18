@@ -26,6 +26,9 @@ Endpoints (default 127.0.0.1:8471):
 A second listener (``ui`` settings) can serve the same handler on a
 public address with TLS, so the UI works from a phone without a tunnel.
 
+    GET  /ledger, /ledger/tail?limit=N, /ledger/verify, /ledger/pubkey
+                  -> Glass Ledger status, last entries, on-box verdict, key
+
 Everything except /health and /status requires the runner token, sent as
 ``Authorization: Bearer <token>`` or ``X-OpenClaw-Token``. The token is
 taken from ``cloud.status_token`` or generated at start and written 0600
@@ -260,6 +263,17 @@ class HeadlessRunner:
                                          "last_thought": runner.agent.last_thought or None})
                     elif path == "/goals":
                         self._send(200, runner.agent.planner.goals)
+                    elif path == "/ledger":
+                        self._send(200, runner.agent.ledger.status())
+                    elif path == "/ledger/tail":
+                        self._send(200, runner.agent.ledger.tail(limit)
+                                   if runner.agent.ledger.enabled else [])
+                    elif path == "/ledger/verify":
+                        self._send(200, runner.agent.ledger.verify()
+                                   if runner.agent.ledger.enabled else {"ok": False, "summary": "ledger disabled"})
+                    elif path == "/ledger/pubkey":
+                        self._send(200, {"pubkey": getattr(runner.agent.ledger, "pubkey", None),
+                                         "format": "glass-ledger/v2"})
                     else:
                         self._send(404, {"error": "not found"})
 
@@ -527,6 +541,10 @@ class HeadlessRunner:
                     self.log.info("cycle %d: %s -> %s", result["cycle"], action,
                                   "ok" if ok else "failed")
                 self._write_status_file()
+                try:
+                    self.agent.ledger.tick()
+                except Exception as e:  # the witness copy never stops the loop
+                    self.log.warning("ledger anchor tick failed: %s", e)
                 if self.max_cycles and cycles >= self.max_cycles:
                     break
                 # Idle cycles wait the full interval; successful work goes
@@ -553,6 +571,10 @@ class HeadlessRunner:
                     break
         finally:
             self.agent.running = False
+            try:
+                self.agent.ledger.tick(force=True)
+            except Exception as e:
+                self.log.warning("final ledger anchor upload failed: %s", e)
             self._write_status_file()
             self.stop_status_server()
             self.log.info("Headless loop stopped after %d cycles", cycles)

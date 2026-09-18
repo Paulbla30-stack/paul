@@ -126,6 +126,84 @@ resource "aws_iam_role_policy" "bedrock" {
   })
 }
 
+# The Glass Ledger witness: an Object Lock bucket the instance can write to
+# but never delete from or read back. The audit (aws/scripts/ledger_audit.py)
+# runs elsewhere against this copy with a pinned public key.
+resource "aws_s3_bucket" "ledger" {
+  count               = var.ledger_anchor ? 1 : 0
+  bucket              = "openclaw-ledger-${data.aws_caller_identity.current.account_id}-${var.name}"
+  object_lock_enabled = true
+  force_destroy       = false
+  tags                = local.tags
+}
+
+resource "aws_s3_bucket_versioning" "ledger" {
+  count  = var.ledger_anchor ? 1 : 0
+  bucket = aws_s3_bucket.ledger[0].id
+  versioning_configuration {
+    status = "Enabled"
+  }
+}
+
+resource "aws_s3_bucket_object_lock_configuration" "ledger" {
+  count      = var.ledger_anchor ? 1 : 0
+  bucket     = aws_s3_bucket.ledger[0].id
+  depends_on = [aws_s3_bucket_versioning.ledger]
+  rule {
+    default_retention {
+      mode = "COMPLIANCE"
+      days = var.ledger_retention_days
+    }
+  }
+}
+
+resource "aws_s3_bucket_public_access_block" "ledger" {
+  count                   = var.ledger_anchor ? 1 : 0
+  bucket                  = aws_s3_bucket.ledger[0].id
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
+resource "aws_s3_bucket_server_side_encryption_configuration" "ledger" {
+  count  = var.ledger_anchor ? 1 : 0
+  bucket = aws_s3_bucket.ledger[0].id
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm = "AES256"
+    }
+  }
+}
+
+resource "aws_iam_role_policy" "ledger_anchor" {
+  count = var.ledger_anchor ? 1 : 0
+  name  = "openclaw-ledger-anchor"
+  role  = aws_iam_role.openclaw.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid      = "AppendOnly"
+        Effect   = "Allow"
+        Action   = ["s3:PutObject"]
+        Resource = "${aws_s3_bucket.ledger[0].arn}/ledger/*"
+      },
+      {
+        Sid    = "NeverReadOrRelease"
+        Effect = "Deny"
+        Action = [
+          "s3:GetObject", "s3:GetObjectVersion", "s3:ListBucket", "s3:ListBucketVersions",
+          "s3:DeleteObject", "s3:DeleteObjectVersion", "s3:PutObjectRetention",
+          "s3:PutObjectLegalHold", "s3:BypassGovernanceRetention", "s3:PutBucketObjectLockConfiguration",
+          "s3:DeleteBucket", "s3:PutLifecycleConfiguration",
+        ]
+        Resource = [aws_s3_bucket.ledger[0].arn, "${aws_s3_bucket.ledger[0].arn}/*"]
+      },
+    ]
+  })
+}
+
 resource "aws_iam_role_policy" "llm_key" {
   count = length(local.llm_key_statements) > 0 && var.llm_provider == "anthropic" ? 1 : 0
   name  = "openclaw-llm-key"
@@ -217,5 +295,6 @@ resource "aws_instance" "openclaw" {
     var.agent_goal != "" ? { "openclaw:goal" = var.agent_goal } : {},
     var.llm_provider == "anthropic" && var.anthropic_api_key_secret != "" ? { "openclaw:llm-key-secret" = var.anthropic_api_key_secret } : {},
     var.llm_provider == "anthropic" && var.anthropic_api_key_ssm_parameter != "" ? { "openclaw:llm-key-parameter" = var.anthropic_api_key_ssm_parameter } : {},
+    var.ledger_anchor ? { "openclaw:ledger-bucket" = aws_s3_bucket.ledger[0].bucket } : {},
   )
 }

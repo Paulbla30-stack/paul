@@ -146,6 +146,19 @@ def load_config(path, extra_paths=()):
             },
         },
         "goals": [],
+        "ledger": {                        # the Glass Ledger (signed, hash-chained journal)
+            "enabled": False,
+            "path": "/var/lib/openclaw/ledger.jsonl",
+            "key_file": "/etc/openclaw/ledger/ed25519.key",
+            "pubkey_file": "/etc/openclaw/ledger/ed25519.pub",
+            "fail_closed": True,           # no record, no action, no answer
+            "anchor": {                    # off-box witness copy (S3 Object Lock bucket)
+                "bucket": None,            # set by the openclaw:ledger-bucket tag or here
+                "prefix": "ledger",
+                "every_s": 300,
+                "copy": True,
+            },
+        },
         "llm": {
             "enabled": False,
             "provider": "anthropic",       # anthropic | bedrock
@@ -320,6 +333,21 @@ class OpenClawSystem:
                       "on" if (llm_cfg.get("shell") or {}).get("enabled") else "off")
         return brain
 
+    def build_ledger(self):
+        """Open the Glass Ledger when enabled; None keeps the agent ungated."""
+        cfg = self.config.get("ledger") or {}
+        if not cfg.get("enabled"):
+            return None
+        cloud = self.config.get("cloud") or {}
+        inst = cloud.get("instance") if isinstance(cloud.get("instance"), dict) else {}
+        try:
+            from openclaw.ledger import AgentLedger
+            return AgentLedger(cfg, self.log, writer=self.config["agent"].get("name", "openclaw"),
+                               region=inst.get("region"), instance_id=inst.get("instance_id"))
+        except Exception as e:  # AgentLedger reports its own failures; this is a bug guard
+            self.log.error("Glass Ledger could not be set up: %s", e)
+            return None
+
     def build_agent(self):
         """Construct the AgentCore and seed it with configured goals."""
         hardware = {
@@ -330,13 +358,26 @@ class OpenClawSystem:
         }
 
         llm_cfg = self.config.get("llm") or {}
+        self.ledger = self.build_ledger()
         self.agent = AgentCore(
             config=self.config["agent"],
             hardware=hardware,
             logger=self.log,
             brain=self.build_brain(),
             shell_policy=llm_cfg.get("shell"),
+            ledger=self.ledger,
         )
+        if self.ledger is not None:
+            brain = self.agent.brain
+            self.ledger.record("action", {
+                "cycle": 0, "actor": "system", "action": "agent_start",
+                "name": self.agent.name, "profile": self.agent.profile,
+                "brain": {"provider": getattr(brain, "provider", None),
+                          "model": getattr(brain, "model", None)} if brain else None,
+                "shell": bool((llm_cfg.get("shell") or {}).get("enabled")),
+                "instance_id": ((self.config.get("cloud") or {}).get("instance") or {}).get("instance_id")
+                if isinstance((self.config.get("cloud") or {}).get("instance"), dict) else None,
+            })
         for goal in self.config.get("goals") or []:
             if isinstance(goal, str):
                 self.agent.add_goal(goal)

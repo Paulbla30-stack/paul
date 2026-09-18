@@ -71,6 +71,9 @@ DEFAULT_SHELL_DENY_PATTERNS = [
     r"~?/\.(?:ssh|aws|config/anthropic)\b",
     _CMD + r"crontab\s+(?:-\S+\s+)*-r\b",
     _CMD + r"cloud-init\s+clean\b",
+    # --- the Glass Ledger: evidence about the agent, never context for it ---
+    r"/(?:var/lib|etc)/openclaw/ledger",
+    r"\bopenclaw\.ledger\b",
 ]
 
 # Installing software or enabling repositories as root is denied unless the

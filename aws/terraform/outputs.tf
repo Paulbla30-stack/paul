@@ -21,3 +21,11 @@ output "serial_console_command" {
 output "ui_url" {
   value = var.ui_cidr != "" ? "https://${aws_instance.openclaw.public_ip}:${var.ui_port}/ui" : "(closed: set -var ui_cidr=<your ip>/32)"
 }
+
+output "ledger_bucket" {
+  value = var.ledger_anchor ? aws_s3_bucket.ledger[0].bucket : "(no anchor: -var ledger_anchor=false)"
+}
+
+output "ledger_audit_command" {
+  value = var.ledger_anchor ? "python3 aws/scripts/ledger_audit.py --bucket ${aws_s3_bucket.ledger[0].bucket} --writer ${var.name} --region ${var.region} --pubkey <pinned hex> --pin build/ledger.pin" : "(no anchor)"
+}

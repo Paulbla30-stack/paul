@@ -208,6 +208,76 @@ validates it, and re-asks once with the parse error (`llm.bedrock.json_retries`)
 Expect planning quality to track the model: a 70B-class instruct model is
 fine with `llm.shell.enabled: true`; with a small model, keep shell off.
 
+### The Glass Ledger: a journal the agent cannot rewrite
+
+Any system that keeps its own log can rewrite its own log. The AMI ships
+the Glass Ledger (Blatherwick, *The Glass Ledger v2*,
+[doi:10.5281/zenodo.21515861](https://doi.org/10.5281/zenodo.21515861)):
+an append-only journal at `/var/lib/openclaw/ledger.jsonl` where every
+entry carries the SHA-256 fingerprint of the entry before it and an
+Ed25519 signature over its own fingerprint, with length-prefix framing,
+canonical JSON and domain-separated signing (`openclaw/ledger/chain.py`
+documents the exact bytes). The agent records:
+
+| kind | what |
+|---|---|
+| `genesis` | seq 0: commits the public key and the writer's name |
+| `decision` | every brain decision: reasoning, chosen task, completed goals, note, or the repeat it was refused |
+| `action` | every task about to run (type, command, goal, source), operator goals and uploads (with the file's SHA-256), agent start |
+| `outcome` | success, error, duration and a digest of the output |
+| `gate` | a shell command refused by policy, a brain cooldown |
+| `thought` | a chat or `--ask` exchange (question, answer digest) |
+
+The action entry is written **before** the task runs. With
+`ledger.fail_closed: true` (the default) the agent does not plan, act or
+answer while it cannot record: no record, no action, no answer. The
+reason (a torn tail after a power loss, a locked file) shows under
+`ledger` in `/status` and on the UI; the one documented repair is an
+operator command, `python -m openclaw.ledger repair <file>`, never the
+agent's. The shell policy denies the agent any command touching the
+ledger, its key or the verifier, and the planner prompt says why: the
+ledger is evidence about the agent, not context for it.
+
+**The witness never lives with the writer.** A verdict from the box that
+wrote the file proves nothing, so Terraform creates an S3 bucket with
+Object Lock (`ledger_anchor = true`, COMPLIANCE retention
+`ledger_retention_days`, default 30). The instance role may only
+`s3:PutObject` under `ledger/` and is explicitly denied reading,
+deleting, or changing retention; every version it writes is kept until
+the retention expires, and nobody, root included, can shorten that. The
+agent anchors a checkpoint pin `(seq, entry_hash)` and a copy of the file
+at most every `ledger.anchor.every_s` seconds (300). The audit runs from
+your machine:
+
+```bash
+# once, when the agent first starts: record its public key somewhere the
+# instance cannot reach (it is also logged at start and at /ledger/pubkey)
+aws ssm send-command --instance-ids <id> --document-name AWS-RunShellScript \
+    --parameters commands='cat /etc/openclaw/ledger/ed25519.pub'
+
+# then, whenever you like: verify the witness copy, check your pin, advance it
+python3 aws/scripts/ledger_audit.py --bucket $(terraform -chdir=aws/terraform output -raw ledger_bucket) \
+    --writer openclaw-agent --region us-west-2 --pubkey <hex> --pin build/ledger.pin
+```
+
+The audit checks the four chain rules on every entry, that genesis
+commits the key you pinned (a rewrite under a fresh key dies at seq 0),
+that the chain still extends the pin you kept (a rolled-back or
+regenerated history is BROKEN), and that the instance's own checkpoint
+agrees with the chain. `python -m openclaw.ledger verify <copy> --pubkey
+<hex> --pin <file>` does the same on any copy; `tail` prints entries.
+Verdicts, never tracebacks: hostile input comes back as `BROKEN at seq N`.
+A partial final line is `INTACT (torn tail)` with a repair instruction,
+so an accident is not reported as an attack.
+
+What it is not: not tamper-proof (edits are detectable, not impossible),
+not confidentiality (entries are plaintext; encrypt the volume if the
+content is sensitive), not trusted time (timestamps are the writer's
+clock). And the bucket is in the same AWS account as the writer; for
+stakes that justify it the paper asks for a seal held by a different
+party, which is where a second copy to another account or an RFC 3161
+timestamp belongs.
+
 ### Interpreter on Amazon Linux 2023
 
 The Anthropic SDK needs Python 3.10 or newer and AL2023's system `python3` is

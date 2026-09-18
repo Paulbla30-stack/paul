@@ -52,6 +52,22 @@ cloud:
 
 goals: []                    # add goals via user data or the openclaw:goal tag
 
+# The Glass Ledger: a signed, hash-chained, append-only journal of every
+# decision, action and outcome (Blatherwick, The Glass Ledger v2,
+# doi:10.5281/zenodo.21515861). fail_closed means the agent does not
+# plan, act or answer while it cannot record. The brain never reads it.
+ledger:
+  enabled: true
+  path: /var/lib/openclaw/ledger.jsonl
+  key_file: /etc/openclaw/ledger/ed25519.key     # generated at first start, 0600
+  pubkey_file: /etc/openclaw/ledger/ed25519.pub  # pin this on the machine that audits
+  fail_closed: true
+  anchor:                    # off-box witness: S3 bucket with Object Lock (Terraform)
+    bucket: null             # set by the openclaw:ledger-bucket instance tag
+    prefix: ledger
+    every_s: 300             # checkpoint pin + file copy at most this often
+    copy: true
+
 # LLM planner. Enabled here, but it only runs when a key is available:
 #   - /etc/openclaw/anthropic.key (0600), written at boot by
 #     openclaw-bootstrap from llm.api_key_secret (AWS Secrets Manager) or

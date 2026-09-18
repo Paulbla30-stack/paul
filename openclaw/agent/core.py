@@ -6,11 +6,50 @@ maintains state/memory across interactions.
 """
 
 import time
+import hashlib
+import json
 import logging
 from collections import deque
 from typing import Any, Optional
 
 from openclaw.agent.planner import TaskPlanner, Task, TaskStatus, TaskType
+
+
+def _sha256(text: str) -> str:
+    return hashlib.sha256((text or "").encode("utf-8", errors="replace")).hexdigest()
+
+
+def _sha256_file(path: str) -> Optional[str]:
+    try:
+        h = hashlib.sha256()
+        with open(path, "rb") as fh:
+            for chunk in iter(lambda: fh.read(1 << 20), b""):
+                h.update(chunk)
+        return h.hexdigest()
+    except OSError:
+        return None
+
+
+class NullLedger:
+    """Stands in when no ledger is configured: records nothing, gates nothing."""
+
+    enabled = False
+    available = False
+
+    def record(self, kind: str, body: dict) -> bool:
+        return True
+
+    def gate(self):
+        return None
+
+    def tick(self, force: bool = False):
+        pass
+
+    def close(self):
+        pass
+
+    def status(self) -> dict:
+        return {"enabled": False}
 from openclaw.agent.executor import TaskExecutor
 from openclaw.agent.memory import AgentMemory
 
@@ -27,7 +66,7 @@ class AgentCore:
     """
 
     def __init__(self, config: dict, hardware: dict, logger: logging.Logger,
-                 brain=None, shell_policy: Optional[dict] = None):
+                 brain=None, shell_policy: Optional[dict] = None, ledger=None):
         self.config = config
         self.hardware = hardware
         self.log = logger.getChild("agent")
@@ -45,6 +84,10 @@ class AgentCore:
         # the rule-based planner takes over for that cycle.
         self.brain = brain
         self.last_thought: dict = {}
+        # The Glass Ledger: a signed, hash-chained journal of every decision,
+        # action and outcome. With fail_closed the agent does not act, plan
+        # or answer while it cannot record. The brain never reads it.
+        self.ledger = ledger if ledger is not None else NullLedger()
         # Failure streak of brain-chosen tasks; past the limit the brain sits
         # out a few cycles so the rule planner (and the operator) get a turn.
         self.brain_failures = 0
@@ -117,6 +160,11 @@ class AgentCore:
             self.log.warning("Task queue full (%d tasks), skipping planning",
                              self.max_tasks)
             return None
+        gate = self.ledger.gate()
+        if gate:
+            if self.cycle_count % 10 == 1:
+                self.log.error("Not planning: %s", gate)
+            return None
 
         if (self.brain is not None and self.cycle_count > self._brain_cooldown_until
                 and self.brain.should_plan(self.cycle_count)):
@@ -133,6 +181,23 @@ class AgentCore:
             self.log.debug("Planned task: %s (priority=%d)",
                            task.description, task.priority)
         return task
+
+    def _decision_body(self, decision, task, skipped: Optional[str] = None) -> dict:
+        body = {"cycle": self.cycle_count, "source": "llm",
+                "reasoning": str(decision.reasoning or "")[:1000],
+                "task": None, "completed_goals": list(decision.completed_goals)[:20]}
+        if decision.note:
+            body["note"] = str(decision.note)[:500]
+        if decision.task is not None:
+            t = decision.task
+            body["task"] = {"type": t.task_type.value, "description": t.description[:300],
+                            "priority": t.priority}
+            for key in ("command", "goal"):
+                if t.metadata.get(key):
+                    body["task"][key] = str(t.metadata[key])[:1000]
+        if skipped:
+            body["skipped"] = skipped[:300]
+        return body
 
     def _apply_decision(self, decision) -> Optional[Task]:
         """Turn a brain Decision into agent state: goals, notes, task."""
@@ -155,6 +220,7 @@ class AgentCore:
         if decision.task is None:
             self.brain_repeat_streak = 0
             self.log.info("Brain: idle. %s", decision.reasoning)
+            self.ledger.record("decision", self._decision_body(decision, None))
             return None
         if self._repeats_last_success(decision.task):
             # Same probe or command as the task that just succeeded: its result
@@ -173,8 +239,15 @@ class AgentCore:
                 f"you chose '{decision.task.description}' but that task just ran successfully "
                 "and its result is in recent_history; it was not run again. Choose none or a "
                 "different task.")
+            self.ledger.record("decision", self._decision_body(
+                decision, None, skipped="repeat of the task that just succeeded"))
+            self.ledger.record("gate", {"cycle": self.cycle_count, "gate": "brain_repeat",
+                                        "task": decision.task.description[:300],
+                                        "streak": self.brain_repeat_streak,
+                                        "rule_planner_cycles": cooldown})
             return None
         self.brain_repeat_streak = 0
+        self.ledger.record("decision", self._decision_body(decision, decision.task))
         self.memory.store(category="llm_plan", data={
             "cycle": self.cycle_count,
             "reasoning": decision.reasoning,
@@ -212,11 +285,43 @@ class AgentCore:
         return True  # same probe as the one that just ran
 
     def act(self, task: Task) -> dict:
-        """Execute a task and return the result."""
-        self.current_task = task
-        self.log.info("Executing task: %s", task.description)
+        """Execute a task and return the result.
 
-        result = self.executor.execute(task)
+        The action is written to the ledger before it runs; if that fails
+        under fail-closed the task is refused, not run: no record, no action.
+        """
+        self.current_task = task
+        action = {"cycle": self.cycle_count, "type": task.task_type.value,
+                  "description": task.description[:300], "priority": task.priority,
+                  "source": task.metadata.get("source") or "rules"}
+        for key in ("command", "goal"):
+            if task.metadata.get(key):
+                action[key] = str(task.metadata[key])[:1000]
+        recorded = self.ledger.record("action", action)
+        gate = None if recorded else self.ledger.gate()
+        if gate:
+            self.log.error("Refusing to run %s: %s", task.description, gate)
+            result = {"success": False, "error": gate, "refused": True}
+        else:
+            self.log.info("Executing task: %s", task.description)
+            started = time.time()
+            result = self.executor.execute(task)
+            outcome = {"cycle": self.cycle_count, "type": task.task_type.value,
+                       "description": task.description[:300],
+                       "success": bool(result.get("success")),
+                       "duration_s": round(time.time() - started, 3)}
+            if result.get("error"):
+                outcome["error"] = str(result["error"])[:500]
+            if "output" in result:
+                text = json.dumps(result["output"], default=str, sort_keys=True)
+                outcome["output"] = {"sha256": _sha256(text), "bytes": len(text),
+                                     "head": text[:200]}
+            policy = (result.get("output") or {}).get("denied") if isinstance(result.get("output"), dict) else None
+            if policy:
+                self.ledger.record("gate", {"cycle": self.cycle_count, "gate": "shell_policy",
+                                            "command": action.get("command", "")[:1000],
+                                            "reason": str(policy)[:300]})
+            self.ledger.record("outcome", outcome)
 
         self.current_task = None
         self.task_history.append({
@@ -260,6 +365,10 @@ class AgentCore:
                     self.log.warning("%d brain tasks failed in a row; rule planner takes the "
                                      "next %d cycles", self.brain_failure_limit,
                                      self.brain_cooldown_cycles)
+                    self.ledger.record("gate", {"cycle": self.cycle_count,
+                                                "gate": "brain_failure_streak",
+                                                "failures": self.brain_failure_limit,
+                                                "rule_planner_cycles": self.brain_cooldown_cycles})
             else:
                 # Re-plan if task failed
                 self.planner.handle_failure(task, error)
@@ -298,6 +407,9 @@ class AgentCore:
             category="goal",
             data={"description": description, "priority": priority},
         )
+        self.ledger.record("action", {"cycle": self.cycle_count, "actor": "operator",
+                                      "action": "add_goal", "description": str(description)[:500],
+                                      "priority": priority})
 
     def complete_goal(self, description: str) -> bool:
         """Mark a goal as satisfied (operator or brain)."""
@@ -305,6 +417,9 @@ class AgentCore:
         if done:
             self.memory.store(category="goal_completed",
                               data={"description": description, "cycle": self.cycle_count})
+            self.ledger.record("action", {"cycle": self.cycle_count, "actor": "operator",
+                                          "action": "complete_goal",
+                                          "description": str(description)[:500]})
         return done
 
     def think(self) -> dict:
@@ -314,6 +429,9 @@ class AgentCore:
         if not self.brain.available():
             return {"error": "LLM brain unavailable: "
                              + (self.brain.unavailable_reason() or "backing off")}
+        gate = self.ledger.gate()
+        if gate:
+            return {"error": gate}
         self.cycle_count += 1
         observations = self.observe()
         decision = self.brain.plan(self, observations)
@@ -337,7 +455,21 @@ class AgentCore:
         """Continue an operator conversation with the agent's context."""
         if self.brain is None:
             return "No LLM brain configured (set llm.enabled and an API key)."
+        gate = self.ledger.gate()
+        if gate:
+            return f"Not answering: {gate}"
         answer = self.brain.chat(self, turns, self.observe())
+        last_user = ""
+        for t in reversed(list(turns or [])):
+            if isinstance(t, dict) and t.get("role") == "user":
+                last_user = str(t.get("content") or "")
+                break
+        self.ledger.record("thought", {"cycle": self.cycle_count, "kind": "chat",
+                                       "question": last_user[:500],
+                                       "answered": bool(answer),
+                                       "answer_sha256": _sha256(answer or ""),
+                                       "answer_head": (answer or "")[:300],
+                                       "model": getattr(self.brain, "model", None)})
         return answer or ("Brain could not answer: "
                           + (self.brain.unavailable_reason() or self.brain.last_error
                              or "unavailable"))
@@ -348,6 +480,10 @@ class AgentCore:
         self.uploads.append(entry)
         self.memory.store(category="upload", data=entry)
         self.notes.append(f"Operator uploaded {name} ({size} bytes) at {path}")
+        self.ledger.record("action", {"cycle": self.cycle_count, "actor": "operator",
+                                      "action": "upload", "name": str(name)[:200],
+                                      "path": str(path)[:300], "size": int(size),
+                                      "sha256": _sha256_file(path)})
         return entry
 
     def get_status(self) -> dict:
@@ -371,6 +507,7 @@ class AgentCore:
             },
             "brain": self.brain.status() if self.brain is not None else None,
             "last_thought": self.last_thought or None,
+            "ledger": self.ledger.status(),
         }
 
     def shutdown(self):

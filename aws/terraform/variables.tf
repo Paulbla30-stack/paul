@@ -102,3 +102,15 @@ variable "ui_port" {
   type    = number
   default = 8443
 }
+
+variable "ledger_anchor" {
+  type        = bool
+  default     = true
+  description = "Create an S3 bucket with Object Lock as the off-box witness for the agent's Glass Ledger. The instance may only add objects; every version is retained for ledger_retention_days."
+}
+
+variable "ledger_retention_days" {
+  type        = number
+  default     = 30
+  description = "Object Lock retention (COMPLIANCE mode) for ledger checkpoints and copies. Nobody, including the account root, can delete a version before it expires; the bucket cannot be emptied until then."
+}

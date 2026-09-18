@@ -77,9 +77,9 @@ fi
 # or boto3 for Amazon Bedrock (llm.provider: bedrock). Install both so the
 # provider is a config choice at launch time.
 log "Installing the anthropic SDK and boto3"
-$PY -m pip install --no-cache-dir --upgrade "anthropic>=1.6" "boto3>=1.34" \
-    || $PY -m pip install --no-cache-dir --upgrade --break-system-packages "anthropic>=1.6" "boto3>=1.34"
-$PY -c 'import anthropic, boto3; print("[provision] anthropic", anthropic.__version__, "boto3", boto3.__version__)'
+$PY -m pip install --no-cache-dir --upgrade "anthropic>=1.6" "boto3>=1.34" "cryptography>=42" \
+    || $PY -m pip install --no-cache-dir --upgrade --break-system-packages "anthropic>=1.6" "boto3>=1.34" "cryptography>=42"
+$PY -c 'import anthropic, boto3, cryptography; print("[provision] anthropic", anthropic.__version__, "boto3", boto3.__version__, "cryptography", cryptography.__version__)'
 command -v aws >/dev/null 2>&1 && log "aws cli: $(aws --version 2>&1 | head -1)" \
     || log "WARNING: aws cli missing; llm.api_key_ssm_parameter will not work"
 
@@ -117,9 +117,9 @@ install -m 0755 "$SRC/rootfs/usr/local/bin/openclaw" /usr/local/bin/openclaw
 install -m 0644 "$SRC/aws/systemd/openclaw-bootstrap.service" /etc/systemd/system/
 install -m 0644 "$SRC/aws/systemd/openclaw.service" /etc/systemd/system/
 install -m 0644 "$SRC/aws/scripts/motd.sh" /etc/profile.d/openclaw.sh
-mkdir -p /var/log /var/lib/openclaw/uploads /etc/openclaw/tls
-chmod 750 /var/lib/openclaw/uploads
-chmod 700 /etc/openclaw/tls
+mkdir -p /var/log /var/lib/openclaw/uploads /etc/openclaw/tls /etc/openclaw/ledger
+chmod 750 /var/lib/openclaw /var/lib/openclaw/uploads
+chmod 700 /etc/openclaw/tls /etc/openclaw/ledger
 touch /var/log/openclaw.log /var/log/openclaw-security.log
 
 systemctl daemon-reload

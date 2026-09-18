@@ -40,6 +40,7 @@ openclaw/
 - **Bootable ISO**: Standalone environment bootable from USB/CD/VM
 - **AWS AMI**: Agent-first EC2 image; goals arrive via user data or tags,
   status via `openclaw --status` or a loopback HTTP endpoint
+- **Glass Ledger**: a signed, hash-chained, append-only journal of every decision, action and outcome that the agent cannot rewrite, verified off-box with a pinned public key ([The Glass Ledger v2](https://doi.org/10.5281/zenodo.21515861)); see `aws/README.md`
 
 ## Building the ISO
 

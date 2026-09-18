@@ -130,6 +130,8 @@ def build_cloud_config(imds: IMDSClient) -> dict:
         config.setdefault("llm", {})["api_key_secret"] = tags["openclaw:llm-key-secret"]
     if tags.get("openclaw:llm-key-parameter"):
         config.setdefault("llm", {})["api_key_ssm_parameter"] = tags["openclaw:llm-key-parameter"]
+    if tags.get("openclaw:ledger-bucket"):
+        config.setdefault("ledger", {}).setdefault("anchor", {})["bucket"] = tags["openclaw:ledger-bucket"]
     if instance:
         config["agent"] = config.get("agent", {})
         config["agent"].setdefault("profile", "cloud")
