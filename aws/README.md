@@ -158,18 +158,29 @@ Bedrock invoke actions and skips the key grant) and put the block from the
 user data example in place of the `anthropic` one. Enable model access for
 the catalog model once in the Bedrock console for your region.
 
-To serve **your own model**, use Bedrock Custom Model Import: Llama, Mistral
-or gpt-oss architecture weights in Hugging Face safetensors format,
-uploaded to S3 and imported once (currently us-east-1 and us-west-2):
+To serve **your own model**, use Bedrock Custom Model Import: Llama,
+Mistral/Mixtral, gpt-oss or Qwen architecture weights in Hugging Face
+safetensors format, in S3, imported once (us-east-1 and us-west-2 only).
+`aws/scripts/bedrock_import.py` does the whole thing from a Hugging Face
+repo id: it launches a temporary instance with a big disk, downloads the
+weights straight into `s3://openclaw-models-<account>/<name>/`, terminates
+the instance, runs the import job with the `openclaw-bedrock-import` role
+and prints the ARN.
 
 ```bash
-aws s3 sync ./my-model/ s3://my-bucket/my-model/
-aws bedrock create-model-import-job --job-name openclaw-brain \
-    --imported-model-name openclaw-brain \
-    --role-arn arn:aws:iam::123456789012:role/BedrockImportRole \
-    --model-data-source '{"s3DataSource":{"s3Uri":"s3://my-bucket/my-model/"}}'
-aws bedrock get-imported-model --model-identifier openclaw-brain --query modelArn
+pip install boto3
+python3 aws/scripts/bedrock_import.py --hf-repo Qwen/Qwen2.5-7B-Instruct --name openclaw-qwen25-7b
+# gated repo (Llama, Mistral): store a HF read token in Secrets Manager first
+python3 aws/scripts/bedrock_import.py --hf-repo meta-llama/Llama-3.1-8B-Instruct \
+    --name openclaw-llama31-8b --hf-token-secret openclaw/hf-token
+# weights already in S3
+python3 aws/scripts/bedrock_import.py --s3-uri s3://my-bucket/my-model/ --name my-model
 ```
+
+It needs the bucket and the two roles (`openclaw-bedrock-import` for
+Bedrock, `openclaw-model-fetcher` for the temporary instance); create them
+once with the snippet in the script's docstring or let an operator with
+IAM rights run it first.
 
 Put that ARN in `llm.model`. Imported models are unloaded when idle and the
 first call after a pause returns `ModelNotReadyException` while it loads;
