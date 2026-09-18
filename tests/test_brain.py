@@ -840,6 +840,20 @@ class TestConfigAndBootstrap(unittest.TestCase):
                                                fetch_secret=fake_secret)
             self.assertIn("openclaw/missing not readable", note)
 
+    def test_bedrock_provider_skips_key_sourcing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = os.path.join(tmp, "config.yaml")
+            with open(base, "w") as f:
+                f.write("llm:\n  api_key_secret: openclaw/key\n  api_key_file: /etc/openclaw/anthropic.key\n")
+            config = {"llm": {"provider": "bedrock", "model": "m", "api_key": "sk-stray"}}
+            bootstrap.apply_base_llm_defaults(config, base)
+            self.assertNotIn("api_key_secret", config["llm"])
+            note = bootstrap.provision_llm_key(config, os.path.join(tmp, "k"),
+                                               fetch=lambda *a: "sk-ssm", fetch_secret=lambda *a: "sk-sm")
+            self.assertIn("not needed", note)
+            self.assertNotIn("api_key", config["llm"])
+            self.assertFalse(os.path.exists(os.path.join(tmp, "k")))
+
     def test_secret_tag_and_config_default(self):
         from tests import test_cloud
         saved = dict(test_cloud.METADATA)

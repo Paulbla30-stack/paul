@@ -147,6 +147,9 @@ def apply_base_llm_defaults(config: dict, base_config_path: Optional[str]) -> No
     llm = config.setdefault("llm", {})
     if not isinstance(llm, dict):
         return
+    provider = str(llm.get("provider") or base_llm.get("provider") or "anthropic").lower()
+    if provider not in ("anthropic", "claude"):
+        return  # Bedrock and friends use the instance role; no key to source
     for key in LLM_DEFAULT_KEYS:
         if not llm.get(key) and base_llm.get(key):
             llm[key] = base_llm[key]
@@ -181,6 +184,9 @@ def provision_llm_key(config: dict, key_file: str = DEFAULT_KEY_FILE,
     llm = config.get("llm")
     if not isinstance(llm, dict):
         return "no llm section"
+    if str(llm.get("provider") or "anthropic").lower() not in ("anthropic", "claude"):
+        llm.pop("api_key", None)
+        return f"not needed for provider {llm.get('provider')} (instance role)"
     key_file = llm.get("api_key_file") or key_file
     inline = llm.pop("api_key", None)
     if isinstance(inline, str) and inline.strip():
