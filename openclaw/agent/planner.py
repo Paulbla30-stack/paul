@@ -59,6 +59,7 @@ class Task:
             "created_at": self.created_at,
             "retry_count": self.retry_count,
             **({"command": self.metadata["command"]} if self.metadata.get("command") else {}),
+            **({"source": self.metadata["source"]} if self.metadata.get("source") else {}),
         }
 
 

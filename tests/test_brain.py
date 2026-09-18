@@ -529,21 +529,52 @@ class TestAgentWithBrain(unittest.TestCase):
             second = agent.run_cycle()
             self.assertEqual(second.get("action", "idle"), "idle")
             self.assertEqual(len(agent.task_history), 1)
-            self.assertIn("repeat of the task that just succeeded", agent.last_thought["skipped"])
+            self.assertIn("just ran successfully", agent.last_thought["skipped"])
             ctx = brain.build_context(agent, {})
             self.assertEqual(ctx["last_decision"]["task"], "idle")
-            self.assertIn("repeat", ctx["last_decision"]["skipped"])
+            self.assertIn("not run again", ctx["last_decision"]["skipped"])
+            self.assertIsInstance(ctx["recent_history"][-1]["ran_s_ago"], int)
+            # first skip: rule planner takes 1 cycle, then the brain is asked again
+            self.assertEqual(agent.brain_repeat_streak, 1)
+            calls = len(api.requests)
+            agent.run_cycle()
+            self.assertEqual(len(api.requests), calls)
             # a failed task is not a "success" to guard: the brain may retry it
-            agent.task_history[-1]["result"] = {"success": False, "error": "boom"}
-            third = agent.run_cycle()
-            self.assertEqual(third["action"], "Measure root filesystem usage")
+            brain_entries = [e for e in agent.task_history if e["task"].get("source") == "llm"]
+            self.assertEqual(len(brain_entries), 1)
+            brain_entries[0]["result"] = {"success": False, "error": "boom"}
+            fourth = agent.run_cycle()
+            self.assertEqual(len(api.requests), calls + 1)
+            self.assertEqual(fourth["action"], "Measure root filesystem usage")
+            self.assertEqual(agent.brain_repeat_streak, 0)
+
+    def test_repeat_streak_backs_off_exponentially(self):
+        with FakeClaude() as api:
+            brain = make_brain(api.url)
+            agent = AgentCore({"name": "t", "profile": "cloud", "brain_repeat_cooldown_max": 4},
+                              dict(NO_HW), LOG, brain=brain, shell_policy={"enabled": True, "timeout": 5})
+            agent.planner._boot_tasks_generated = True
+            agent.add_goal("Keep root under 80%", 3)
+            self.assertTrue(agent.run_cycle()["result"]["success"])  # brain task runs once
+            consulted = []
+            for _ in range(24):
+                before = len(api.requests)
+                agent.run_cycle()
+                consulted.append(len(api.requests) > before)
+            # brain asked at cycle 2 (skip, 1 off), 4 (skip, 2 off), 7 (4 off), 12 (4 off, capped), 17, 22
+            self.assertEqual([i + 2 for i, c in enumerate(consulted) if c], [2, 4, 7, 12, 17, 22])
+            # the brain's task ran exactly once; the rest of the history is rule-planner work
+            self.assertEqual(sum(1 for e in agent.task_history if e["task"].get("source") == "llm"), 1)
 
     def test_repeat_guard_keys(self):
         agent = make_agent(None)
-        def hist(kind, desc, ok=True, command=None):
-            t = {"type": kind, "description": desc}
+        def hist(kind, desc, ok=True, command=None, source="llm"):
+            t = {"type": kind, "description": desc, "source": source}
             if command: t["command"] = command
-            agent.task_history = [{"task": t, "result": {"success": ok}, "timestamp": 0}]
+            agent.task_history = [{"task": t, "result": {"success": ok}, "timestamp": 0},
+                                  # a rule-planner task after it never masks the repeat
+                                  {"task": {"type": "goal_step", "description": "Goal step: x"},
+                                   "result": {"success": True}, "timestamp": 1}]
         def task(kind, desc, command=None):
             md = {"source": "llm", **({"command": command} if command else {})}
             return Task(priority=5, description=desc, task_type=kind, metadata=md)
@@ -561,6 +592,9 @@ class TestAgentWithBrain(unittest.TestCase):
         hist("goal_step", "Note progress on disk goal")
         self.assertTrue(agent._repeats_last_success(task(TaskType.GOAL_STEP, "note  progress on disk goal")))
         self.assertFalse(agent._repeats_last_success(task(TaskType.GOAL_STEP, "note progress on security goal")))
+        # a probe the rules ran (boot scan) does not count: the brain may run it once
+        hist("security_scan", "Run boot security scan", source="rules")
+        self.assertFalse(agent._repeats_last_success(task(TaskType.SECURITY_SCAN, "x")))
         agent.task_history = []
         self.assertFalse(agent._repeats_last_success(task(TaskType.SECURITY_SCAN, "x")))
 

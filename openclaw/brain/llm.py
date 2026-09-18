@@ -454,6 +454,7 @@ class BaseBrain:
         entries = agent.task_history[-self.history_window:]
         history = []
         n = len(entries)
+        now = time.time()
         for i, entry in enumerate(entries):
             task = entry.get("task", {})
             result = entry.get("result", {})
@@ -463,6 +464,8 @@ class BaseBrain:
                 "type": task.get("type"),
                 "success": bool(result.get("success")),
             }
+            if entry.get("timestamp"):
+                item["ran_s_ago"] = max(0, round(now - float(entry["timestamp"])))
             if "error" in result:
                 item["error"] = str(result["error"])[:self.output_limit]
             if "output" in result and i >= n - self.full_output_entries:
@@ -497,7 +500,7 @@ class BaseBrain:
                 "task": (last.get("task") or {}).get("description") if last.get("task") else "idle",
             }
             if last.get("skipped"):
-                context["last_decision"]["skipped"] = str(last["skipped"])[:300]
+                context["last_decision"]["skipped"] = str(last["skipped"])[:400]
         cloud = agent.memory.recall("cloud_instance", 1) or agent.memory.recall("cloud_probe", 1)
         if cloud:
             context["cloud"] = _truncate(cloud[-1].get("data"), 200)

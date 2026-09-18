@@ -51,6 +51,11 @@ class AgentCore:
         self.brain_failure_limit = int(config.get("brain_failure_limit", 4))
         self.brain_cooldown_cycles = int(config.get("brain_cooldown_cycles", 5))
         self._brain_cooldown_until = 0
+        # Consecutive brain decisions that merely repeated the task that just
+        # succeeded. Each one doubles the number of cycles the rule planner
+        # takes before the brain is asked again, up to this cap.
+        self.brain_repeat_streak = 0
+        self.brain_repeat_cooldown_max = int(config.get("brain_repeat_cooldown_max", 20))
         # Brain notes live here, not in the evictable AgentMemory, so they
         # survive however busy the loop gets.
         self.notes = deque(maxlen=config.get("notes_limit", 20))
@@ -148,18 +153,28 @@ class AgentCore:
             "timestamp": time.time(),
         }
         if decision.task is None:
+            self.brain_repeat_streak = 0
             self.log.info("Brain: idle. %s", decision.reasoning)
             return None
         if self._repeats_last_success(decision.task):
             # Same probe or command as the task that just succeeded: its result
             # is already in the model's history, so running it again only
-            # spends a call and a cycle. Idle instead and tell the model why.
-            self.log.info("Brain chose the task that just succeeded again (%s); idling this "
-                          "cycle instead", decision.task.description)
+            # spends a call and a cycle. Idle instead, tell the model why, and
+            # leave planning to the rules for a growing number of cycles so a
+            # model that keeps insisting cannot burn the hourly call budget.
+            self.brain_repeat_streak += 1
+            cooldown = min(2 ** (self.brain_repeat_streak - 1), self.brain_repeat_cooldown_max)
+            self._brain_cooldown_until = self.cycle_count + cooldown
+            self.log.info("Brain chose the task that just succeeded again (%s); idling and "
+                          "leaving the next %d cycle(s) to the rule planner",
+                          decision.task.description, cooldown)
             self.last_thought["task"] = None
-            self.last_thought["skipped"] = ("repeat of the task that just succeeded: "
-                                            + decision.task.description)
+            self.last_thought["skipped"] = (
+                f"you chose '{decision.task.description}' but that task just ran successfully "
+                "and its result is in recent_history; it was not run again. Choose none or a "
+                "different task.")
             return None
+        self.brain_repeat_streak = 0
         self.memory.store(category="llm_plan", data={
             "cycle": self.cycle_count,
             "reasoning": decision.reasoning,
@@ -172,10 +187,16 @@ class AgentCore:
         return decision.task
 
     def _repeats_last_success(self, task: Task) -> bool:
-        """True when task would redo the most recent task, which succeeded."""
-        if not self.task_history:
+        """True when task would redo the brain's most recent task, which succeeded.
+
+        Only the brain's own tasks count: boot probes and the rule planner's
+        goal steps interleave with them and must not hide a repeat, and the
+        brain is allowed one run of a probe the rules already did.
+        """
+        last = next((e for e in reversed(self.task_history)
+                     if (e.get("task") or {}).get("source") == "llm"), None)
+        if last is None:
             return False
-        last = self.task_history[-1]
         prev, result = last.get("task") or {}, last.get("result") or {}
         if not result.get("success") or prev.get("type") != task.task_type.value:
             return False
