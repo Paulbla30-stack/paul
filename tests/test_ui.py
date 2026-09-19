@@ -11,7 +11,7 @@ import urllib.error
 import urllib.request
 
 from jarvis.agent.core import AgentCore
-from jarvis.cloud.headless import HeadlessRunner, UI_HTML_PATH
+from jarvis.cloud.headless import HeadlessRunner, UI_HTML_PATH, UI_OPEN_PATHS
 from tests.test_brain import FakeClaude, make_brain, message, needs_sdk
 
 NO_HW = {"display": None, "input": None, "memory": None, "storage": None}
@@ -103,6 +103,53 @@ class TestUiListener(unittest.TestCase):
                 self.assertEqual(snapshot["name"], "ui-test")
                 health, _ = call(base, "/health")
                 self.assertEqual(health["agent"], "ui-test")
+            finally:
+                runner.stop_status_server()
+
+    def test_lockout_follows_the_real_client_through_the_tunnel(self):
+        """The tunnel makes every request look like 127.0.0.1.
+
+        Counting failures against the socket peer would put the whole
+        internet in one bucket: a stranger guessing tokens would lock the
+        operator out of his own agent, and the operator's own fat-fingered
+        retry would spend the stranger's budget.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            runner, port = self._runner(make_agent(), tmp)
+            base = f"http://127.0.0.1:{port}"
+            stranger = {"CF-Connecting-IP": "203.0.113.9"}
+            try:
+                for _ in range(runner.auth_failure_limit):
+                    with self.assertRaises(urllib.error.HTTPError):
+                        call(base, "/goals", headers={**stranger,
+                                                      "Authorization": "Bearer wrong"})
+                self.assertTrue(runner.auth_locked("203.0.113.9"))
+                # the operator, arriving from a different address, is untouched
+                self.assertFalse(runner.auth_locked("198.51.100.4"))
+                goals, status = call(base, "/goals",
+                                     headers={"CF-Connecting-IP": "198.51.100.4",
+                                              "Authorization": "Bearer t0k"})
+                self.assertEqual(status, 200)
+            finally:
+                runner.stop_status_server()
+
+    def test_the_header_is_only_trusted_from_loopback(self):
+        """A request straight at the open port could otherwise set the header
+        itself and have every guess charged to someone else."""
+        with tempfile.TemporaryDirectory() as tmp:
+            runner, _ = self._runner(make_agent(), tmp)
+            try:
+                handler = runner._make_handler(UI_OPEN_PATHS)
+                probe = handler.__new__(handler)
+                probe.headers = {"CF-Connecting-IP": "203.0.113.9"}
+                probe.client_address = ("127.0.0.1", 1234)
+                self.assertEqual(probe._client(), "203.0.113.9")
+                probe.client_address = ("198.51.100.77", 1234)
+                self.assertEqual(probe._client(), "198.51.100.77")
+                # and a missing header falls back to the peer
+                probe.headers = {}
+                probe.client_address = ("127.0.0.1", 1234)
+                self.assertEqual(probe._client(), "127.0.0.1")
             finally:
                 runner.stop_status_server()
 

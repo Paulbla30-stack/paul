@@ -71,6 +71,8 @@ OPEN_PATHS = ("/", "/health", "/status")
 # listener would hand a stranger the model ARN, the goals and the agent's
 # last reasoning.
 UI_OPEN_PATHS = ("/health",)
+# Addresses that can only be the box itself, and so the tunnel.
+LOOPBACK = ("127.0.0.1", "::1", "::ffff:127.0.0.1")
 
 
 def write_token_file(token: str, path: str) -> Optional[str]:
@@ -236,7 +238,23 @@ class HeadlessRunner:
                 self.wfile.write(body)
 
             def _client(self) -> str:
-                return self.client_address[0] if self.client_address else "?"
+                """Who to count a failed login against.
+
+                Behind the tunnel every request arrives from loopback, so the
+                socket peer alone would put the whole internet in one bucket:
+                a stranger guessing tokens would lock the operator out, and
+                the operator's own retries would spend the stranger's budget.
+                Cloudflare puts the real client in CF-Connecting-IP. It is
+                trusted only when the peer is loopback, because a request
+                straight at the port could otherwise set the header itself and
+                have every guess counted against a different address.
+                """
+                peer = self.client_address[0] if self.client_address else "?"
+                if peer in LOOPBACK:
+                    forwarded = (self.headers.get("CF-Connecting-IP") or "").strip()
+                    if forwarded:
+                        return forwarded[:64]
+                return peer
 
             def _authorised(self) -> bool:
                 if runner.auth_locked(self._client()):
