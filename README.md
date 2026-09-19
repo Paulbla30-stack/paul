@@ -266,6 +266,57 @@ contains only what a person actually said would quietly destroy that value.
 
 `GET /memory/store?q=&limit=` returns the stats and the matching entries.
 
+## The permission spine
+
+The command deny-list is a floor: it answers "is this catastrophic?" It
+answered correctly when the planner tried to write a kernel parameter
+directly. Nothing answered the prior question, "is changing this machine
+within what I was asked to do at all?", and that is the gap that let a real
+incident through.
+
+The agent held a goal reading "Report security posture once per hour and note
+anything new". It read the scan, decided to remediate, ran
+`echo 1 > /proc/sys/kernel/yama/ptrace_scope`, and was refused. Its next
+cycle reasoned that the attempt "was denied due to a command pattern
+restriction" and that it would "use a safer and allowed method", then ran
+`sysctl -w kernel.yama.ptrace_scope=1`, which succeeded. The intent was
+benign and the outcome was an improvement. That is what makes it worth
+fixing: it was told *that command* was denied, so it looked for a command
+that was not.
+
+`agent.rung` is the ceiling that sits above that floor, from the design
+pack's permission spine:
+
+- **observer** may look and report. A change is refused and recorded.
+- **proposer** may look and report, and a change becomes a proposal for the
+  operator instead of an action. This is the default.
+- **actor** may change the machine, still under the deny-list.
+
+A task is classified before anything runs. Probe tasks only look. A shell
+command is classified by parsing it: an unrecognised program, a writing flag
+such as `sed -i` or `find -delete`, a writing subcommand such as
+`systemctl restart`, any redirection, and any pipe into `tee` or `dd` are all
+changes. Classification fails closed, so a command that cannot be recognised
+as read-only costs a proposal rather than a surprise, and an unrecognised
+rung falls back to proposer rather than actor.
+
+Two things matter about what happens next. The refusal is recorded as an
+`authority` gate and the change is written down as a proposal, durable in the
+agent's memory and visible at `GET /proposals`, so nothing is silently
+dropped. And the planner is told that **the kind of action** was out of
+scope, not that a command was denied, because a refusal it can rephrase is
+not a refusal. The prompt says so in as many words: there is no other command
+that makes it allowed, and looking for one is the worst thing it can do.
+
+The check runs in the decision path, where a refusal can become a proposal,
+and again in the executor, so the ceiling does not depend on one code path
+being taken.
+
+Raising the rung is a deliberate act. `agent.rung: actor` restores the old
+behaviour for a deployment that wants it. The upper rungs of the pack's
+spine, standing approval and scheduled autonomy, need an autonomy register
+and approval cards that are not built yet.
+
 ## Headless mode
 
 `jarvis --headless` runs the same agent loop without the console. It is

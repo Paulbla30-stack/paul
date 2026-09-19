@@ -195,6 +195,8 @@ class TaskExecutor:
         self.memory = memory
         self.log = logger.getChild("executor")
         self.shell_policy = normalise_shell_policy(shell_policy, self.log)
+        # Set by the agent; None leaves the executor unbounded, as before.
+        self.rung = None
 
         # Map task types to handlers
         self._handlers = {
@@ -424,8 +426,25 @@ class TaskExecutor:
         self.memory.store(category="cloud_probe", data=info)
         return {"success": True, "output": info}
 
+    def _authority_refusal(self, task: Task):
+        """Second check of the mandate, at the point of execution.
+
+        The decision path refuses an out-of-scope task and turns it into a
+        proposal. This is the backstop for a task that arrives another way:
+        the ceiling should not depend on one code path being taken.
+        """
+        if self.rung is None:
+            return None
+        from jarvis.agent import authority
+        verdict = authority.review(task, self.rung)
+        return None if verdict.allowed else verdict.reason
+
     def _handle_shell_command(self, task: Task) -> dict:
         """Run a planner-chosen shell command under the shell policy."""
+        refusal = self._authority_refusal(task)
+        if refusal:
+            self.log.warning("Shell command outside mandate: %s", refusal)
+            return {"success": False, "error": f"outside mandate: {refusal}"}
         command = str(task.metadata.get("command") or "")
         denied = check_command_allowed(command, self.shell_policy)
         record = {"command": command, "goal": task.metadata.get("goal")}

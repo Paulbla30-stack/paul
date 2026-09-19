@@ -275,6 +275,10 @@ class HeadlessRunner:
                         self._send(200, runner.snapshot())
                     elif path == "/memory":
                         self._send(200, runner.agent.memory.get_summary())
+                    elif path == "/proposals":
+                        self._send(200, {
+                            "rung": runner.agent.rung,
+                            "proposals": list(runner.agent.proposals)[-limit:]})
                     elif path == "/memory/store":
                         store = runner.agent.store
                         entries = (store.search(search, limit) if search
@@ -319,6 +323,18 @@ class HeadlessRunner:
                 if int(self.headers.get("Content-Length") or 0) > 1_000_000:
                     return self._send(413, {"error": "body too large"})
                 body = self._body().strip()
+                if path == "/goal/withdraw":
+                    # An operator who can only add goals cannot take an
+                    # instruction back; a goal the agent cannot satisfy would
+                    # otherwise sit in its context for the life of the process.
+                    if not body:
+                        return self._send(400, {"error": "goal text required in body"})
+                    with runner._lock:
+                        done = runner.agent.withdraw_goal(body)
+                    runner.wake()
+                    return self._send(200 if done else 404,
+                                      {"withdrawn": body if done else None,
+                                       "error": None if done else "no open goal with that text"})
                 if path == "/goal":
                     if not body:
                         return self._send(400, {"error": "goal text required in body"})

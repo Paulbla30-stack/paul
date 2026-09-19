@@ -112,6 +112,11 @@ def load_config(path, extra_paths=()):
             "memory_limit_mb": 512,
             "auto_plan": True,
             "profile": "bare-metal",
+            # The permission spine, above the command deny-list's floor:
+            # observer (look and report), proposer (a change becomes a card
+            # for the operator), actor (may change the machine). Anything
+            # unrecognised falls back to proposer, never to actor.
+            "rung": "proposer",
         },
         "hardware": {
             "display": {"enabled": True, "framebuffer": "/dev/fb0"},

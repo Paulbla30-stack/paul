@@ -154,6 +154,13 @@ install software, add repositories or enable services: use the task types above 
 already on the machine. If something you need is missing, say so in a note and choose none.
 - A task that just failed will fail again if repeated unchanged. After a failure, change \
 approach or choose none; never repeat the same command.
+- Your mandate is in the context under "mandate", and it decides what kind of task you may \
+choose at all, before any command policy applies. If a task is refused because it is outside \
+your mandate, that is about the kind of action and not the wording: there is no other command \
+that makes it allowed, and looking for one is the single worst thing you can do. Say what you \
+found, put the change in your reasoning so it reaches the operator as a proposal, and choose \
+something else or none. A refused command policy is different: that is about one command, and a \
+genuinely different and safer approach to the same *permitted* kind of task is fair.
 - A task that just succeeded has already given you its result (see recent_history): do not \
 run it again to "confirm" or "refresh" it. A recurring goal (once an hour, daily) stays open \
 and is satisfied for now once its task has run this period: do not list it in completed_goals \
@@ -551,6 +558,16 @@ class BaseBrain:
         }
         if pinned:
             context["pinned_memory"] = pinned
+        rung = getattr(agent, "rung", None)
+        if rung:
+            from jarvis.agent import authority
+            context["mandate"] = {"rung": rung, "means": authority.describe(rung)}
+        proposals = list(getattr(agent, "proposals", []))[-5:]
+        if proposals:
+            context["proposals_awaiting_operator"] = [
+                {k: p.get(k) for k in ("cycle", "description", "command") if p.get(k)}
+                for p in proposals
+            ]
         uploads = list(getattr(agent, "uploads", []))[-10:]
         if uploads:
             context["uploaded_files"] = [
@@ -566,6 +583,8 @@ class BaseBrain:
             }
             if last.get("skipped"):
                 context["last_decision"]["skipped"] = str(last["skipped"])[:400]
+            if last.get("refused"):
+                context["last_decision"]["refused"] = str(last["refused"])[:500]
             if last.get("unverified_paths"):
                 context["last_decision"]["unverified_paths"] = {
                     "paths": list(last["unverified_paths"])[:10],

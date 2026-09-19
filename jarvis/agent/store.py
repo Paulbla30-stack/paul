@@ -51,7 +51,7 @@ CREATE INDEX IF NOT EXISTS memories_ts ON memories(ts);
 CREATE INDEX IF NOT EXISTS memories_kind ON memories(kind);
 """
 
-KINDS = ("note", "fact", "upload", "goal", "operator")
+KINDS = ("note", "fact", "upload", "goal", "operator", "proposal")
 SOURCES = ("brain", "operator", "system")
 
 DEFAULT_PATH = "/var/lib/jarvis/memory.db"

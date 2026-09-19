@@ -113,6 +113,16 @@ class AgentCore:
         self._restore_notes()
         # Files handed to the agent through the UI / API; the brain sees them.
         self.uploads = deque(maxlen=50)
+        # The permission spine: what this agent is allowed to *be*, above the
+        # deny-list's floor of what it may never run. Default is propose, so a
+        # change becomes a card for the operator rather than an action.
+        from jarvis.agent import authority as _authority
+        self.rung = _authority.normalise_rung(config.get("rung"))
+        self.executor.rung = self.rung
+        # Changes the agent wanted to make and did not. Bounded here, durable
+        # in the store, so they outlive the process.
+        self.proposals = deque(maxlen=50)
+        self._restore_proposals()
 
         # State
         self.running = False
@@ -262,6 +272,42 @@ class AgentCore:
         except Exception:                          # never lose a cycle over it
             return []
 
+    def _restore_proposals(self):
+        """Refill pending proposals from durable memory after a restart."""
+        try:
+            rows = self.store.recent(self.proposals.maxlen, kind="proposal")
+        except Exception:
+            return
+        for row in reversed(rows):
+            self.proposals.append({"ts": row.get("ts"), "cycle": row.get("cycle"),
+                                   "text": row.get("text"), "restored": True})
+
+    def _record_proposal(self, decision, task) -> dict:
+        """A change the agent wanted to make and was not allowed to make.
+
+        It is not a failure and it is not retried. It is written down, shown
+        to the operator, and the model is told that the *kind* of action was
+        out of scope, so there is nothing to rephrase.
+        """
+        command = (task.metadata or {}).get("command") or ""
+        entry = {
+            "ts": time.time(),
+            "cycle": self.cycle_count,
+            "description": task.description[:300],
+            "command": str(command)[:1000],
+            "goal": str((task.metadata or {}).get("goal") or "")[:300],
+            "reasoning": str(decision.reasoning or "")[:500],
+            "rung": self.rung,
+        }
+        self.proposals.append(entry)
+        summary = f"Proposed (not run, rung {self.rung}): {entry['description']}"
+        if command:
+            summary += f" [{entry['command'][:200]}]"
+        self.remember(summary, kind="proposal", source="brain")
+        self.log.warning("Proposal recorded, not executed (rung %s): %s",
+                         self.rung, entry["description"])
+        return entry
+
     def _apply_decision(self, decision) -> Optional[Task]:
         """Turn a brain Decision into agent state: goals, notes, task."""
         for goal in decision.completed_goals:
@@ -317,6 +363,23 @@ class AgentCore:
                                         "task": decision.task.description[:300],
                                         "streak": self.brain_repeat_streak,
                                         "rule_planner_cycles": cooldown})
+            return None
+        from jarvis.agent import authority
+        verdict = authority.review(decision.task, self.rung)
+        if not verdict.allowed:
+            # Out of scope for this mandate. Not a denied command, a change the
+            # agent was never asked to make: there is no other spelling of it.
+            self.brain_repeat_streak = 0
+            entry = self._record_proposal(decision, decision.task) if verdict.proposal else None
+            self.last_thought["task"] = None
+            self.last_thought["refused"] = verdict.reason
+            self.ledger.record("decision", self._decision_body(
+                decision, None, skipped="outside this goal's authority"))
+            self.ledger.record("gate", {
+                "cycle": self.cycle_count, "gate": "authority", "rung": self.rung,
+                "kind": verdict.kind, "task": decision.task.description[:300],
+                "command": str((decision.task.metadata or {}).get("command") or "")[:500],
+                "proposal": bool(entry)})
             return None
         self.brain_repeat_streak = 0
         self.ledger.record("decision", self._decision_body(decision, decision.task))
@@ -604,6 +667,18 @@ class AgentCore:
                 "model": result.get("model")})
         return result
 
+    def withdraw_goal(self, description: str) -> bool:
+        """Take back an instruction. Recorded, like giving one."""
+        text = (description or "").strip()
+        if not text or not self.planner.complete_goal(text):
+            return False
+        self.log.info("Goal withdrawn by operator: %s", text[:200])
+        self.remember(f"Operator withdrew the goal: {text[:200]}",
+                      kind="goal", source="operator")
+        self.ledger.record("action", {"cycle": self.cycle_count, "actor": "operator",
+                                      "action": "withdraw_goal", "description": text[:300]})
+        return True
+
     def record_upload(self, name: str, path: str, size: int) -> dict:
         """Register an operator-uploaded file so the brain can act on it."""
         entry = {"name": name, "path": path, "size": size, "uploaded_at": time.time()}
@@ -640,6 +715,7 @@ class AgentCore:
             "last_thought": self.last_thought or None,
             "ledger": self.ledger.status(),
             "memory_store": self.store.stats(),
+            "authority": {"rung": self.rung, "proposals": len(self.proposals)},
         }
 
     def shutdown(self):

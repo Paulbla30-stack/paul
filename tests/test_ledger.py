@@ -547,7 +547,10 @@ class TestAgentIntegration(unittest.TestCase):
                 Decision(reasoning="done", completed_goals=["Keep root under 80%"])]
 
     def agent(self, ledger=None, brain=None):
-        agent = AgentCore({"name": "t", "profile": "cloud"}, dict(NO_HW), LOG,
+        # rung "actor" so this test still exercises the deny-list gate it was
+        # written for; the permission spine is covered in test_authority.
+        agent = AgentCore({"name": "t", "profile": "cloud", "rung": "actor"},
+                          dict(NO_HW), LOG,
                           brain=brain, shell_policy={"enabled": True, "timeout": 5},
                           ledger=ledger)
         agent.planner._boot_tasks_generated = True
