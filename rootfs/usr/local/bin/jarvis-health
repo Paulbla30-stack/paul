@@ -1,0 +1,147 @@
+#!/bin/bash
+#
+# Jarvis health and security check.
+#
+# Reports host vitals and the agent's own live state, then exits non-zero if
+# any threshold is breached, so a systemd timer surfaces it as a failed unit.
+#
+# Scope: this is an operator tool. It runs outside the agent's plan/act loop,
+# so its runs are NOT recorded in the Glass Ledger. It only reads; it changes
+# nothing, and it deliberately never reads the ledger file itself.
+#
+# Every number names its source, so nothing here is taken on trust.
+
+set -uo pipefail
+
+STATUS_FILE=${JARVIS_STATUS_FILE:-/run/jarvis/status.json}
+SECURITY_LOG=${JARVIS_SECURITY_LOG:-/var/log/jarvis-security.log}
+DISK_WARN_PCT=${JARVIS_DISK_WARN_PCT:-85}
+BUDGET_WARN_PCT=${JARVIS_BUDGET_WARN_PCT:-90}
+
+note() { printf '  %-20s %s\n' "$1" "$2"; }
+
+host_section() {
+    echo "-- host --"
+    note "Hostname" "$(hostname 2>/dev/null || echo unknown)"
+    note "Uptime" "$(uptime -p 2>/dev/null || uptime 2>/dev/null || echo unknown)"
+    note "CPU" "$(lscpu 2>/dev/null | awk -F: '/^Model name:/{gsub(/^[[:space:]]+/,"",$2);print $2;exit}')"
+
+    local cores load1 disk_pct
+    cores=$(nproc 2>/dev/null || echo 1)
+    load1=$(awk '{print $1}' /proc/loadavg 2>/dev/null || echo 0)
+    note "Cores" "$cores"
+    note "Load (1/5/15m)" "$(awk '{print $1", "$2", "$3}' /proc/loadavg 2>/dev/null || echo unknown)"
+    note "Memory" "$(free -h 2>/dev/null | awk '/^Mem:/{printf "%s used of %s, %s available", $3, $2, $7}')"
+    note "Root filesystem" "$(df -hP / 2>/dev/null | awk 'NR==2{printf "%s used of %s (%s full), %s free", $3, $2, $5, $4}')"
+
+    disk_pct=$(df -P / 2>/dev/null | awk 'NR==2{gsub(/%/,"",$5); print $5+0}')
+    if [ -n "${disk_pct:-}" ] && [ "$disk_pct" -ge "$DISK_WARN_PCT" ]; then
+        echo "  ALERT: root filesystem ${disk_pct}% full (threshold ${DISK_WARN_PCT}%)"
+    fi
+    awk -v l="$load1" -v c="$cores" \
+        'BEGIN{ if (c > 0 && l > c) printf "  ALERT: load %.2f exceeds %d cores\n", l, c }'
+}
+
+agent_section() {
+    echo "-- agent (source: $STATUS_FILE) --"
+    if [ ! -r "$STATUS_FILE" ]; then
+        echo "  ALERT: no readable status file at $STATUS_FILE (agent stopped, or not running as root)"
+        return
+    fi
+    python3 - "$STATUS_FILE" "$BUDGET_WARN_PCT" <<'PY'
+import json, sys
+
+try:
+    with open(sys.argv[1]) as fh:
+        d = json.load(fh)
+except Exception as exc:                      # unreadable, or caught half-written
+    print("  ALERT: status file unreadable: %s" % exc)
+    sys.exit(0)
+
+warn_pct = float(sys.argv[2])
+brain = d.get("brain") or {}
+ledger = d.get("ledger") or {}
+runner = d.get("runner") or {}
+goals = d.get("goals") or {}
+stats = brain.get("stats") or {}
+head = ledger.get("head") or {}
+anchor = ledger.get("anchor") or {}
+
+
+def note(label, value):
+    print("  %-20s %s" % (label, value))
+
+
+note("Service", "running" if d.get("running") else "NOT running")
+note("Profile", d.get("profile"))
+note("Cycles", d.get("cycle_count"))
+note("Last action", "%s (idle streak %s)" % (runner.get("last_action"),
+                                             runner.get("idle_streak")))
+note("Tasks", "%s pending, %s completed" % (d.get("pending_tasks"),
+                                            d.get("completed_tasks")))
+note("Goals", "%s open of %s" % (goals.get("open"), goals.get("total")))
+
+model = (brain.get("model") or "").rsplit("/", 1)[-1] or "none"
+note("Planner", "%s via %s (%s)" % (
+    model, brain.get("provider"),
+    "available" if brain.get("available") else "UNAVAILABLE"))
+
+calls, cap = brain.get("calls_last_hour"), brain.get("max_calls_per_hour")
+if isinstance(calls, int) and isinstance(cap, int) and cap:
+    note("Call budget", "%d of %d this hour (%.0f%%)" % (calls, cap, 100.0 * calls / cap))
+note("Planner errors", "%s errors, %s refusals, %s rate-limited" % (
+    stats.get("errors"), stats.get("refusals"), stats.get("rate_limited")))
+note("Ledger", "%s, head seq %s" % (
+    "available" if ledger.get("available") else "UNAVAILABLE", head.get("seq")))
+note("Ledger witness", ("anchoring to %s" % anchor.get("bucket"))
+     if anchor.get("enabled") else "not anchoring off-box")
+
+if not d.get("running"):
+    print("  ALERT: agent reports itself not running")
+if not brain.get("available"):
+    print("  ALERT: planner unavailable: %s" % (
+        brain.get("unavailable_reason") or brain.get("disabled_reason") or "no reason given"))
+if ledger.get("enabled") and not ledger.get("available"):
+    print("  ALERT: ledger enabled but unavailable: %s" % (ledger.get("reason") or "no reason given"))
+if isinstance(calls, int) and isinstance(cap, int) and cap and 100.0 * calls / cap >= warn_pct:
+    print("  ALERT: planner call budget %d/%d this hour" % (calls, cap))
+PY
+}
+
+security_section() {
+    echo "-- security scan --"
+    if [ ! -e "$SECURITY_LOG" ]; then
+        note "Report" "none at $SECURITY_LOG"
+        echo "  NOTE: no report on disk. This is NOT a clean bill of health: scan"
+        echo "        findings are kept in agent memory and the ledger, not here."
+        return
+    fi
+    if [ ! -s "$SECURITY_LOG" ]; then
+        note "Report" "$SECURITY_LOG is empty"
+        echo "  NOTE: an empty file means nothing was written to it, NOT zero findings."
+        echo "        Scan results live in agent memory and the ledger."
+        return
+    fi
+    local findings
+    findings=$(grep -c -E 'warning|critical' "$SECURITY_LOG" 2>/dev/null || true)
+    findings=${findings:-0}
+    note "Report" "$SECURITY_LOG ($(wc -l < "$SECURITY_LOG") lines)"
+    note "Warning/critical" "$findings"
+    if [ "$findings" -gt 0 ]; then
+        echo "  ALERT: $findings warning/critical lines in $SECURITY_LOG"
+    fi
+}
+
+report=$( { host_section; echo; agent_section; echo; security_section; } 2>&1 )
+alerts=$(printf '%s\n' "$report" | grep -c '^  ALERT:' || true)
+
+echo "=== Jarvis health report: $(date -u +%Y-%m-%dT%H:%M:%SZ) ==="
+echo
+printf '%s\n' "$report"
+echo
+if [ "${alerts:-0}" -gt 0 ]; then
+    echo "=== RESULT: ${alerts} alert(s) ==="
+    exit 1
+fi
+echo "=== RESULT: all checks passed ==="
+exit 0

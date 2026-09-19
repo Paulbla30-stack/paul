@@ -114,8 +114,11 @@ YAML
 # ---- 4. Launcher, service units, login banner ---------------------------
 log "Installing launcher and systemd units"
 install -m 0755 "$SRC/rootfs/usr/local/bin/jarvis" /usr/local/bin/jarvis
+install -m 0755 "$SRC/rootfs/usr/local/bin/jarvis-health" /usr/local/bin/jarvis-health
 install -m 0644 "$SRC/aws/systemd/jarvis-bootstrap.service" /etc/systemd/system/
 install -m 0644 "$SRC/aws/systemd/jarvis.service" /etc/systemd/system/
+install -m 0644 "$SRC/aws/systemd/jarvis-health.service" /etc/systemd/system/
+install -m 0644 "$SRC/aws/systemd/jarvis-health.timer" /etc/systemd/system/
 install -m 0644 "$SRC/aws/scripts/motd.sh" /etc/profile.d/jarvis.sh
 mkdir -p /var/log /var/lib/jarvis/uploads /etc/jarvis/tls /etc/jarvis/ledger
 chmod 750 /var/lib/jarvis /var/lib/jarvis/uploads
@@ -124,6 +127,7 @@ touch /var/log/jarvis.log /var/log/jarvis-security.log
 
 systemctl daemon-reload
 systemctl enable jarvis-bootstrap.service jarvis.service
+systemctl enable jarvis-health.timer
 
 # ---- 5. Agent-first OS tweaks -------------------------------------------
 log "Applying agent-first OS settings"
