@@ -7,7 +7,7 @@ output "private_ip" {
 }
 
 output "public_ip" {
-  value = aws_instance.jarvis.public_ip
+  value = var.static_ip ? aws_eip.jarvis[0].public_ip : aws_instance.jarvis.public_ip
 }
 
 output "ssm_session_command" {
@@ -19,7 +19,7 @@ output "serial_console_command" {
 }
 
 output "ui_url" {
-  value = var.ui_cidr != "" ? "https://${aws_instance.jarvis.public_ip}:${var.ui_port}/ui" : "(closed: set -var ui_cidr=<your ip>/32)"
+  value = var.ui_cidr != "" ? "https://${var.static_ip ? aws_eip.jarvis[0].public_ip : aws_instance.jarvis.public_ip}:${var.ui_port}/ui" : "(closed: set -var ui_cidr=<your ip>/32)"
 }
 
 output "ledger_bucket" {

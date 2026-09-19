@@ -140,6 +140,10 @@ def load_config(path, extra_paths=()):
             "status_file": "/run/jarvis/status.json",
             "status_token": None,
             "status_token_file": "/run/jarvis/token",
+            # The runtime copy above dies with every restart; this one does not,
+            # so a redeploy stops replacing the operator's credential.
+            "status_token_persist_file": "/etc/jarvis/token",
+            "session_key_file": "/etc/jarvis/session.key",
             "ui": {
                 "enabled": False,          # web UI (chat, agent panel, uploads)
                 "host": "0.0.0.0",
@@ -148,6 +152,7 @@ def load_config(path, extra_paths=()):
                 "tls_dir": "/etc/jarvis/tls",
                 "upload_dir": "/var/lib/jarvis/uploads",
                 "max_upload_mb": 50,
+                "session_days": 30,       # how long a browser login lasts
             },
         },
         "goals": [],
@@ -428,6 +433,9 @@ class JarvisSystem:
                 status_file=cloud.get("status_file"),
                 token=cloud.get("status_token") or None,
                 token_file=cloud.get("status_token_file"),
+                token_persist_file=cloud.get("status_token_persist_file"),
+                session_key_file=cloud.get("session_key_file"),
+                session_days=int((cloud.get("ui") or {}).get("session_days") or 30),
                 max_idle_wait=cloud.get("max_idle_wait"),
                 ui=cloud.get("ui"),
             )

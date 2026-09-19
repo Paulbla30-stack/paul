@@ -214,6 +214,7 @@
 (function () {
   const $ = (id) => document.getElementById(id);
   let token = "";
+  let sessionActive = false;
   try { token = localStorage.getItem("jarvis.token") || ""; } catch (e) {}
   let turns = [];
   try { turns = JSON.parse(localStorage.getItem("jarvis.chat") || "[]"); } catch (e) { turns = []; }
@@ -223,6 +224,7 @@
   async function api(path, opts) {
     const init = Object.assign({}, opts || {});
     init.headers = headers(init.headers || {});   // never let caller headers drop the token
+    init.credentials = "same-origin";             // and the session cookie rides along
     const r = await fetch(path, init);
     if (r.status === 401) { showLogin("Token rejected"); throw new Error("unauthorised"); }
     const text = await r.text();
@@ -231,12 +233,35 @@
     return data;
   }
   function showLogin(msg) { $("login").style.display = "flex"; $("loginErr").textContent = msg || ""; $("tokenInput").focus(); }
-  window.saveToken = function () {
-    token = $("tokenInput").value.trim();
+  window.saveToken = async function () {
+    const supplied = $("tokenInput").value.trim();
+    if (!supplied) { showLogin("Paste the runner token."); return; }
+    // Exchange the token for a signed session cookie. The cookie survives a
+    // restart, so a redeploy that rotates the token no longer logs you out.
+    try {
+      const r = await fetch("/login", { method: "POST", body: supplied, credentials: "same-origin" });
+      if (!r.ok) {
+        const d = await r.json().catch(() => ({}));
+        showLogin(r.status === 429 ? "Too many attempts; wait a few minutes."
+                                   : ((d && d.error) || "That token was not accepted."));
+        return;
+      }
+      const d = await r.json().catch(() => ({}));
+      if (d && d.session) { sessionActive = true; }
+    } catch (e) {
+      showLogin("Could not reach the agent: " + e.message);
+      return;
+    }
+    token = supplied;
     try { localStorage.setItem("jarvis.token", token); } catch (e) {}
     $("login").style.display = "none"; refresh();
   };
-  window.logout = function () { token = ""; try { localStorage.removeItem("jarvis.token"); } catch (e) {} showLogin(""); };
+  window.logout = async function () {
+    try { await fetch("/logout", { method: "POST", credentials: "same-origin" }); } catch (e) {}
+    token = ""; sessionActive = false;
+    try { localStorage.removeItem("jarvis.token"); } catch (e) {}
+    showLogin("");
+  };
 
   // ---- tabs ----
   document.querySelectorAll("nav button").forEach(b => b.addEventListener("click", () => {
@@ -451,8 +476,22 @@
   function escapeHtml(s) { return String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
 
   renderChat();
-  if (!token) showLogin(""); else refresh();
-  setInterval(() => { if (token && document.visibilityState === "visible") refresh(); }, 5000);
+  // A session cookie from a previous login is enough on its own, so try the
+  // agent before asking for anything. This is what makes a restart invisible.
+  (async function boot() {
+    try {
+      const r = await fetch("/status", { credentials: "same-origin" });
+      if (r.ok) {
+        const probe = await fetch("/goals", { credentials: "same-origin",
+                                              headers: token ? { "Authorization": "Bearer " + token } : {} });
+        if (probe.ok) { sessionActive = !token; $("login").style.display = "none"; refresh(); return; }
+      }
+    } catch (e) {}
+    if (!token) showLogin(""); else refresh();
+  })();
+  setInterval(() => {
+    if ((token || sessionActive) && document.visibilityState === "visible") refresh();
+  }, 5000);
 })();
 </script>
 </body>

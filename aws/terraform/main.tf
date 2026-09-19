@@ -289,7 +289,7 @@ resource "aws_instance" "jarvis" {
   tags = merge(
     local.tags,
     {
-      Name            = var.name
+      Name          = var.name
       "jarvis:name" = var.name
     },
     var.agent_goal != "" ? { "jarvis:goal" = var.agent_goal } : {},
@@ -297,4 +297,16 @@ resource "aws_instance" "jarvis" {
     var.llm_provider == "anthropic" && var.anthropic_api_key_ssm_parameter != "" ? { "jarvis:llm-key-parameter" = var.anthropic_api_key_ssm_parameter } : {},
     var.ledger_anchor ? { "jarvis:ledger-bucket" = aws_s3_bucket.ledger[0].bucket } : {},
   )
+}
+
+# An auto-assigned public IP changes whenever the instance is stopped and
+# started. That moves the UI's origin, which loses the browser's stored login
+# along with the bookmark. An Elastic IP attached to a running instance costs
+# nothing and fixes it. Off by default because turning it on changes the
+# address once, the next time you apply.
+resource "aws_eip" "jarvis" {
+  count    = var.static_ip ? 1 : 0
+  instance = aws_instance.jarvis.id
+  domain   = "vpc"
+  tags     = { Name = var.name }
 }

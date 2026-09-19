@@ -317,6 +317,49 @@ behaviour for a deployment that wants it. The upper rungs of the pack's
 spine, standing approval and scheduled autonomy, need an autonomy register
 and approval cards that are not built yet.
 
+## Signing in
+
+The UI's credential is the runner token, and the login now lasts.
+
+Two things used to break it. The token was minted fresh at every start and
+written only to `/run/jarvis/token`, which systemd deletes and recreates on
+each restart (`RuntimeDirectory=jarvis`), so every deploy silently replaced
+the credential sitting in the browser. And there was no session: each request
+re-sent the token, so when the token changed there was nothing to fall back
+on. The operator was not being timed out. His credential was being swapped
+underneath him.
+
+- **The token persists.** It is read from `cloud.status_token_persist_file`
+  (default `/etc/jarvis/token`, 0600) and generated there once if absent, then
+  also written to the runtime path for the existing `cat /run/jarvis/token`
+  habit. Set `cloud.status_token` to pin it explicitly; delete the persisted
+  file to rotate it.
+- **A login mints a signed session.** `POST /login` with the token returns a
+  cookie that is HttpOnly, SameSite=Strict and Secure over TLS, valid for
+  `cloud.ui.session_days` (default 30). It is stateless: value, expiry and an
+  HMAC over both, signed with a key at `cloud.session_key_file` (default
+  `/etc/jarvis/session.key`, 0600, created on first start). Because the key is
+  on disk rather than in the runtime directory, a restart does not end the
+  session. `POST /logout` clears it, and deleting the key file invalidates
+  every session at once, which is the only revocation a single operator needs.
+- **If the key cannot be written, sessions are off** rather than signed with a
+  key that dies with the process. A cookie that stops working at the next
+  restart is the bug, not the fix.
+- Both files are on the shell deny-list. The agent cannot read the credentials
+  its operator logs in with.
+
+The bearer token still works on every endpoint, so `curl` and scripts are
+unaffected.
+
+Two things are still worth doing and are not done here. The public IP is
+auto-assigned, so a stop/start moves the UI's address and the browser loses
+its stored login with the origin; `terraform apply -var static_ip=true`
+attaches an Elastic IP, which is free while attached and changes the address
+once. And the certificate is self-signed on an IP, which is why the browser
+warns every time. The real answer to both is a name and a real certificate,
+with Cloudflare Tunnel in front so the port is not open to the internet at
+all.
+
 ## Headless mode
 
 `jarvis --headless` runs the same agent loop without the console. It is

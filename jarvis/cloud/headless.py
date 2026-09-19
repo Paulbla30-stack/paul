@@ -61,6 +61,8 @@ _SAFE_NAME = re.compile(r"[^A-Za-z0-9._-]+")
 DEFAULT_STATUS_PORT = 8471
 DEFAULT_STATUS_FILE = "/run/jarvis/status.json"
 DEFAULT_TOKEN_FILE = "/run/jarvis/token"
+# Survives a restart, unlike the runtime directory copy above.
+DEFAULT_TOKEN_PERSIST_FILE = "/etc/jarvis/token"
 OPEN_PATHS = ("/", "/health", "/status")
 
 
@@ -106,6 +108,9 @@ class HeadlessRunner:
                  status_file: Optional[str] = None,
                  token: Optional[str] = None,
                  token_file: Optional[str] = DEFAULT_TOKEN_FILE,
+                 token_persist_file: Optional[str] = DEFAULT_TOKEN_PERSIST_FILE,
+                 session_key_file: Optional[str] = None,
+                 session_days: int = 30,
                  ui: Optional[dict] = None,
                  max_idle_wait: Optional[float] = None):
         self.agent = agent
@@ -115,8 +120,18 @@ class HeadlessRunner:
         self.status_port = status_port
         self.status_host = status_host
         self.status_file = status_file
-        self.token = token or secrets.token_urlsafe(32)
+        # The token used to be minted fresh at every start and written only
+        # under /run, which systemd wipes on restart: every deploy silently
+        # replaced the operator's credential. It now persists.
+        self.token_persist_file = token_persist_file
+        self.token = token or read_token_file(token_persist_file) or secrets.token_urlsafe(32)
         self.token_file = token_file
+        # Signed browser sessions, so a login survives a restart even when the
+        # token is rotated. No key means no sessions, never an ephemeral one.
+        from jarvis.cloud import session as _session
+        self.session_days = max(1, min(int(session_days or 30), _session.MAX_DAYS))
+        self.session_key_file = session_key_file or _session.DEFAULT_KEY_FILE
+        self.session_key = _session.load_or_create_key(self.session_key_file, self.log)
         ui = dict(ui or {})
         self.ui_enabled = bool(ui.get("enabled"))
         self.ui_host = ui.get("host") or "0.0.0.0"
@@ -202,11 +217,13 @@ class HeadlessRunner:
             def log_message(self, fmt, *args):  # quiet
                 runner.log.debug("http %s", fmt % args)
 
-            def _send(self, code: int, payload):
+            def _send(self, code: int, payload, headers: Optional[list] = None):
                 body = json.dumps(payload, default=str).encode()
                 self.send_response(code)
                 self.send_header("Content-Type", "application/json")
                 self.send_header("Content-Length", str(len(body)))
+                for name, value in (headers or []):
+                    self.send_header(name, value)
                 self.end_headers()
                 self.wfile.write(body)
 
@@ -216,6 +233,8 @@ class HeadlessRunner:
             def _authorised(self) -> bool:
                 if runner.auth_locked(self._client()):
                     return False
+                if runner.session_valid(self.headers.get("Cookie")):
+                    return True
                 header = self.headers.get("Authorization") or ""
                 supplied = header[7:].strip() if header.lower().startswith("bearer ") else ""
                 supplied = supplied or (self.headers.get("X-Jarvis-Token") or "").strip()
@@ -316,6 +335,26 @@ class HeadlessRunner:
             def do_POST(self):
                 raw_path, _, query = self.path.partition("?")
                 path = raw_path.rstrip("/") or "/"
+                # Login and logout come before the auth check: one is how you
+                # get authorised, and the other only clears your own cookie.
+                if path == "/login":
+                    if runner.auth_locked(self._client()):
+                        return self._send(429, {"error": "too many failed logins; try again later"})
+                    if int(self.headers.get("Content-Length") or 0) > 4096:
+                        return self._send(413, {"error": "body too large"})
+                    supplied = self._body().strip()
+                    if not supplied or not secrets.compare_digest(supplied, runner.token):
+                        runner.auth_failed(self._client())
+                        return self._send(401, {"error": "bad token"})
+                    cookie = runner.new_session_cookie()
+                    if not cookie:
+                        return self._send(200, {"ok": True, "session": False,
+                                                "note": "sessions unavailable; the token is still required"})
+                    return self._send(200, {"ok": True, "session": True, "days": runner.session_days},
+                                      headers=[("Set-Cookie", cookie)])
+                if path == "/logout":
+                    return self._send(200, {"ok": True},
+                                      headers=[("Set-Cookie", runner.clear_session_cookie())])
                 if not self._authorised():
                     return self._deny()
                 if path == "/upload":
@@ -464,6 +503,10 @@ class HeadlessRunner:
             daemon=True)
         self._server_thread.start()
         port = self._server.server_address[1]
+        if self.token_persist_file:
+            # Written outside the runtime directory so a restart does not
+            # invalidate the credential already in the operator's browser.
+            write_token_file(self.token, self.token_persist_file)
         written = write_token_file(self.token, self.token_file) if self.token_file else None
         self.log.info("Status endpoint listening on http://%s:%d/status (token: %s)",
                       self.status_host, port, written or "not written to disk")
@@ -480,6 +523,27 @@ class HeadlessRunner:
             self._ui_server = None
 
     # ---- auth throttle ----------------------------------------------------------
+
+    def session_valid(self, cookie_header: Optional[str]) -> bool:
+        """True when the request carries a session this runner signed."""
+        if not self.session_key:
+            return False
+        from jarvis.cloud import session as _session
+        return _session.verify(self.session_key,
+                               _session.from_cookie_header(cookie_header))
+
+    def new_session_cookie(self) -> Optional[str]:
+        """A Set-Cookie value for a fresh session, or None when disabled."""
+        if not self.session_key:
+            return None
+        from jarvis.cloud import session as _session
+        return _session.cookie_header(
+            _session.issue(self.session_key, self.session_days),
+            self.session_days, secure=self.ui_tls)
+
+    def clear_session_cookie(self) -> str:
+        from jarvis.cloud import session as _session
+        return _session.clear_header(secure=self.ui_tls)
 
     def auth_locked(self, client: str) -> bool:
         now = time.time()

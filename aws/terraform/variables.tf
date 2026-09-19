@@ -114,3 +114,9 @@ variable "ledger_retention_days" {
   default     = 30
   description = "Object Lock retention (COMPLIANCE mode) for ledger checkpoints and copies. Nobody, including the account root, can delete a version before it expires; the bucket cannot be emptied until then."
 }
+
+variable "static_ip" {
+  description = "Attach an Elastic IP so the UI address survives a stop/start. Turning this on changes the public address once."
+  type        = bool
+  default     = false
+}

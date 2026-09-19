@@ -74,6 +74,9 @@ DEFAULT_SHELL_DENY_PATTERNS = [
     _CMD + r"(?:passwd|chpasswd|useradd|userdel|usermod|adduser|deluser|visudo)\b",
     r"/etc/(?:shadow|gshadow|sudoers)",
     r"/etc/jarvis/anthropic\.key|/proc/\S*/environ",
+    # the operator's own credentials: the runner token and the key that
+    # signs UI sessions are as good as a login
+    r"/etc/jarvis/(?:token|session\.key)\b",
     r"\baws\s+ssm\s+get-parameter",
     r"~?/\.(?:ssh|aws|config/anthropic)\b",
     _CMD + r"crontab\s+(?:-\S+\s+)*-r\b",
