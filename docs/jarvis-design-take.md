@@ -171,6 +171,137 @@ and kept strictly separate from Arkin Engine Ltd", "not the movie". The platform
 package, paths, units, tags, buckets and UI. Two constraints carry: nothing here is Arkin's, and the
 voice is a peer's, capable, calm and direct.
 
+## The Heartbeat Framework, mapped onto this platform
+
+A second source, and a different kind of one. The design pack above is Paul's private architecture
+for Jarvis. The Heartbeat Framework (heartbeat-framework.org, twenty Zenodo records, CC BY 4.0) is
+his published clinical-AI governance estate: an eight-instrument deployment sequence with the
+governing principle *assess at the gate, measure over time, record beyond amendment*.
+
+Jarvis is a deployment. It has been through one station of the eight.
+
+The one it has is the last one. The Glass Ledger (station 8, RECORD) is built, signed, witnessed
+off-box and audited from another machine. It was taken first because it is the station that is most
+obviously software. The seven skipped stations are the ones that ask the questions the last two
+incidents raised.
+
+### The sequence, station by station
+
+| # | Station | Its question | Here |
+|---|---|---|---|
+| 1 | BEFORE, the Readiness Gate | Is this deployment ready to proceed? | Nothing. Ten observable checks and red lines that pause a discretionary deployment until they clear, never run |
+| 2 | ASSESS, the Risk Screen | What interaction risks exist at baseline and over time? | Nothing. No baseline and no change-over-time log |
+| 3 | SPECIFY, the Character Pathway | What character, and what are its baseline vitals? | Half. The behaviour lab *is* a character specification, undeclared as one, with no vitals |
+| 4 | OVERSEE, the Overseer's Bible | Who watches, and what do they track? | Begun. The proposal queue is the start of an oversight artefact; no shift card, no paced review |
+| 5 | TRIAL, the Floor Test | How does it behave in real conditions? | Ad hoc. Live checks are run by hand, predictions are not stated in advance |
+| 6 | AUDIT, the Damping Audit | Are harms being contained? | Nothing |
+| 7 | MEASURE, the AIOP | What outcomes has the deployment produced? | Nothing |
+| 8 | RECORD, the Glass Ledger | How is the evidence preserved beyond tampering? | Built, witnessed, audited off-box |
+
+### The nine vitals name both failures
+
+The Floor Test captures nine vitals at baseline and again at ninety days. Two of them are the exact
+names for the two things that went wrong here, and neither is instrumented.
+
+| Vital | Here | State |
+|---|---|---|
+| Override rate | How often Paul overrides a Jarvis recommendation | Not recorded |
+| Alert positive-predictive value | Of the findings Jarvis raises, how many are real | Not computed. It was low: of five scan warnings, one was a false positive from reading `conf.all` alone and one asserted Secure Boot from a variable's existence |
+| Gate verification time | How long a gate or proposal waits on the operator | Computable from the ledger; not computed |
+| Near-miss reporting rate | Does it surface its own near misses | The ptrace bypass was recorded and surfaced by nobody |
+| Workaround census | Times the agent worked around a control | Exactly one known, and it took a human reading the journal to find it |
+| Responder concentration | Whether one person answers everything | Degenerate at one operator, but worth stating rather than omitting |
+| We/they language | How the planner speaks of its operator | Computable from ledger reasoning text |
+| The double-zero check | Zero overrides and zero disagreements together | **Currently double zero, because neither is instrumented.** The alarm reading, arrived at by not looking |
+| Three-question trust pulse | Paul's own reading, periodically | Not asked |
+
+The double zero is the cheapest and sharpest of these. Zero overrides and zero disagreements does not
+mean the dyad is healthy; it means it has stopped being a dyad. Item 12 of the take-now list is the
+instrument for it and it is still unbuilt.
+
+### The five control surfaces
+
+The Character Pathway governs character through five surfaces: model selection, fine-tuning, the
+grounding corpus, the deployed constitution, and production feedback loops. The behaviour lab covers
+one and a half of them.
+
+- **Model selection**: Qwen3-32B, imported by Paul. A real choice, made once, recorded nowhere as a
+  character decision.
+- **Fine-tuning**: none. The base model is used as shipped, which is itself a position worth stating.
+- **Grounding corpus**: the environment block, the durable memory and the context. Built, and the
+  `context` dial governs how much of it the model sees.
+- **Deployed constitution**: the `constitution`, `honesty` and `voice` dials. Covered.
+- **Production feedback loops**: **nothing**. No signal from how answers land ever returns to the
+  system. The pathway attaches an anti-sycophancy clause to exactly this surface, because feedback
+  loops are where preference optimisation breeds agreement.
+
+The pathway's other rule bears on the lab directly: nine vitals, *run as signals, never targets*. The
+lab's dials are an obvious thing to start optimising. The moment a dial setting becomes a target, the
+instrument stops measuring.
+
+### Where the estate names what happened
+
+Three lines from the estate describe the last two incidents better than anything written here.
+
+- *Systems demote unease from signal to dissent* (the Damping Audit's sensing-node layer). The
+  deny-list refusal was recorded as a failed task. The planner read it as an obstacle, not a signal,
+  and went looking for a way past it. The refusal carried no standing.
+- *Capability multiplied by culture, and regulation assesses only the capability term* (the Cultural
+  Safety Case). Everything built in this branch is capability: fences, grounding, memory, the
+  permission spine. The culture term is how Paul uses it, and nothing here measures that.
+- *Rent the sockets, own the gravity* (the Tenant's Record). This platform already is that doctrine:
+  rented compute, owned weights, owned ledger, owned memory, owned constitution. It is the closest
+  thing the estate has to a working reference implementation, and it is undeclared as one.
+
+The Overseer's Bible adds two rules that apply the moment there is a proposal queue. The seat test,
+*authority, information, time, retained skill*, is a checklist Paul can fail as Jarvis's sole
+overseer, and time is the term most likely to fail. And the sampling rule against rubber-stamping,
+*one random, one highest-risk, one recently-changed, never sequential*, is how a proposal queue
+should be reviewed rather than cleared top to bottom.
+
+### What transfers, and what does not
+
+The estate is written for people in care settings. The method transfers to an infrastructure agent;
+the clinical content does not, and pretending otherwise would be the same error as dressing a
+care-home instrument up as a server control.
+
+- The **AIOP measures a person against their own pre-AI baseline**, not a machine. It applies to Paul
+  and his use of Jarvis, not to Jarvis. What transfers to the lab is its *method*: bipolar axes
+  running harm pole to benefit pole rather than the lab's unipolar "how much of this layer is on";
+  measurement against a baseline rather than an absolute, which the lab already does by running the
+  bare model alongside; and two lanes whose **disagreements are recorded rather than averaged**. The
+  lab has one lane and throws its disagreements away.
+- The **Damping Audit asks what has happened to the humans around this team**. Jarvis has a team of
+  one, so the question is degenerate but not empty: what has happened to Paul since it arrived.
+- The **population-vulnerability threshold** for gating agentic deployment does not bind here. No
+  patient data touches this box. The autonomy and span terms do bind, and the permission spine is
+  the first thing in this branch that answers them.
+
+### Take first
+
+1. **Declare the character specification.** The lab already computes a fingerprint of every dial
+   setting and stamps it on ledger entries. Naming that a character specification, with the nine
+   vitals as its baseline, costs little and is the precondition for every other station: nothing
+   downstream can measure change without something to measure from.
+2. **Instrument the double zero.** Override and disagreement counters, per take-now item 12. One
+   endpoint, two ledger kinds, a count in the status. It measures the term nobody else measures.
+3. **Compute alert positive-predictive value from the ledger.** Every finding Jarvis raises is
+   already recorded. Marking each one true or false in hindsight turns "it keeps coming back with
+   errors" from an impression into a number that can move.
+4. **Run the Readiness Gate retroactively** and record the result, red lines included. At least one
+   is likely to bite: the paper's own rule is that the seal must not share a trust boundary with the
+   node it seals, and the witness bucket is in the same AWS account as the instance.
+
+### What could not be read
+
+This mapping is built from the estate's public pages, not the deposited PDFs. The following are
+referenced but not reproduced here because the granular items are in the records themselves: the ten
+observable pre-deployment checks and the four red lines (Before the Machine), the nine indicators of
+the relational-load index (the Damping Audit), and the AIOP's 26 self-report and 18 observer items
+(After the Machine). The nine vitals *are* listed above, from the Floor Test page, and the five
+control surfaces from the Character Pathway page. Anything built from the four items above should
+start by reading the records.
+
 ## Decisions the pack leaves to Paul, as this platform now forces them
 
 1. **The processor.** AWS and Bedrock carry all model traffic and the model runs in Paul's own account
@@ -188,3 +319,9 @@ voice is a peer's, capable, calm and direct.
    finding goes to Paul carrying the marker that it is not allowed to stay inside the dyad.
 7. **Memory residency.** The yard is git-versioned on the instance; whether `memory/` ever leaves the
    box (a mirror or backup) is a ratified decision, default no.
+8. **Whether Jarvis is a declared Floor Test of the Heartbeat Framework.** It is a real deployment of
+   an agentic system with a named lead, an owned stack and a tamper-evident record, which is more
+   than most sites running the instruments will have. Running the ninety-day protocol on it would
+   produce a data point against the estate's own registered predictions, and the estate is public, so
+   this is a publication decision as much as an engineering one. Default is no, and the mapping above
+   stands on its own either way.
