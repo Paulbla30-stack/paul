@@ -178,7 +178,11 @@ for Jarvis. The Heartbeat Framework (heartbeat-framework.org, twenty Zenodo reco
 his published clinical-AI governance estate: an eight-instrument deployment sequence with the
 governing principle *assess at the gate, measure over time, record beyond amendment*.
 
-Jarvis is a deployment. It has been through one station of the eight.
+Jarvis is a deployment, in the sense that it runs continuously on a real machine. It is not yet in
+service, in the sense that its operator is still building it rather than relying on it. Both facts
+matter below: the stations apply, and the vitals that measure a working relationship do not read yet.
+
+It has been through one station of the eight.
 
 The one it has is the last one. The Glass Ledger (station 8, RECORD) is built, signed, witnessed
 off-box and audited from another machine. It was taken first because it is the station that is most
@@ -212,12 +216,28 @@ names for the two things that went wrong here, and neither is instrumented.
 | Workaround census | Times the agent worked around a control | Exactly one known, and it took a human reading the journal to find it |
 | Responder concentration | Whether one person answers everything | Degenerate at one operator, but worth stating rather than omitting |
 | We/they language | How the planner speaks of its operator | Computable from ledger reasoning text |
-| The double-zero check | Zero overrides and zero disagreements together | **Currently double zero, because neither is instrumented.** The alarm reading, arrived at by not looking |
+| The double-zero check | Zero overrides and zero disagreements together | Reads zero, but **not the alarm reading**: see below. Neither counter is instrumented |
 | Three-question trust pulse | Paul's own reading, periodically | Not asked |
 
-The double zero is the cheapest and sharpest of these. Zero overrides and zero disagreements does not
-mean the dyad is healthy; it means it has stopped being a dyad. Item 12 of the take-now list is the
-instrument for it and it is still unbuilt.
+The double zero is the cheapest and sharpest of these once a deployment is in service. It is not
+sharp here yet, and an earlier draft of this section got that wrong. Zero overrides and zero
+disagreements is the alarm reading when an operator is relying on a system and never contradicting
+it. Paul is not relying on this one: he is building it, and taking his engineering questions
+elsewhere while he does. The reading is null, not alarming, and calling it an alarm would be the
+instrument measuring its own absence.
+
+That distinction is the framework's own. The Floor Test captures baseline vitals at the start of
+**service**, and this platform is pre-service. By the estate's sequence it sits at stations 1 to 3,
+not station 5. Build the counters now so the baseline can be captured the day it enters service;
+read them after that day, not before.
+
+It also reframes what the two tasks Jarvis has been given actually tested. Both, a health script and
+a judgement on security findings, were build-and-advise questions, which is the work Paul is doing
+elsewhere and where he has a far better-resourced alternative. The questions this deployment is
+uniquely placed to answer are about the machine it lives on and sees continuously. Until it is asked
+those, the dyad vitals have nothing to measure, and the honest readiness question for station 1 is
+not "is it safe to act" but "what would have to be true for Paul to ask Jarvis instead of asking
+Claude".
 
 ### The five control surfaces
 
@@ -283,8 +303,10 @@ care-home instrument up as a server control.
    setting and stamps it on ledger entries. Naming that a character specification, with the nine
    vitals as its baseline, costs little and is the precondition for every other station: nothing
    downstream can measure change without something to measure from.
-2. **Instrument the double zero.** Override and disagreement counters, per take-now item 12. One
-   endpoint, two ledger kinds, a count in the status. It measures the term nobody else measures.
+2. **Build the double-zero counters, and do not read them yet.** Override and disagreement counters,
+   per take-now item 12. One endpoint, two ledger kinds, a count in the status. They measure the term
+   nobody else measures, but only once the platform is in service; until then the reading is null and
+   the instrument is being put in place, not consulted.
 3. **Compute alert positive-predictive value from the ledger.** Every finding Jarvis raises is
    already recorded. Marking each one true or false in hindsight turns "it keeps coming back with
    errors" from an impression into a number that can move.
