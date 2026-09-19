@@ -182,7 +182,8 @@ class SelfKnowledge:
             out.append(f"Over the last {days:g} days you took {data['decisions']} "
                        f"decisions and completed {data['outcomes']} tasks.")
         if data.get("failure_rate") is not None and data["failures"]:
-            out.append(f"{data['failures']} of them failed "
+            failed = data["failures"]
+            out.append(f"{failed} of them failed "
                        f"({data['failure_rate'] * 100:.0f}%).")
 
         # Checks that keep coming back empty.
@@ -203,9 +204,10 @@ class SelfKnowledge:
             out.append(f"Your {name} failed {stat['failed']} of {stat['runs']} "
                        f"attempts; whatever you are doing there is not working.")
 
-        if data["proposals_filed"]:
-            out.append(f"You filed {data['proposals_filed']} proposals rather than "
-                       f"making a change yourself.")
+        filed = data["proposals_filed"]
+        if filed:
+            out.append(f"You filed {filed} proposal{'' if filed == 1 else 's'} "
+                       f"rather than making a change yourself.")
         # What he actually said, verbatim. This is the corpus the agent learns
         # his preferences from, and a count cannot carry it: "one of six
         # accepted" says the hit rate is poor and nothing about what a good
@@ -215,7 +217,7 @@ class SelfKnowledge:
         if verdicts:
             accepted = [v for v in verdicts if v["verdict"] == "accepted"]
             declined = [v for v in verdicts if v["verdict"] == "declined"]
-            out.append(f"The operator answered {len(verdicts)} of them: "
+            out.append(f"He answered {len(verdicts)} of them: "
                        f"{len(accepted)} accepted, {len(declined)} declined.")
             for v in verdicts[:6]:
                 line = f"He {v['verdict']}: \"{v['proposal']}\""
