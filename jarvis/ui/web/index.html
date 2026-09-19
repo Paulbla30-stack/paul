@@ -54,9 +54,117 @@
   .bar i { display:block; height:100%; width:0; background:var(--accent); }
   #login { position:fixed; inset:0; background:rgba(0,0,0,.75); display:none; align-items:center; justify-content:center; padding:20px; z-index:5; }
   #login .card { width:100%; max-width:380px; }
+
+  /* ---- Handheld and tablet ------------------------------------------------
+     This is read on a phone far more often than on a desktop, so the base
+     layout is the small one and the wide screens are the special case. */
+
+  html { -webkit-text-size-adjust:100%; }
+  body { overscroll-behavior-y:contain; -webkit-tap-highlight-color:transparent; }
+
+  /* viewport-fit=cover lets the page under the notch and the home indicator,
+     which is what makes the header and nav look right when scrolled; these
+     put the content back inside the safe area. */
+  header { padding-top:calc(10px + env(safe-area-inset-top));
+           padding-left:calc(14px + env(safe-area-inset-left));
+           padding-right:calc(14px + env(safe-area-inset-right)); }
+  main { padding-left:calc(14px + env(safe-area-inset-left));
+         padding-right:calc(14px + env(safe-area-inset-right));
+         padding-bottom:24px; }
+  body.chat-open main { padding-bottom:96px; }
+  .composer { padding-left:calc(14px + env(safe-area-inset-left));
+              padding-right:calc(14px + env(safe-area-inset-right)); }
+
+  /* iOS Safari zooms the whole page when a focused field is under 16px, and
+     never zooms back out. Everything typed into goes to 16. */
+  input, textarea, select { font-size:16px; }
+
+  /* Thumbs are not mice. 44px is the smallest reliable target. */
+  nav { overflow-x:auto; scrollbar-width:none; -webkit-overflow-scrolling:touch;
+        scroll-snap-type:x proximity; padding-left:env(safe-area-inset-left);
+        padding-right:env(safe-area-inset-right); }
+  nav::-webkit-scrollbar { display:none; }
+  nav button { flex:1 0 auto; white-space:nowrap; padding:0 16px; min-height:48px;
+               scroll-snap-align:center; }
+  button.btn, .file-btn, button.ghost { min-height:44px; display:inline-flex;
+               align-items:center; justify-content:center; }
+  header button.ghost { min-height:40px; padding:8px 12px; }
+  details summary { min-height:32px; display:flex; align-items:center; }
+  /* A checkbox is 18px because that is what a checkbox looks like. The thing
+     you actually aim at is the label wrapped round it, so that is what gets
+     the 44px. */
+  label.small { min-height:44px; display:flex; align-items:center; gap:8px;
+                cursor:pointer; }
+
+  /* Sliders are the lab's whole interface and the default thumb is tiny. */
+  input[type=range] { height:44px; accent-color:var(--accent); background:transparent; }
+  input[type=range]::-webkit-slider-runnable-track { height:6px; border-radius:3px; background:var(--line); }
+  input[type=range]::-moz-range-track { height:6px; border-radius:3px; background:var(--line); }
+  input[type=range]::-webkit-slider-thumb { -webkit-appearance:none; width:26px; height:26px;
+      margin-top:-10px; border-radius:50%; background:var(--accent); border:0; }
+  input[type=range]::-moz-range-thumb { width:26px; height:26px; border-radius:50%;
+      background:var(--accent); border:0; }
+  input[type=checkbox], input[type=radio] { width:18px; height:18px; accent-color:var(--accent); }
+
+  /* Long hashes and paths should scroll, not stretch the page sideways. */
+  pre { -webkit-overflow-scrolling:touch; overscroll-behavior:contain; }
+  #messages { min-height:min(40vh, 40dvh); }
+  .msg { max-width:min(88%, 62ch); }
+
+  /* Tablet and desktop: use the width instead of a 900px column in the middle
+     of a 1280px screen. Chat stays one column, because a conversation reading
+     in two columns is a worse conversation. */
+  @media (min-width: 900px) {
+    main { max-width:1180px; padding-bottom:32px; }
+    body.chat-open main { padding-bottom:110px; }
+    .composer .inner { max-width:1180px; }
+    section.active { display:grid; grid-template-columns:repeat(2, minmax(0,1fr));
+                     gap:14px; align-items:start; }
+    section#chat.active { display:block; }
+    .card { margin-bottom:0; padding:14px; }
+    .span-2 { grid-column:1 / -1; }
+    nav button { flex:1 1 auto; }
+  }
+
+  /* The dial's name and its current setting. The setting can be a sentence
+     ("full: observations not verdicts, cite or don't assert"), which squeezes
+     the name to nothing on a phone, so below 520px they stack instead. */
+  .dial-head { justify-content:space-between; align-items:baseline; gap:10px; }
+  .dial-head b { flex:0 1 auto; }
+  .dial-head span { flex:1 1 auto; text-align:right; min-width:0; }
+  @media (max-width: 520px) {
+    .dial-head { flex-direction:column; align-items:flex-start; gap:1px; }
+    .dial-head span { text-align:left; }
+  }
+
+  /* Tabs sit over the content column rather than stretching across a
+     1280px screen with 200px between them. */
+  nav { justify-content:center; }
+  nav .inner, nav { }
+  @media (min-width: 900px) {
+    nav { padding-left:max(env(safe-area-inset-left), calc((100vw - 1180px) / 2));
+          padding-right:max(env(safe-area-inset-right), calc((100vw - 1180px) / 2)); }
+    nav button { flex:0 1 200px; }
+  }
+
+  #labResults { display:grid; gap:12px; grid-template-columns:1fr; }
+  @media (min-width: 760px) { #labResults.compare { grid-template-columns:1fr 1fr; } }
+
+  /* A phone held sideways has very little height; stop the chrome eating it. */
+  @media (max-height: 460px) and (orientation: landscape) {
+    header { position:static; }
+    nav button { min-height:40px; }
+    #messages { min-height:24dvh; }
+  }
+
+  /* Respect the system setting rather than animating regardless. */
+  @media (prefers-reduced-motion: reduce) {
+    * { animation-duration:.01ms !important; transition-duration:.01ms !important;
+        scroll-behavior:auto !important; }
+  }
 </style>
 </head>
-<body>
+<body class="chat-open">
 <header>
   <span id="statusDot" class="dot"></span>
   <h1 id="agentName">Jarvis</h1>
@@ -102,7 +210,7 @@
       </div>
     </div>
 
-    <div class="card">
+    <div class="card span-2">
       <h2>Recent tasks</h2>
       <ul id="history"></ul>
     </div>
@@ -147,7 +255,7 @@
         <span id="lVerdict" class="small"></span>
       </div>
     </div>
-    <div class="card">
+    <div class="card span-2">
       <h2>Latest entries</h2>
       <ul id="ledgerEntries"></ul>
     </div>
@@ -166,13 +274,13 @@
         <span id="dialsMsg" class="small muted"></span>
       </div>
     </div>
-    <div class="card">
+    <div class="card span-2">
       <h2>What the model sees</h2>
       <p class="small muted" style="margin:0 0 6px">System text at the current dials; context keys attached to the question.</p>
       <pre id="labPreview" class="small" style="white-space:pre-wrap;max-height:260px;overflow:auto"></pre>
       <p id="labContextKeys" class="small muted" style="margin:6px 0 0"></p>
     </div>
-    <div class="card">
+    <div class="card span-2">
       <h2>Run</h2>
       <textarea id="labQuestion" rows="2" placeholder="Ask something, or leave empty in plan mode to ask for the next task" style="width:100%;box-sizing:border-box"></textarea>
       <div class="row" style="margin-top:8px;flex-wrap:wrap;gap:8px">
@@ -267,7 +375,9 @@
   document.querySelectorAll("nav button").forEach(b => b.addEventListener("click", () => {
     document.querySelectorAll("nav button").forEach(x => x.classList.toggle("active", x === b));
     document.querySelectorAll("main section").forEach(s => s.classList.toggle("active", s.id === b.dataset.tab));
-    $("composer").style.display = b.dataset.tab === "chat" ? "" : "none";
+    const onChat = b.dataset.tab === "chat";
+    $("composer").style.display = onChat ? "" : "none";
+    document.body.classList.toggle("chat-open", onChat);
     if (b.dataset.tab === "files") loadUploads();
     if (b.dataset.tab === "ledger") loadLedger();
     if (b.dataset.tab === "lab") loadLab();
@@ -393,7 +503,7 @@
         const isLevel = d.kind === "level";
         const min = isLevel ? 0 : d.min, max = isLevel ? d.levels.length - 1 : d.max, step = isLevel ? 1 : (d.step || 1);
         const v = dialValue(d);
-        row.innerHTML = '<div class="row" style="justify-content:space-between"><b class="small">' + escapeHtml(d.label) + '</b><span class="small muted" id="dv-' + d.id + '"></span></div>' +
+        row.innerHTML = '<div class="row dial-head"><b class="small">' + escapeHtml(d.label) + '</b><span class="small muted" id="dv-' + d.id + '"></span></div>' +
           '<input type="range" style="width:100%" min="' + min + '" max="' + max + '" step="' + step + '" value="' + v + '" data-dial="' + d.id + '">' +
           '<div class="small muted">' + escapeHtml(d.description) + '</div>';
         box.appendChild(row);
@@ -433,7 +543,9 @@
     try {
       const r = await api("/lab/run", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ question: q, mode, compare: $("labCompare").checked, settings: labSettings }) });
       const box = $("labResults"); box.innerHTML = "";
-      box.style.gridTemplateColumns = r.variants.length > 1 && window.innerWidth > 700 ? "1fr 1fr" : "1fr";
+      // Side by side when there is room, decided by CSS so rotating a tablet
+      // reflows instead of keeping whatever the width was when Run was pressed.
+      box.classList.toggle("compare", r.variants.length > 1);
       for (const v of r.variants) {
         const card = document.createElement("div"); card.className = "card"; card.style.margin = "0";
         const head = v.variant === "base" ? "Base model (all dials off)" : "Under the dials";
