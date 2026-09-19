@@ -211,6 +211,12 @@
     </div>
 
     <div class="card span-2">
+      <h2>Proposals <span class="small muted" style="text-transform:none;letter-spacing:0">— changes it wanted to make and did not</span></h2>
+      <ul id="proposals"></ul>
+      <p class="small muted" style="margin:8px 0 0">Accepting says it was right to want this. It does not run it.</p>
+    </div>
+
+    <div class="card span-2">
       <h2>Recent tasks</h2>
       <ul id="history"></ul>
     </div>
@@ -412,10 +418,50 @@
 
   // ---- agent panel ----
   function fmtTime(ts) { if (!ts) return ""; const d = new Date(ts * 1000); return d.toLocaleTimeString(); }
+  function renderProposals(props) {
+    const list = $("proposals"); list.innerHTML = "";
+    const items = (props && props.proposals) || [];
+    if (!items.length) {
+      list.innerHTML = '<li class="muted small">Nothing waiting. At the '
+        + escapeHtml((props && props.rung) || "proposer")
+        + ' rung a change becomes a proposal rather than an action.</li>';
+      return;
+    }
+    items.forEach((p, i) => {
+      const li = document.createElement("li");
+      const text = escapeHtml(p.text || p.description || "(no description)");
+      if (p.decision) {
+        li.innerHTML = '<div class="small muted">' + (p.decision === "accepted" ? "✅ accepted" : "🚫 declined")
+          + (p.decision_reason ? " — " + escapeHtml(p.decision_reason) : "") + '</div><div>' + text + '</div>';
+      } else {
+        li.innerHTML = '<div>' + text + '</div>'
+          + '<div class="row" style="margin-top:8px;gap:8px">'
+          + '<input placeholder="why (optional, and it learns from this)" id="pr-' + i + '" />'
+          + '<button class="btn" data-ok="1">Accept</button>'
+          + '<button class="ghost">Decline</button></div>';
+        const [ok, no] = li.querySelectorAll("button");
+        ok.onclick = () => decideProposal(i, true);
+        no.onclick = () => decideProposal(i, false);
+      }
+      list.appendChild(li);
+    });
+  }
+
+  window.decideProposal = async function (index, accepted) {
+    const box = $("pr-" + index);
+    const reason = box ? box.value.trim() : "";
+    try {
+      await api("/proposals/decide", { method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ index, accepted, reason }) });
+      refresh();
+    } catch (e) { alert("Could not record that: " + e.message); }
+  };
+
   async function refresh() {
     if (!token) { showLogin(""); return; }
     try {
-      const [status, goals, hist, brain] = await Promise.all([api("/status"), api("/goals"), api("/history?limit=30"), api("/brain")]);
+      const [status, goals, hist, brain, props] = await Promise.all([api("/status"), api("/goals"), api("/history?limit=30"), api("/brain"), api("/proposals")]);
       $("agentName").textContent = status.name || "Jarvis";
       $("statusDot").className = "dot " + (status.running ? "ok" : "bad");
       $("sCycles").textContent = status.cycle_count; $("sTasks").textContent = status.completed_tasks;
@@ -434,6 +480,7 @@
         li.innerHTML = '<span style="flex:1">' + (g.completed ? "✅ " : "⬜ ") + escapeHtml(g.description) + ' <span class="small muted">P' + g.priority + '</span></span>';
         if (!g.completed) { const btn = document.createElement("button"); btn.className = "ghost"; btn.textContent = "Done"; btn.onclick = () => markDone(g.description); li.appendChild(btn); }
         gl.appendChild(li); }
+      renderProposals(props);
       const hl = $("history"); hl.innerHTML = "";
       if (!hist.length) hl.innerHTML = '<li class="muted small">Nothing yet.</li>';
       for (const h of hist.slice().reverse()) { const ok = h.result && h.result.success; const li = document.createElement("li"); li.className = "task";

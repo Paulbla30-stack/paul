@@ -153,6 +153,53 @@ class TestUiListener(unittest.TestCase):
             finally:
                 runner.stop_status_server()
 
+    def test_a_proposal_can_be_answered_and_is_not_a_toggle(self):
+        """Until this existed, proposals went one way: filed, listed, and
+        never replied to, so the agent could file the same one a sixth time
+        and never learn the first five were unwelcome."""
+        with tempfile.TemporaryDirectory() as tmp:
+            agent = make_agent()
+            agent.proposals.append({"ts": 1, "cycle": 2,
+                                    "text": "harden ptrace_scope via sysctl"})
+            runner, port = self._runner(agent, tmp)
+            base = f"http://127.0.0.1:{port}"
+            auth = {"Authorization": "Bearer t0k", "Content-Type": "application/json"}
+            try:
+                listed, _ = call(base, "/proposals", headers=auth, method="GET")
+                self.assertEqual(len(listed["proposals"]), 1)
+                decided, status = call(base, "/proposals/decide", headers=auth,
+                                       data=json.dumps({"index": 0, "accepted": False,
+                                                        "reason": "kernel tuning is mine"}).encode())
+                self.assertEqual(status, 200)
+                self.assertEqual(decided["decision"], "declined")
+                self.assertEqual(decided["decision_reason"], "kernel tuning is mine")
+                # answering twice is not a toggle
+                with self.assertRaises(urllib.error.HTTPError) as cm:
+                    call(base, "/proposals/decide", headers=auth,
+                         data=json.dumps({"index": 0, "accepted": True}).encode())
+                self.assertEqual(cm.exception.code, 404)
+                # and the verdict became operator-sourced memory
+                self.assertTrue(any("declined the proposal" in n
+                                    for n in agent.notes))
+            finally:
+                runner.stop_status_server()
+
+    def test_deciding_something_that_is_not_there(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            runner, port = self._runner(make_agent(), tmp)
+            base = f"http://127.0.0.1:{port}"
+            auth = {"Authorization": "Bearer t0k", "Content-Type": "application/json"}
+            try:
+                with self.assertRaises(urllib.error.HTTPError) as cm:
+                    call(base, "/proposals/decide", headers=auth,
+                         data=json.dumps({"index": 7, "accepted": True}).encode())
+                self.assertEqual(cm.exception.code, 404)
+                with self.assertRaises(urllib.error.HTTPError) as cm:
+                    call(base, "/proposals/decide", headers=auth, data=b"not json")
+                self.assertEqual(cm.exception.code, 400)
+            finally:
+                runner.stop_status_server()
+
     def test_upload_saves_file_and_tells_the_agent(self):
         with tempfile.TemporaryDirectory() as tmp:
             agent = make_agent()

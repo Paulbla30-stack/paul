@@ -184,7 +184,14 @@ class AgentCore:
         text = (text or "").strip()
         if not text:
             return None
-        if kind == "note":
+        # The notes deque is the hot cache handed to the model every cycle.
+        # Operator-sourced memory belongs in it as much as the agent's own
+        # observations do -- more, really: a verdict on a proposal is the one
+        # class of input that is instruction rather than observation, and it
+        # should not have to wait for the next self-knowledge refresh to be
+        # heard. It still goes to the store under its own kind, because where
+        # a memory came from is the thing provenance is for.
+        if kind in ("note", "operator"):
             self.notes.append(text)
         try:
             return self.store.remember(text, kind=kind, source=source,
@@ -726,6 +733,50 @@ class AgentCore:
         self.ledger.record("action", {"cycle": self.cycle_count, "actor": "operator",
                                       "action": "withdraw_goal", "description": text[:300]})
         return True
+
+    def decide_proposal(self, index: int, accepted: bool,
+                        reason: str = "") -> Optional[dict]:
+        """The operator's verdict on a change the agent wanted to make.
+
+        Until this existed, proposals went one way. The agent filed them, they
+        sat in a list, and nothing ever came back -- so it could file the same
+        one a sixth time and never learn that the first five were unwelcome.
+        A permission spine with no reply is not a conversation, it is a
+        suggestion box.
+
+        The verdict is kept as operator-sourced memory, not as a note, because
+        the distinction matters to what the agent may do with it: this is the
+        one class of input that is instruction rather than observation. It is
+        ledgered as an operator action, like giving or withdrawing a goal.
+
+        An accepted proposal does NOT run. Acceptance says the agent was right
+        to want it, which is what it needs to learn from; carrying it out is a
+        separate act, and one that a click in a web UI should not trigger.
+        """
+        items = list(self.proposals)
+        if not items or not (0 <= int(index) < len(items)):
+            return None
+        proposal = dict(items[int(index)])
+        if proposal.get("decision"):
+            return None                          # already answered; not a toggle
+        verdict = "accepted" if accepted else "declined"
+        note = (reason or "").strip()[:300]
+        proposal["decision"] = verdict
+        proposal["decision_reason"] = note or None
+        proposal["decided_at"] = time.time()
+        self.proposals[int(index)] = proposal
+
+        text = proposal.get("text") or proposal.get("description") or ""
+        summary = f"Operator {verdict} the proposal: {str(text)[:220]}"
+        if note:
+            summary += f" -- because: {note}"
+        self.remember(summary, kind="operator", source="operator")
+        self.log.info("Proposal %s by operator: %s", verdict, str(text)[:160])
+        self.ledger.record("action", {
+            "cycle": self.cycle_count, "actor": "operator",
+            "action": "decide_proposal", "verdict": verdict,
+            "proposal": str(text)[:300], "reason": note or None})
+        return proposal
 
     def record_upload(self, name: str, path: str, size: int) -> dict:
         """Register an operator-uploaded file so the brain can act on it."""

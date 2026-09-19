@@ -397,6 +397,26 @@ class HeadlessRunner:
                 if int(self.headers.get("Content-Length") or 0) > 1_000_000:
                     return self._send(413, {"error": "body too large"})
                 body = self._body().strip()
+                if path == "/proposals/decide":
+                    # Until this existed, proposals went one way: the agent
+                    # filed them, they sat in a list, and nothing came back, so
+                    # it could file the same one a sixth time and never learn
+                    # the first five were unwelcome. Accepting does not run it;
+                    # it says the agent was right to want it, which is the part
+                    # worth learning from.
+                    try:
+                        payload = json.loads(body or "{}")
+                        index = int(payload.get("index"))
+                        accepted = bool(payload.get("accepted"))
+                    except (ValueError, TypeError):
+                        return self._send(400, {"error": "index and accepted required"})
+                    with runner._lock:
+                        decided = runner.agent.decide_proposal(
+                            index, accepted, str(payload.get("reason") or ""))
+                    runner.wake()
+                    if decided is None:
+                        return self._send(404, {"error": "no such undecided proposal"})
+                    return self._send(200, decided)
                 if path == "/goal/withdraw":
                     # An operator who can only add goals cannot take an
                     # instruction back; a goal the agent cannot satisfy would

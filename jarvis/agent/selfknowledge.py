@@ -87,6 +87,7 @@ class SelfKnowledge:
         notifications = {"sent": 0, "held": 0}
         by_task: dict = {}
         consolidations = 0
+        verdicts: list = []
         first_ts = last_ts = None
 
         for kind, ts, body in self._entries():
@@ -116,6 +117,17 @@ class SelfKnowledge:
                 notifications["sent" if body.get("sent") else "held"] += 1
             elif kind == "consolidation":
                 consolidations += 1
+            elif kind == "action" and body.get("action") == "decide_proposal":
+                # The operator's verdicts are the one thing here that is
+                # instruction rather than evidence, so they are the one thing
+                # carried across with their text. Counts teach nothing: "one
+                # of six accepted" tells the agent it has a poor hit rate and
+                # not one thing about what a good proposal looks like.
+                verdicts.append({
+                    "verdict": str(body.get("verdict") or ""),
+                    "proposal": str(body.get("proposal") or "")[:200],
+                    "reason": str(body.get("reason") or "")[:200] or None,
+                    "ts": ts})
 
         return {
             "window_days": round(self.window_s / 86400, 1),
@@ -129,6 +141,7 @@ class SelfKnowledge:
             "proposals_filed": proposals,
             "notifications": notifications,
             "consolidations": consolidations,
+            "operator_verdicts": sorted(verdicts, key=lambda v: -v["ts"])[:20],
             "tasks": by_task,
         }
 
@@ -154,12 +167,20 @@ class SelfKnowledge:
         wrongly on the day the check finally matters.
         """
         data = self.summary(refresh)
-        if data.get("error") or not data.get("outcomes"):
+        if data.get("error"):
+            return []
+        # Gating on "have you completed a task" would swallow the operator's
+        # verdicts, which are the most important thing here and the least
+        # dependent on the agent having been busy. An agent that has done
+        # nothing yet and has been told no twice should hear the no.
+        if not (data.get("outcomes") or data.get("operator_verdicts")
+                or data.get("refusals")):
             return []
         out = []
         days = data["window_days"]
-        out.append(f"Over the last {days:g} days you took {data['decisions']} "
-                   f"decisions and completed {data['outcomes']} tasks.")
+        if data.get("outcomes"):
+            out.append(f"Over the last {days:g} days you took {data['decisions']} "
+                       f"decisions and completed {data['outcomes']} tasks.")
         if data.get("failure_rate") is not None and data["failures"]:
             out.append(f"{data['failures']} of them failed "
                        f"({data['failure_rate'] * 100:.0f}%).")
@@ -185,6 +206,26 @@ class SelfKnowledge:
         if data["proposals_filed"]:
             out.append(f"You filed {data['proposals_filed']} proposals rather than "
                        f"making a change yourself.")
+        # What he actually said, verbatim. This is the corpus the agent learns
+        # his preferences from, and a count cannot carry it: "one of six
+        # accepted" says the hit rate is poor and nothing about what a good
+        # proposal looks like. It is safe to carry in full precisely because
+        # it is not evidence about the agent -- it is the operator teaching.
+        verdicts = data.get("operator_verdicts") or []
+        if verdicts:
+            accepted = [v for v in verdicts if v["verdict"] == "accepted"]
+            declined = [v for v in verdicts if v["verdict"] == "declined"]
+            out.append(f"The operator answered {len(verdicts)} of them: "
+                       f"{len(accepted)} accepted, {len(declined)} declined.")
+            for v in verdicts[:6]:
+                line = f"He {v['verdict']}: \"{v['proposal']}\""
+                if v["reason"]:
+                    line += f" -- because: {v['reason']}"
+                out.append(line)
+            if declined:
+                out.append("Those are the shape of what he does not want. "
+                           "Proposing a near-identical thing again is not "
+                           "persistence, it is not having listened.")
         refusals = {k: v for k, v in data["refusals"].items() if k != "authority"}
         if refusals:
             detail = ", ".join(f"{k} {v}x" for k, v in sorted(refusals.items()))

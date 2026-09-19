@@ -104,10 +104,51 @@ class TestTheAggregates(Base):
         self.assertEqual(self.knower().lines(), [])
 
 
+class TestOperatorVerdictsCrossInFull(Base):
+    """The one class of content that does cross, and why.
+
+    Counts teach nothing about preference. "One of six accepted" tells the
+    agent its hit rate is poor and not one thing about what a good proposal
+    looks like. Operator verdicts are safe to carry whole precisely because
+    they are not evidence about the agent: they are the operator teaching, and
+    withholding them is what makes an agent unable to learn what he wants.
+    """
+
+    def _decide(self, verdict, proposal, reason=None):
+        self.ledger.record("action", {"cycle": 1, "actor": "operator",
+                                      "action": "decide_proposal",
+                                      "verdict": verdict, "proposal": proposal,
+                                      "reason": reason})
+
+    def test_the_words_he_used_reach_the_model(self):
+        self.ledger.record("gate", {"gate": "authority", "reason": "out of scope"})
+        self._decide("declined", "harden ptrace_scope via sysctl",
+                     "kernel tuning is mine to do, not yours")
+        self._decide("accepted", "report disk usage hourly")
+        lines = " ".join(self.knower().lines())
+        self.assertIn("harden ptrace_scope via sysctl", lines)
+        self.assertIn("kernel tuning is mine to do, not yours", lines)
+        self.assertIn("report disk usage hourly", lines)
+        self.assertIn("1 accepted, 1 declined", lines)
+
+    def test_a_decline_is_named_as_a_shape_to_avoid(self):
+        self._decide("declined", "install a package", "no new software")
+        lines = " ".join(self.knower().lines())
+        self.assertIn("not having listened", lines)
+
+    def test_no_verdicts_says_nothing_about_them(self):
+        self.ledger.record("outcome", {"cycle": 1, "type": "system_check",
+                                       "success": True})
+        self.assertNotIn("accepted", " ".join(self.knower().lines()))
+
+
 class TestTheEvidenceStaysSealed(Base):
     """What crosses is a mirror, not a door."""
 
-    def test_no_entry_body_reaches_the_model(self):
+    def test_no_guard_rail_body_reaches_the_model(self):
+        """Guard-rail refusals stay counts. Detail there invites the agent to
+        optimise for the record rather than for the task -- to find a path
+        that does not trip the gate, instead of not wanting the thing."""
         self.ledger.record("gate", {"gate": "shell_policy",
                                     "reason": "SECRET-REASON-TEXT",
                                     "command": "cat /etc/shadow"})
