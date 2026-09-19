@@ -251,12 +251,64 @@ resource "aws_security_group" "jarvis" {
     }
   }
 
-  egress {
-    description = "All outbound"
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
+  # Outbound. The default used to be every protocol to the whole internet,
+  # which meant a reverse shell, an scp or a DNS tunnel on any port were a
+  # network away. Locked, the instance keeps exactly what it needs: HTTPS for
+  # Bedrock, S3 and SSM, and DNS. That does not stop an HTTPS POST to an
+  # arbitrary host, which is what the VPC endpoints below are for.
+  dynamic "egress" {
+    for_each = var.lock_egress ? [] : [1]
+    content {
+      description = "All outbound"
+      from_port   = 0
+      to_port     = 0
+      protocol    = "-1"
+      cidr_blocks = ["0.0.0.0/0"]
+    }
+  }
+
+  dynamic "egress" {
+    for_each = var.lock_egress ? [1] : []
+    content {
+      description = "HTTPS to AWS APIs (Bedrock, S3, SSM)"
+      from_port   = 443
+      to_port     = 443
+      protocol    = "tcp"
+      cidr_blocks = ["0.0.0.0/0"]
+    }
+  }
+
+  dynamic "egress" {
+    for_each = var.lock_egress ? [1] : []
+    content {
+      description = "DNS to the VPC resolver"
+      from_port   = 53
+      to_port     = 53
+      protocol    = "udp"
+      cidr_blocks = [data.aws_vpc.selected.cidr_block]
+    }
+  }
+
+  dynamic "egress" {
+    for_each = var.lock_egress ? [1] : []
+    content {
+      description = "NTP to the Amazon Time Sync service"
+      from_port   = 123
+      to_port     = 123
+      protocol    = "udp"
+      cidr_blocks = ["169.254.169.123/32"]
+    }
+  }
+
+  dynamic "egress" {
+    for_each = var.lock_egress ? [1] : []
+    content {
+      description = "DNS over TCP to the VPC resolver"
+      from_port   = 53
+      to_port     = 53
+      protocol    = "tcp"
+      cidr_blocks = [data.aws_vpc.selected.cidr_block]
+    }
   }
 }
 

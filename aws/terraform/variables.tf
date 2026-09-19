@@ -120,3 +120,9 @@ variable "static_ip" {
   type        = bool
   default     = false
 }
+
+variable "lock_egress" {
+  description = "Restrict outbound to HTTPS and DNS instead of everything. Kills reverse shells, scp and non-443 exfiltration; does not stop an HTTPS POST to an arbitrary host."
+  type        = bool
+  default     = true
+}

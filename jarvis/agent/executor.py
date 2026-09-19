@@ -96,6 +96,26 @@ DEFAULT_SHELL_DENY_PATTERNS = [
 # Installing software or enabling repositories as root is denied unless the
 # operator opts in: a planner that cannot find a tool tends to reach for the
 # package manager instead of the task types it was given.
+# Outbound network tools. Denied unless the operator opts in, for the same
+# reason package installs are: the planner has no business reaching the
+# internet, and the only thing that was stopping it was that `curl` happens
+# not to be on the authority layer's read-only list. That is an accident, and
+# an accident is not a control: `curl` reads a URL, so a later tidy-up of that
+# list could reasonably add it and silently open egress. This states the
+# intent where it cannot be mistaken for an oversight.
+#
+# This is a deny-list, so it is not complete. A planner with an interpreter
+# can still open a socket. It is the third layer, behind the mandate rung and
+# the security group; none of the three is load-bearing on its own.
+EGRESS_DENY_PATTERNS = [
+    _CMD + r"(?:curl|wget|fetch|aria2c|httpie|http|https)\b",
+    _CMD + r"(?:nc|ncat|netcat|socat|telnet|ftp|tftp|lftp)\b",
+    _CMD + r"(?:ssh|scp|sftp|rsync)\b",
+    _CMD + r"(?:python[0-9.]*|perl|ruby|php|node)\s+-\S*[ce]\b[^|;&]*(?:urllib|requests|httpx|socket|http\.client|net/http|LWP|Net::)",
+    _CMD + r"(?:bash|sh|zsh)\s+-c\b[^|;&]*(?:/dev/tcp/|/dev/udp/)",
+    r"/dev/(?:tcp|udp)/",
+]
+
 PACKAGE_INSTALL_DENY_PATTERNS = [
     _CMD + r"(?:dnf|yum|apt|apt-get|microdnf|zypper|apk|pacman)\s+(?:-\S+\s+)*(?:install|reinstall|remove|erase|purge|upgrade|update|dist-upgrade|config-manager|copr|add-repository|groupinstall)\b",
     _CMD + r"(?:pip3?|pipx|python[0-9.]*\s+-m\s+pip|npm|yarn|gem|cargo|go)\s+(?:-\S+\s+)*install\b",
@@ -111,7 +131,8 @@ DEFAULT_SHELL_POLICY = {
     "max_output": 4000,
     "cwd": "/",
     "deny_patterns": None,          # extra patterns, added to the defaults
-    "allow_package_install": False,  # True = let the planner install software
+    "allow_package_install": False,   # true = let the planner install software
+    "allow_egress": False,            # true = let the planner reach the network
 }
 
 # Environment variables never handed to a planner-chosen shell command.
@@ -154,6 +175,8 @@ def normalise_shell_policy(policy: Optional[dict], log=None) -> dict:
     patterns = list(DEFAULT_SHELL_DENY_PATTERNS) + extra
     if not merged.get("allow_package_install"):
         patterns += PACKAGE_INSTALL_DENY_PATTERNS
+    if not merged.get("allow_egress"):
+        patterns += EGRESS_DENY_PATTERNS
     merged["deny_patterns"] = patterns
     merged["_compiled"] = _compile_patterns(patterns, log)
     merged["enabled"] = bool(merged.get("enabled"))

@@ -480,12 +480,9 @@
   // agent before asking for anything. This is what makes a restart invisible.
   (async function boot() {
     try {
-      const r = await fetch("/status", { credentials: "same-origin" });
-      if (r.ok) {
-        const probe = await fetch("/goals", { credentials: "same-origin",
-                                              headers: token ? { "Authorization": "Bearer " + token } : {} });
-        if (probe.ok) { sessionActive = !token; $("login").style.display = "none"; refresh(); return; }
-      }
+      const probe = await fetch("/goals", { credentials: "same-origin",
+                                            headers: token ? { "Authorization": "Bearer " + token } : {} });
+      if (probe.ok) { sessionActive = !token; $("login").style.display = "none"; refresh(); return; }
     } catch (e) {}
     if (!token) showLogin(""); else refresh();
   })();

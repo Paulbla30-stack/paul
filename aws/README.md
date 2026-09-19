@@ -305,7 +305,29 @@ and appear in the brain's context as `uploaded_files`, so "look at the CSV
 I just uploaded" works.
 
 Keep `ui_cidr` narrow: the token is the only login and anyone who has it
-can hand the root agent work.
+can hand the root agent work. `ui_cidr = "0.0.0.0/0"` puts the login page
+in front of every scanner on the internet. The listener holds the line —
+every path but `/ui` and `/health` needs the token or a signed session,
+`/health` answers only `{"ok": true}`, and five bad tokens from one address
+lock it out for five minutes — but a narrow CIDR, or a tunnel in front, is
+the wall. Only the loopback API on 127.0.0.1:8471 serves `/status` without
+a token, because nothing off the box can reach it.
+
+## Outbound
+
+`lock_egress` (on by default) restricts the instance to HTTPS on 443, DNS to
+the VPC resolver and NTP to the Amazon Time Sync service, instead of every
+protocol to the whole internet:
+
+```bash
+terraform apply ... -var lock_egress=false   # back to wide open, if you must
+```
+
+That kills a reverse shell, an `scp` out, a DNS tunnel and anything on a
+non-standard port at the network, underneath whatever the agent's own
+deny-list does. It does not stop an HTTPS POST to an arbitrary host — only
+VPC interface endpoints for Bedrock, SSM and S3, with 443 narrowed to the
+VPC, would do that, at roughly $36/month.
 
 ## Talking to the agent
 

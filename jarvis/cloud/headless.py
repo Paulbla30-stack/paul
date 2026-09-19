@@ -63,7 +63,14 @@ DEFAULT_STATUS_FILE = "/run/jarvis/status.json"
 DEFAULT_TOKEN_FILE = "/run/jarvis/token"
 # Survives a restart, unlike the runtime directory copy above.
 DEFAULT_TOKEN_PERSIST_FILE = "/etc/jarvis/token"
+# What the loopback status API (127.0.0.1) serves without a token: the box's
+# own `jarvis --status` reads it, and nothing off the box can reach it.
 OPEN_PATHS = ("/", "/health", "/status")
+# What the UI listener serves without a token. It is reachable from wherever
+# ui_cidr allows, so it gives away nothing but liveness; /status on this
+# listener would hand a stranger the model ARN, the goals and the agent's
+# last reasoning.
+UI_OPEN_PATHS = ("/health",)
 
 
 def write_token_file(token: str, path: str) -> Optional[str]:
@@ -210,8 +217,9 @@ class HeadlessRunner:
 
     # ---- http ----------------------------------------------------------
 
-    def _make_handler(self):
+    def _make_handler(self, open_paths=OPEN_PATHS):
         runner = self
+        loopback_only = open_paths is OPEN_PATHS
 
         class Handler(BaseHTTPRequestHandler):
             def log_message(self, fmt, *args):  # quiet
@@ -251,7 +259,7 @@ class HeadlessRunner:
                                      "hint": f"Authorization: Bearer $(cat {runner.token_file})"})
 
             def _require_token(self, path) -> bool:
-                if path in OPEN_PATHS or self._authorised():
+                if path in open_paths or self._authorised():
                     return True
                 self._deny()
                 return False
@@ -288,8 +296,11 @@ class HeadlessRunner:
                         search = urllib.parse.unquote_plus(part[2:])[:200].strip()
                 with runner._lock:
                     if path in ("/", "/health"):
-                        self._send(200, {"ok": True, "agent": runner.agent.name,
-                                         "cycles": runner.agent.cycle_count})
+                        if loopback_only:
+                            self._send(200, {"ok": True, "agent": runner.agent.name,
+                                             "cycles": runner.agent.cycle_count})
+                        else:
+                            self._send(200, {"ok": True})
                     elif path == "/status":
                         self._send(200, runner.snapshot())
                     elif path == "/memory":
@@ -590,7 +601,8 @@ class HeadlessRunner:
         if not self.ui_enabled:
             return None
         try:
-            server = ThreadingHTTPServer((self.ui_host, self.ui_port), self._make_handler())
+            server = ThreadingHTTPServer((self.ui_host, self.ui_port),
+                                         self._make_handler(UI_OPEN_PATHS))
         except OSError as e:
             self.log.warning("UI listener unavailable on %s:%s: %s", self.ui_host, self.ui_port, e)
             return None

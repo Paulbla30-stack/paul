@@ -63,6 +63,49 @@ class TestUiListener(unittest.TestCase):
             finally:
                 runner.stop_status_server()
 
+    def test_status_needs_a_token_on_the_ui_listener(self):
+        """The UI port is reachable from off the box; /status is not.
+
+        The loopback status API serves /status without a token because only
+        the box itself can reach it. The same handler ran the UI listener, so
+        anyone who could reach the UI port could read the model ARN, the open
+        goals and the agent's last reasoning without logging in.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            runner, port = self._runner(make_agent(), tmp)
+            base = f"http://127.0.0.1:{port}"
+            try:
+                for path in ("/status", "/", "/goals", "/brain", "/memory"):
+                    with self.assertRaises(urllib.error.HTTPError, msg=path) as cm:
+                        call(base, path)
+                    self.assertEqual(cm.exception.code, 401, path)
+                snapshot, status = call(base, "/status",
+                                        headers={"Authorization": "Bearer t0k"})
+                self.assertEqual(status, 200)
+                self.assertEqual(snapshot["name"], "ui-test")
+                # Liveness stays open, and says nothing but that it is alive.
+                health, status = call(base, "/health")
+                self.assertEqual((status, health), (200, {"ok": True}))
+            finally:
+                runner.stop_status_server()
+
+    def test_loopback_status_api_still_answers_the_box_itself(self):
+        """Nothing off the box can reach 127.0.0.1:8471, so it stays open."""
+        with tempfile.TemporaryDirectory() as tmp:
+            agent = make_agent()
+            runner = HeadlessRunner(agent, LOG, interval=0, status_port=0, token="t0k",
+                                    token_file=None, ui={"enabled": False})
+            port = runner.start_status_server()
+            base = f"http://127.0.0.1:{port}"
+            try:
+                snapshot, status = call(base, "/status")
+                self.assertEqual(status, 200)
+                self.assertEqual(snapshot["name"], "ui-test")
+                health, _ = call(base, "/health")
+                self.assertEqual(health["agent"], "ui-test")
+            finally:
+                runner.stop_status_server()
+
     def test_upload_saves_file_and_tells_the_agent(self):
         with tempfile.TemporaryDirectory() as tmp:
             agent = make_agent()
