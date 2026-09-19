@@ -102,6 +102,11 @@ llm:
   max_calls_per_hour: 60     # hard budget; rule planner takes over beyond it
   plan_every_n_cycles: 1
   history_window: 10
+  environment_paths: null    # paths checked and reported to the model every cycle;
+                             # null uses the standard set (the Jarvis config, state,
+                             # library, launcher, logs and unit). Missing paths are
+                             # reported as missing on purpose: an absence the model
+                             # cannot see is one it invents something to fill.
   shell:
     enabled: true            # let the brain run commands (deny-list guarded)
     timeout: 60

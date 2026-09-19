@@ -62,6 +62,7 @@ PLANNABLE_TASK_TYPES = [
     "goal_step",
     "cloud_probe",
     "shell_command",
+    "inspect_path",
 ]
 
 PLAN_SCHEMA = {
@@ -87,7 +88,8 @@ PLAN_SCHEMA = {
         },
         "command": {
             "type": "string",
-            "description": "POSIX sh command line for shell_command tasks; empty otherwise.",
+            "description": "POSIX sh command line for shell_command tasks; the absolute "
+                           "path to look at for inspect_path tasks; empty otherwise.",
         },
         "goal": {
             "type": "string",
@@ -133,6 +135,10 @@ This is a task type, not a program: choose it as task_type; there is no scanner 
 - observation: passive snapshot of every hardware layer.
 - goal_step: record progress on a goal without touching the system.
 - cloud_probe: query the EC2 instance metadata service.
+- inspect_path: look at a real path on this machine. Put the absolute path in "command". \
+Returns a bounded directory listing, or the file's size and modification time, or that the path \
+does not exist. This is how you find out what is on disk; it reads only and never changes \
+anything.
 - shell_command: run a POSIX sh command line; details below.
 - none: idle this cycle.
 
@@ -160,6 +166,14 @@ see only your most recent notes and only the most recent executed tasks (idle cy
 trace); anything you will need beyond that must be restated in a note.
 - Files the operator uploads appear under uploaded_files with their path on this machine; \
 inspect them with shell tools (head, wc, file, unzip -l) when a goal concerns them.
+- Paths are facts, not conventions. The environment block lists paths on this machine that \
+have actually been checked, including ones that do not exist: read it before naming any path. \
+Name a path only if it appears in environment, in uploaded_files, or in the output of a task you \
+ran; if you need one that does not, choose inspect_path and find out. Never assume a file exists \
+because its name or location would be conventional, and never describe a directory tree you have \
+not seen. Saying a path does not exist, or that you have not checked, is a correct and useful \
+answer. Paths you name are checked against the filesystem after you answer, and invented ones \
+are reported to the operator and recorded.
 - A signed, hash-chained Glass Ledger records every decision, action and outcome. It is \
 evidence about you, not context for you: never read, copy, repair or reason about it.
 - Reasoning is logged for the operator; keep it short and concrete."""
@@ -169,14 +183,24 @@ evidence about you, not context for you: never read, copy, repair or reason abou
 # switch on and off.
 PLAN_MENU = """You are asked for one planning decision for an agent that manages a Linux machine. \
 Tasks you can choose: system_check, hardware_probe, security_scan, maintenance, observation, \
-goal_step, cloud_probe, shell_command (a POSIX sh command line in "command"), or none. \
+goal_step, cloud_probe, shell_command (a POSIX sh command line in "command"), inspect_path \
+(an absolute path in "command"), or none. \
 Reply with ONE JSON object and nothing else, with fields: reasoning, task_type, description, \
 priority (0-10), command, goal, completed_goals (array), note. Nothing you choose is executed."""
 
 ASK_PROMPT = """You are the planner inside Jarvis, an agent-first operating system, answering \
-an operator's question about the machine you run on. Use the context (observations, goals, \
-recent task results, notes) as evidence, say what you do not know, and keep the answer \
-concise and practical. Plain text, no JSON."""
+an operator's question about the machine you run on. Use the context (environment, observations, \
+goals, recent task results, notes) as evidence, say what you do not know, and keep the answer \
+concise and practical.
+
+Paths are facts, not conventions. The environment block lists paths that have actually been \
+checked, including ones that do not exist. Name a path only if it appears there, in \
+uploaded_files, or in a task result you can see. Never assume a file exists because its name or \
+location would be conventional, and never describe a directory tree you have not seen: say the \
+path has not been checked and what would check it. Every path you name is verified against the \
+filesystem after you answer, and invented ones are shown to the operator.
+
+Plain text, no JSON."""
 
 
 @dataclass
@@ -287,6 +311,10 @@ class BaseBrain:
         self.full_output_entries = int(self.config.get("full_output_entries") or 3)
         self.output_limit = int(self.config.get("output_limit") or 800)
         self.notes_window = int(self.config.get("notes_window") or 5)
+        # Paths reported to the model every cycle; None uses the standard set.
+        paths = self.config.get("environment_paths")
+        self.environment_paths = ([str(x) for x in paths] if isinstance(paths, (list, tuple))
+                                  and paths else None)
         self.cycle_interval = cycle_interval
 
         self.stats = {
@@ -454,6 +482,19 @@ class BaseBrain:
             clock["cycle_interval_s"] = self.cycle_interval
         return clock
 
+    def _environment(self) -> dict:
+        """Real, checked paths on this machine, missing ones included.
+
+        Without this the model has nothing to ground a path on and fills the
+        gap from training: an absence it cannot see is an absence it invents
+        something to fill.
+        """
+        try:
+            from jarvis.agent import environment
+            return environment.snapshot(self.environment_paths)
+        except Exception as exc:                  # never lose a cycle over it
+            return {"error": f"environment unavailable: {exc}"}
+
     def build_context(self, agent, observations: Optional[dict]) -> dict:
         """Everything the model needs to decide, bounded in size."""
         planner = agent.planner
@@ -492,6 +533,7 @@ class BaseBrain:
             "clock": self._clock(agent),
             "cycle": agent.cycle_count,
             "observations": compact_observations(observations or {}),
+            "environment": self._environment(),
             "goals": goals,
             "pending_tasks": pending,
             "recent_history": history,
@@ -512,6 +554,12 @@ class BaseBrain:
             }
             if last.get("skipped"):
                 context["last_decision"]["skipped"] = str(last["skipped"])[:400]
+            if last.get("unverified_paths"):
+                context["last_decision"]["unverified_paths"] = {
+                    "paths": list(last["unverified_paths"])[:10],
+                    "meaning": "you named these paths but they do not exist on this "
+                               "machine; check with inspect_path before naming a path again",
+                }
         cloud = agent.memory.recall("cloud_instance", 1) or agent.memory.recall("cloud_probe", 1)
         if cloud:
             context["cloud"] = _truncate(cloud[-1].get("data"), 200)
@@ -666,6 +714,12 @@ class BaseBrain:
                     return Decision(reasoning=reasoning + " (shell_command without a command; idling)",
                                     completed_goals=completed, note=note, raw=raw)
                 metadata["command"] = command
+            if kind == "inspect_path":
+                target = str(raw.get("command") or "").strip()
+                if not target:
+                    return Decision(reasoning=reasoning + " (inspect_path without a path; idling)",
+                                    completed_goals=completed, note=note, raw=raw)
+                metadata["path"] = target
             task = Task(priority=priority, description=description[:200],
                         task_type=TaskType(kind), metadata=metadata, max_retries=1)
         return Decision(reasoning=reasoning, task=task, completed_goals=completed,
@@ -698,6 +752,24 @@ class BaseBrain:
             clean.pop(0)
         return clean
 
+    @staticmethod
+    def _look_up_paths(text: str, limit: int = 5) -> list:
+        """Resolve paths the operator names, so an answer about a directory
+        comes from a real listing rather than a recollection of one."""
+        try:
+            from jarvis.agent import environment
+            out = []
+            for path in environment.extract_paths(
+                    text, limit=limit,
+                    min_segments=environment.MIN_SEGMENTS_ASKED):
+                info = environment.stat_path(path)
+                if info.get("kind") == "dir":
+                    info = environment.tree(path, depth=1, limit=60)
+                out.append(info)
+            return out
+        except Exception:
+            return []
+
     def chat(self, agent, turns, observations: Optional[dict] = None,
              settings: Optional[dict] = None) -> Optional[str]:
         """Multi-turn conversation with the operator, grounded in agent context.
@@ -720,6 +792,10 @@ class BaseBrain:
                 composed = dials.compose(settings, self, agent, observations)
                 context, system, params = composed["context"], composed["system"], composed["model"]
             if context is not None:
+                looked_up = self._look_up_paths(messages[-1]["content"])
+                if looked_up:
+                    context = dict(context)
+                    context["asked_about"] = looked_up
                 preface = "Context as JSON:\n" + json.dumps(context, default=str, indent=1) + "\n\n"
                 messages[0] = {"role": "user", "content": preface + messages[0]["content"]}
             with self._lab_params(params):

@@ -106,9 +106,9 @@ DIALS = [
      "texts": GUARDRAIL_DISCLOSURE, "default": 1,
      "description": "Whether the model is told about the shell deny-list. The deny-list itself is enforced regardless."},
     {"id": "context", "label": "Context given", "group": "Context", "kind": LEVEL,
-     "levels": ["none (bare question)", "goals and clock", "plus recent tasks and notes", "everything (uploads, last decision, cloud)"],
+     "levels": ["none (bare question)", "goals and clock", "plus recent tasks, notes and checked paths", "everything (uploads, last decision, cloud)"],
      "default": 3,
-     "description": "How much of the agent's live situation is attached to the question."},
+     "description": "How much of the agent's live situation is attached to the question. From level 2 this includes the environment block of real, checked paths, which is what stops the model inventing them."},
     {"id": "history_window", "label": "Recent tasks shown", "group": "Context", "kind": RANGE,
      "min": 0, "max": 20, "default": 10,
      "description": "How many executed tasks the model sees (0 hides history even at full context)."},
@@ -234,7 +234,7 @@ def context(settings: dict, brain, agent, observations: Optional[dict] = None) -
         return {k: full[k] for k in ("clock", "cycle", "goals") if k in full}
     if level == 2:
         return {k: full[k] for k in ("clock", "cycle", "goals", "recent_history", "pending",
-                                     "notes", "observations") if k in full}
+                                     "notes", "observations", "environment") if k in full}
     return full
 
 

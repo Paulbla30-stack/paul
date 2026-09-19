@@ -199,6 +199,27 @@ class AgentCore:
             body["skipped"] = skipped[:300]
         return body
 
+    @staticmethod
+    def _unverified_paths(task) -> list:
+        """Absolute paths a planned task names that are not on this filesystem.
+
+        This is a signal, not a refusal: a command may legitimately create a
+        path that does not exist yet. But a model that names a path it never
+        checked is guessing, so the guess is fed back to it next cycle and put
+        on the record rather than quietly acted on. inspect_path is exempt:
+        asking whether a path exists is the cure, not the disease.
+        """
+        if task is None or task.task_type == TaskType.INSPECT_PATH:
+            return []
+        text = " ".join(str(task.metadata.get(k) or "") for k in ("command", "path"))
+        if not text.strip():
+            return []
+        try:
+            from jarvis.agent import environment
+            return environment.verify(text)["missing"]
+        except Exception:                          # never lose a cycle over it
+            return []
+
     def _apply_decision(self, decision) -> Optional[Task]:
         """Turn a brain Decision into agent state: goals, notes, task."""
         for goal in decision.completed_goals:
@@ -217,6 +238,15 @@ class AgentCore:
             "completed_goals": list(decision.completed_goals),
             "timestamp": time.time(),
         }
+        unverified = self._unverified_paths(decision.task)
+        if unverified:
+            self.last_thought["unverified_paths"] = unverified
+            self.log.warning("Brain named %d path(s) that do not exist: %s",
+                             len(unverified), ", ".join(unverified[:5]))
+            self.ledger.record("alert", {
+                "cycle": self.cycle_count, "alert": "unverified_path",
+                "task": decision.task.description[:300] if decision.task else None,
+                "paths": unverified[:20]})
         if decision.task is None:
             self.brain_repeat_streak = 0
             self.log.info("Brain: idle. %s", decision.reasoning)
@@ -451,6 +481,25 @@ class AgentCore:
         """Answer an operator question with the agent's context."""
         return self.chat([{"role": "user", "content": question}])
 
+    @staticmethod
+    def _check_answer_paths(answer: str):
+        """Verify every path an answer names. Returns (answer, verification).
+
+        A model that invents a path is most convincing in prose, where there
+        is no command to fail. Checking after the fact turns an invention into
+        something the operator sees immediately instead of discovering when a
+        script silently reports nothing.
+        """
+        try:
+            from jarvis.agent import environment
+            result = environment.verify(answer or "")
+            note = environment.verification_note(result)
+        except Exception:
+            return answer, None
+        if note:
+            answer = f"{answer}\n\n[path check] {note}"
+        return answer, result
+
     def chat(self, turns, settings: Optional[dict] = None) -> str:
         """Continue an operator conversation with the agent's context.
 
@@ -464,6 +513,7 @@ class AgentCore:
             return f"Not answering: {gate}"
         extra = {"settings": settings} if settings is not None else {}
         answer = self.brain.chat(self, turns, self.observe(), **extra)
+        answer, paths = self._check_answer_paths(answer) if answer else (answer, None)
         last_user = ""
         for t in reversed(list(turns or [])):
             if isinstance(t, dict) and t.get("role") == "user":
@@ -475,6 +525,8 @@ class AgentCore:
                 "answer_sha256": _sha256(answer or ""),
                 "answer_head": (answer or "")[:300],
                 "model": getattr(self.brain, "model", None)}
+        if paths and paths.get("checked"):
+            body["paths"] = {"checked": paths["checked"], "missing": paths["missing"][:20]}
         if settings is not None:
             from jarvis.brain import dials
             body["dials"] = dials.fingerprint(settings)

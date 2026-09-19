@@ -190,6 +190,47 @@ allows. Every dial change and every run is ledgered with a fingerprint of
 the settings, so a behaviour change always has a return address. API:
 `GET /lab`, `POST /lab/settings`, `POST /lab/preview`, `POST /lab/run`.
 
+## Filesystem grounding
+
+A language model asked about a path it cannot see does not say "I don't
+know": it produces a plausible one. Jarvis's planner once wrote a health
+script that grepped `/var/log/jarvis/security_scan.log` and installed itself
+into `/opt/jarvis`. Neither exists. Nothing in the context described the
+filesystem, so every path in that script was a guess, and the script would
+have reported zero security findings forever.
+
+Three things close that, and all three are on by default:
+
+- **The model is shown real paths.** Every cycle the context carries an
+  `environment` block: the host's identity and a set of paths that have
+  actually been checked, each with its kind, size, mode and modification
+  time. Missing paths are listed *as missing* rather than left out, because
+  an absence a model cannot see is one it invents something to fill. The set
+  is `llm.environment_paths` (null uses the standard Jarvis paths).
+- **The model can look.** `inspect_path` is a task type like any other: the
+  planner puts an absolute path in `command` and gets back a real bounded
+  directory listing, or a file's size and modification time, or the fact
+  that the path does not exist. In an operator conversation, any path in the
+  question is resolved the same way before the model answers, so a question
+  about a directory is answered from a listing rather than a recollection.
+  It reads only, and refuses the same paths the shell deny-list refuses: the
+  ledger, its signing key, the agent's runtime directory, credentials. A
+  read-only inspector that could read the ledger would just be a way around
+  that fence.
+- **Invented paths are caught.** Every absolute path the model names, in a
+  planned command or in an answer, is checked against the filesystem after
+  the fact. A planned command naming a path that does not exist is not
+  blocked, because a command may legitimately create one, but it is logged,
+  recorded in the ledger as an `unverified_path` alert, and fed back to the
+  model on the next cycle. An answer naming one gets a `[path check]` line
+  the operator can see. `inspect_path` is exempt: asking whether a path
+  exists is the cure, not the disease.
+
+The planner's rules say the same thing in words: paths are facts, not
+conventions; name one only if it appears in `environment`, in
+`uploaded_files`, or in a task result; and saying a path has not been
+checked is a correct answer.
+
 ## Headless mode
 
 `jarvis --headless` runs the same agent loop without the console. It is

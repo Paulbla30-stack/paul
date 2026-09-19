@@ -197,6 +197,7 @@ class TaskExecutor:
             TaskType.GOAL_STEP: self._handle_goal_step,
             TaskType.CLOUD_PROBE: self._handle_cloud_probe,
             TaskType.SHELL_COMMAND: self._handle_shell_command,
+            TaskType.INSPECT_PATH: self._handle_inspect_path,
         }
 
     def execute(self, task: Task) -> dict:
@@ -321,6 +322,43 @@ class TaskExecutor:
         report = scanner.full_scan()
         self.memory.store(category="security_scan", data=report)
         return {"success": True, "output": report}
+
+    def _handle_inspect_path(self, task: Task) -> dict:
+        """Look at a real path: a bounded listing or a stat, never a guess.
+
+        This exists so the planner can check the filesystem instead of
+        recalling it. It only reads, and it refuses the same paths the shell
+        deny-list refuses, so it is not a way around that fence.
+        """
+        from jarvis.agent import environment
+
+        target = str(task.metadata.get("path")
+                     or task.metadata.get("command") or "").strip()
+        if not target:
+            return {"success": False, "error": "inspect_path needs a path"}
+        if not target.startswith("/"):
+            return {"success": False,
+                    "error": f"inspect_path needs an absolute path, got {target!r}"}
+
+        reason = environment.fenced_reason(target)
+        if reason:
+            self.log.warning("inspect_path refused %s: %s", target, reason)
+            return {"success": False, "error": f"refused: {reason}",
+                    "output": {"path": target, "refused": reason}}
+
+        try:
+            depth = int(task.metadata.get("depth", 1))
+        except (TypeError, ValueError):
+            depth = 1
+        info = environment.stat_path(target)
+        if info.get("kind") == "dir":
+            result = environment.tree(target, depth=depth)
+        else:
+            result = info
+        self.memory.store(category="inspect_path", data=result)
+        # A path that is not there is a useful answer, not a failure: it is
+        # the answer that stops the planner inventing one.
+        return {"success": True, "output": result}
 
     def _handle_user_command(self, task: Task) -> dict:
         """Handle a user-initiated command via input devices."""

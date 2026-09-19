@@ -29,6 +29,7 @@ class TaskType(Enum):
     GOAL_STEP = "goal_step"
     CLOUD_PROBE = "cloud_probe"
     SHELL_COMMAND = "shell_command"
+    INSPECT_PATH = "inspect_path"
 
 
 # Boot-task profiles: what the agent should look at first depends on
