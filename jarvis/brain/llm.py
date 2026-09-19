@@ -106,9 +106,15 @@ PLAN_SCHEMA = {
             "type": "string",
             "description": "A fact worth remembering for future cycles; empty if nothing.",
         },
+        "proposal": {
+            "type": "string",
+            "description": "A change to this machine you think should happen but "
+                           "are not permitted to make: state it as the change, not "
+                           "as a sentence about yourself. Empty if none.",
+        },
     },
     "required": ["reasoning", "task_type", "description", "priority",
-                 "command", "goal", "completed_goals", "note"],
+                 "command", "goal", "completed_goals", "note", "proposal"],
     "additionalProperties": False,
 }
 
@@ -174,6 +180,13 @@ note now; repeating a note you already made refreshes it rather than adding a se
 see only your most recent notes and only the most recent executed tasks (idle cycles leave no \
 trace); anything you will need beyond that must be restated in a note. Anything under \
 pinned_memory was marked by the operator as standing fact.
+- Use "proposal" when you think this machine should be changed and your mandate does not let \
+you change it. Do not write the recommendation into "note" or "reasoning" instead: a note is \
+prose the operator has no way to answer, and an unanswered recommendation teaches you nothing. \
+A proposal is a thing he can accept or decline, with a reason, and his verdicts come back to \
+you so you learn the shape of what he wants. State the change itself -- "set kernel.yama.\
+ptrace_scope to 1" -- not "I propose to look at ptrace_scope". One per cycle; if it is already \
+listed in proposals_awaiting_operator, it has been filed and repeating it is noise.
 - Files the operator uploads appear under uploaded_files with their path on this machine; \
 inspect them with shell tools (head, wc, file, unzip -l) when a goal concerns them.
 - Paths are facts, not conventions. The environment block lists paths on this machine that \
@@ -220,6 +233,10 @@ class Decision:
     task: Optional[Task] = None
     completed_goals: list = field(default_factory=list)
     note: str = ""
+    # A change the model thinks should happen and is not permitted to make.
+    # Kept separate from `note` on purpose: a note is prose the operator has
+    # no way to answer, and an unanswered recommendation teaches nothing.
+    proposal: str = ""
     raw: dict = field(default_factory=dict)
 
     @property
@@ -767,6 +784,7 @@ class BaseBrain:
             return Decision(reasoning="model returned a non-object plan", raw={})
         reasoning = str(raw.get("reasoning") or "")[:2000]
         note = str(raw.get("note") or "")[:1000]
+        proposal = str(raw.get("proposal") or "")[:500]
         completed_raw = raw.get("completed_goals")
         completed = []
         if isinstance(completed_raw, list):
@@ -789,18 +807,18 @@ class BaseBrain:
                 command = str(raw.get("command") or "").strip()
                 if not command:
                     return Decision(reasoning=reasoning + " (shell_command without a command; idling)",
-                                    completed_goals=completed, note=note, raw=raw)
+                                    completed_goals=completed, note=note, proposal=proposal, raw=raw)
                 metadata["command"] = command
             if kind == "inspect_path":
                 target = str(raw.get("command") or "").strip()
                 if not target:
                     return Decision(reasoning=reasoning + " (inspect_path without a path; idling)",
-                                    completed_goals=completed, note=note, raw=raw)
+                                    completed_goals=completed, note=note, proposal=proposal, raw=raw)
                 metadata["path"] = target
             task = Task(priority=priority, description=description[:200],
                         task_type=TaskType(kind), metadata=metadata, max_retries=1)
         return Decision(reasoning=reasoning, task=task, completed_goals=completed,
-                        note=note, raw=raw)
+                        note=note, proposal=proposal, raw=raw)
 
     def ask(self, agent, question: str, observations: Optional[dict] = None) -> Optional[str]:
         """Free-form question about the system, answered with agent context."""

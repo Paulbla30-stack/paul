@@ -268,3 +268,67 @@ class TestGoalWithdrawal(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestStatedProposals(unittest.TestCase):
+    """The gap that made the whole spine one-way.
+
+    The model complies with the proposer rung so well that the authority gate
+    never fires: it does not attempt the change, so there is nothing to
+    refuse, so nothing was ever filed. Its recommendations lived as sentences
+    inside notes -- prose the operator had no way to answer and the agent
+    could not learn from. On the live instance, after a week of running, the
+    store held zero memories of kind "proposal" and two notes beginning
+    "Proposing to...".
+    """
+
+    def _agent(self):
+        import logging
+        from jarvis.agent.core import AgentCore
+        return AgentCore({"name": "t", "profile": "cloud", "rung": "proposer"},
+                         {"display": None, "input": None, "memory": None,
+                          "storage": None}, logging.getLogger("test"))
+
+    def _decision(self, proposal, note=""):
+        from jarvis.brain.llm import Decision
+        return Decision(reasoning="because the scan flagged it", note=note,
+                        proposal=proposal)
+
+    def test_a_stated_proposal_is_filed_and_answerable(self):
+        agent = self._agent()
+        agent._apply_decision(self._decision("set kernel.yama.ptrace_scope to 1"))
+        self.assertEqual(len(agent.proposals), 1)
+        self.assertTrue(agent.proposals[0]["stated"])
+        decided = agent.decide_proposal(0, False, "kernel tuning is mine to do")
+        self.assertEqual(decided["decision"], "declined")
+
+    def test_restating_it_every_cycle_files_it_once(self):
+        agent = self._agent()
+        for _ in range(5):
+            agent._apply_decision(self._decision("set kernel.yama.ptrace_scope to 1"))
+        self.assertEqual(len(agent.proposals), 1)
+
+    def test_whitespace_and_case_do_not_defeat_the_dedupe(self):
+        agent = self._agent()
+        agent._apply_decision(self._decision("Set kernel.yama.ptrace_scope to 1"))
+        agent._apply_decision(self._decision("set  kernel.yama.ptrace_scope   TO 1"))
+        self.assertEqual(len(agent.proposals), 1)
+
+    def test_a_note_is_not_a_proposal(self):
+        """The whole point of the separation: prose stays prose."""
+        agent = self._agent()
+        agent._apply_decision(self._decision("", note="I propose adjusting ptrace_scope"))
+        self.assertEqual(len(agent.proposals), 0)
+        self.assertIn("I propose adjusting ptrace_scope", list(agent.notes))
+
+    def test_it_is_stored_under_its_own_kind_so_it_survives_a_restart(self):
+        """kind='proposal' is what _restore_proposals looks for; the two real
+        ones on the live box were kind='note', which is why the deque was
+        empty after every restart."""
+        agent = self._agent()
+        agent._apply_decision(self._decision("mount /var noexec"))
+        stored = agent.store.recent(10, kind="proposal")
+        if agent.store.available:          # NullStore in a bare test env
+            self.assertTrue(stored)
+            self.assertIn("mount /var noexec", stored[0]["text"])
+

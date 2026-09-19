@@ -345,6 +345,35 @@ class AgentCore:
                          self.rung, entry["description"])
         return entry
 
+    def _record_stated_proposal(self, decision) -> Optional[dict]:
+        """File a change the model asked for rather than attempted.
+
+        Deduplicated against what is already waiting, so a planner that
+        restates the same recommendation every cycle files it once. Ledgered
+        as a gate of its own kind: nothing refused it, the mandate simply
+        meant it was never tried.
+        """
+        text = str(decision.proposal or "").strip()[:300]
+        if not text:
+            return None
+        norm = " ".join(text.lower().split())
+        for existing in self.proposals:
+            current = existing.get("description") or existing.get("text") or ""
+            if " ".join(str(current).lower().split()) == norm:
+                return None
+        entry = {"ts": time.time(), "cycle": self.cycle_count,
+                 "description": text, "command": "", "goal": "",
+                 "reasoning": str(decision.reasoning or "")[:500],
+                 "rung": self.rung, "stated": True}
+        self.proposals.append(entry)
+        self.remember(f"Proposed to the operator (rung {self.rung}): {text}",
+                      kind="proposal", source="brain")
+        self.ledger.record("gate", {"cycle": self.cycle_count, "gate": "authority",
+                                    "reason": "stated proposal, not attempted",
+                                    "proposal": text})
+        self.log.info("Proposal filed for the operator: %s", text[:200])
+        return entry
+
     def _apply_decision(self, decision) -> Optional[Task]:
         """Turn a brain Decision into agent state: goals, notes, task."""
         for goal in decision.completed_goals:
@@ -356,6 +385,15 @@ class AgentCore:
             self.remember(decision.note, kind="note", source="brain")
             self.memory.store(category="llm_note",
                               data={"note": decision.note, "cycle": self.cycle_count})
+        # A change it thinks should happen and may not make. This arrives as
+        # its own field rather than being mined out of prose, because the
+        # model complies with the proposer rung so well that the authority
+        # gate never fires: it does not attempt the change, so there is
+        # nothing to refuse, so nothing was ever filed. Its recommendations
+        # lived only as sentences in notes, where the operator could not
+        # answer them and it could not learn from the answer.
+        if decision.proposal:
+            self._record_stated_proposal(decision)
         self.last_thought = {
             "cycle": self.cycle_count,
             "reasoning": decision.reasoning,
