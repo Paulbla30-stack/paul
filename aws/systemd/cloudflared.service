@@ -1,0 +1,52 @@
+[Unit]
+Description=Cloudflare Tunnel for the Jarvis UI (outbound only, no open port)
+Documentation=https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/
+After=network-online.target jarvis-bootstrap.service
+Wants=network-online.target
+Wants=jarvis-bootstrap.service
+# No token, no tunnel: the box still boots and is reachable over SSM, which
+# is how you would go and fix it.
+ConditionPathExists=/etc/jarvis/cloudflared.env
+StartLimitIntervalSec=300
+StartLimitBurst=10
+
+[Service]
+Type=notify
+User=cloudflared
+Group=cloudflared
+# TUNNEL_TOKEN lives here, 0600 and owned by this user. Passing it on the
+# command line would put the credential in every `ps` on the box.
+EnvironmentFile=/etc/jarvis/cloudflared.env
+ExecStart=/usr/local/bin/cloudflared --no-autoupdate --loglevel info tunnel run
+Restart=always
+RestartSec=5
+KillSignal=SIGINT
+TimeoutStopSec=30
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=cloudflared
+
+# It dials out and forwards to a loopback port. It needs nothing else.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+CapabilityBoundingSet=
+AmbientCapabilities=
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

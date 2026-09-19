@@ -1,0 +1,7 @@
+# Copy to aws/packer/local.auto.pkrvars.hcl (git-ignored) and edit.
+region        = "eu-west-2"
+instance_type = "t3.small"
+arch          = "x86_64"     # or "arm64" with instance_type = "t4g.small"
+base          = "al2023"     # or "ubuntu"
+# ami_users   = ["123456789012"]
+# subnet_id   = "subnet-0123456789abcdef0"

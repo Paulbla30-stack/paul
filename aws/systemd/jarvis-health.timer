@@ -1,0 +1,14 @@
+[Unit]
+Description=Run the Jarvis health check every 15 minutes
+Documentation=https://github.com/Paulbla30-stack/paul
+
+[Timer]
+# First run shortly after boot, once the agent has published its status.
+OnBootSec=5min
+OnUnitActiveSec=15min
+AccuracySec=30s
+Persistent=true
+Unit=jarvis-health.service
+
+[Install]
+WantedBy=timers.target

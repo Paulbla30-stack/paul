@@ -1,11 +1,11 @@
 #!/bin/sh
-# OpenClaw Init Script
+# Jarvis Init Script
 # ====================
 # This is the first process (PID 1) that runs when the ISO boots.
-# It sets up the environment and launches the OpenClaw agent.
+# It sets up the environment and launches the Jarvis agent.
 
 echo "=========================================="
-echo "  OpenClaw Agentic Agent Environment"
+echo "  Jarvis Agentic Agent Environment"
 echo "  Version 1.0.0"
 echo "=========================================="
 
@@ -30,11 +30,11 @@ DEBUG=0
 
 for param in $(cat /proc/cmdline 2>/dev/null); do
     case "$param" in
-        openclaw.autostart=*) AUTOSTART="${param#*=}" ;;
-        openclaw.fullaccess=*) FULLACCESS="${param#*=}" ;;
-        openclaw.safemode=*)  SAFEMODE="${param#*=}" ;;
-        openclaw.scanonly=*)  SCANONLY="${param#*=}" ;;
-        openclaw.debug=*)     DEBUG="${param#*=}" ;;
+        jarvis.autostart=*) AUTOSTART="${param#*=}" ;;
+        jarvis.fullaccess=*) FULLACCESS="${param#*=}" ;;
+        jarvis.safemode=*)  SAFEMODE="${param#*=}" ;;
+        jarvis.scanonly=*)  SCANONLY="${param#*=}" ;;
+        jarvis.debug=*)     DEBUG="${param#*=}" ;;
     esac
 done
 
@@ -94,8 +94,8 @@ else
 fi
 
 # ---- Set hostname ----
-echo "openclaw" > /proc/sys/kernel/hostname 2>/dev/null
-echo "[init] Hostname: openclaw"
+echo "jarvis" > /proc/sys/kernel/hostname 2>/dev/null
+echo "[init] Hostname: jarvis"
 
 # ---- Set up networking (basic) ----
 ip link set lo up 2>/dev/null
@@ -106,32 +106,32 @@ for iface in eth0 ens0 enp0s3; do
     fi
 done
 
-# ---- Launch OpenClaw ----
+# ---- Launch Jarvis ----
 if [ "$AUTOSTART" = "1" ]; then
     echo ""
-    echo "[init] Starting OpenClaw Agent..."
+    echo "[init] Starting Jarvis Agent..."
     echo ""
 
-    export OPENCLAW_FULLACCESS="$FULLACCESS"
-    export OPENCLAW_SAFEMODE="$SAFEMODE"
-    export OPENCLAW_SCANONLY="$SCANONLY"
-    export OPENCLAW_DEBUG="$DEBUG"
-    export PYTHONPATH="/usr/lib/openclaw"
+    export JARVIS_FULLACCESS="$FULLACCESS"
+    export JARVIS_SAFEMODE="$SAFEMODE"
+    export JARVIS_SCANONLY="$SCANONLY"
+    export JARVIS_DEBUG="$DEBUG"
+    export PYTHONPATH="/usr/lib/jarvis"
 
     if [ "$SCANONLY" = "1" ]; then
         echo "[init] Running security scan only..."
-        python3 /usr/lib/openclaw/openclaw/security/scanner.py --target / --report /tmp/scan-report.txt
+        python3 /usr/lib/jarvis/jarvis/security/scanner.py --target / --report /tmp/scan-report.txt
         echo ""
         echo "[init] Scan complete. Report at /tmp/scan-report.txt"
         cat /tmp/scan-report.txt
     else
-        python3 /usr/lib/openclaw/openclaw/main.py
+        python3 /usr/lib/jarvis/jarvis/main.py
     fi
 fi
 
 # ---- Drop to shell if agent exits ----
 echo ""
-echo "[init] OpenClaw agent has stopped."
+echo "[init] Jarvis agent has stopped."
 echo "[init] Dropping to maintenance shell..."
 echo ""
 

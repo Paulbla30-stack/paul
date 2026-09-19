@@ -1,0 +1,132 @@
+# Jarvis Agent Configuration - AWS AMI profile
+# ==============================================
+# Installed as /etc/jarvis/config.yaml on the AMI.  Instance-specific
+# values (identity, user-data overrides, goals) land in
+# /etc/jarvis/cloud.yaml, written by jarvis-bootstrap.service at boot
+# and merged on top of this file.
+
+agent:
+  name: "Jarvis"
+  profile: "cloud"          # boot tasks: IMDS probe, memory, storage, scan
+  max_tasks: 100
+  memory_limit_mb: 512
+  auto_plan: true
+  # The permission spine, above the command deny-list. The deny-list is the
+  # floor (what may never run); this is the ceiling (what kind of task is in
+  # scope at all). observer: look and report. proposer: a change is not run,
+  # it becomes a proposal for the operator. actor: may change the machine,
+  # still under the deny-list. Anything unrecognised falls back to proposer.
+  rung: proposer
+
+hardware:
+  # EC2 instances have no framebuffer or physical input devices.
+  display:
+    enabled: false
+  input:
+    enabled: false
+  memory:
+    enabled: true
+    max_map_mb: 256
+  storage:
+    enabled: true
+    readonly: false          # set true for a read-only auditing agent
+
+security:
+  scan_on_boot: true
+  enforce_hardening: false
+  report_path: "/var/log/jarvis-security.log"
+
+cloud:
+  enabled: true
+  provider: "aws"
+  headless: true             # no console; run the loop as a service
+  cycle_interval: 30         # seconds between idle cycles
+  max_cycles: 0              # 0 = run forever
+  status_host: "127.0.0.1"   # loopback only; use SSM/SSH to reach it
+  status_port: 8471
+  status_file: "/run/jarvis/status.json"
+  status_token: null         # null = generated at start and written to the file below
+  status_token_file: "/run/jarvis/token"   # 0600; needed for every call but /health, /status
+  ui:                        # web UI: chat, agent panel, file uploads
+    enabled: true
+    host: "0.0.0.0"          # reachable only if the security group allows it (terraform ui_cidr)
+    port: 8443
+    tls: true                # self-signed certificate; the browser will warn once
+    tls_dir: /etc/jarvis/tls
+    upload_dir: /var/lib/jarvis/uploads
+    max_upload_mb: 50
+
+goals: []                    # add goals via user data or the jarvis:goal tag
+
+# The agent's own durable operational memory: what it learned about THIS
+# machine, kept across restarts. Deliberately separate from the ledger
+# (evidence about the agent, which the brain may never read) and from any
+# personal memory store (not the agent's to hold). Written through the
+# agent, so the deny-list refuses shell access to the file.
+memory:
+  enabled: true
+  path: /var/lib/jarvis/memory.db
+  max_rows: 2000             # oldest unpinned entries drop past this
+
+# The Glass Ledger: a signed, hash-chained, append-only journal of every
+# decision, action and outcome (Blatherwick, The Glass Ledger v2,
+# doi:10.5281/zenodo.21515861). fail_closed means the agent does not
+# plan, act or answer while it cannot record. The brain never reads it.
+ledger:
+  enabled: true
+  path: /var/lib/jarvis/ledger.jsonl
+  key_file: /etc/jarvis/ledger/ed25519.key     # generated at first start, 0600
+  pubkey_file: /etc/jarvis/ledger/ed25519.pub  # pin this on the machine that audits
+  fail_closed: true
+  anchor:                    # off-box witness: S3 bucket with Object Lock (Terraform)
+    bucket: null             # set by the jarvis:ledger-bucket instance tag
+    prefix: ledger
+    every_s: 300             # checkpoint pin + file copy at most this often
+    copy: true
+
+# LLM planner. Enabled here, but it only runs when a key is available:
+#   - /etc/jarvis/anthropic.key (0600), written at boot by
+#     jarvis-bootstrap from llm.api_key_secret (AWS Secrets Manager) or
+#     llm.api_key_ssm_parameter (SSM Parameter Store), set here, in user
+#     data, or via the jarvis:llm-key-secret / jarvis:llm-key-parameter
+#     tags, or
+#   - ANTHROPIC_API_KEY in the service environment.
+# Without a key the agent falls back to the rule-based planner and says so
+# in the journal.
+llm:
+  enabled: true
+  provider: anthropic        # anthropic (Claude API, needs the key below) | bedrock
+  model: claude-opus-5       # bedrock: e.g. meta.llama3-3-70b-instruct-v1:0, an
+                             # inference profile, or your imported model's ARN
+                             # arn:aws:bedrock:REGION:ACCOUNT:imported-model/ID
+  region: null               # bedrock: null = the instance's region
+  bedrock:
+    temperature: 0.2
+    json_retries: 1          # re-ask once when the plan is not valid JSON
+    thinking: auto           # Qwen3-style <think> blocks: auto | on | off (plans are always off)
+    not_ready_backoff: 45    # seconds to wait while an imported model loads
+  effort: medium             # low | medium | high (xhigh/max need max_tokens >= 64000)
+  thinking: adaptive         # adaptive | disabled (ignored on models without adaptive thinking)
+  max_tokens: 4096
+  fallbacks: true            # server-side refusal fallbacks (Claude API only)
+  api_key_file: /etc/jarvis/anthropic.key
+  api_key_secret: jarvis/anthropic-api-key   # AWS Secrets Manager name or ARN; the
+                                # value may be the bare key or JSON with an
+                                # ANTHROPIC_API_KEY / api_key field. Tried first.
+  api_key_ssm_parameter: null   # or an SSM SecureString, e.g. /jarvis/anthropic-api-key.
+                                # User data and the jarvis:llm-key-* tags override both.
+  max_calls_per_hour: 60     # hard budget; rule planner takes over beyond it
+  plan_every_n_cycles: 1
+  history_window: 10
+  environment_paths: null    # paths checked and reported to the model every cycle;
+                             # null uses the standard set (the Jarvis config, state,
+                             # library, launcher, logs and unit). Missing paths are
+                             # reported as missing on purpose: an absence the model
+                             # cannot see is one it invents something to fill.
+  shell:
+    enabled: true            # let the brain run commands (deny-list guarded)
+    timeout: 60
+    max_output: 4000
+    cwd: /
+    deny_patterns: null      # extra patterns, ADDED to the built-in list (which never shrinks)
+    allow_package_install: false   # true = let the planner run dnf/apt/pip install

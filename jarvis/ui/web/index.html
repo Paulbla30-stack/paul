@@ -1,0 +1,607 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Jarvis</title>
+<style>
+  :root { color-scheme: dark; --bg:#0f1115; --panel:#171a21; --line:#262b36; --text:#e6e8ee; --muted:#8b93a7;
+          --accent:#5ec2ff; --ok:#4cd68a; --bad:#ff6b6b; --warn:#f2c14e; }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; background: var(--bg); color: var(--text);
+               font: 15px/1.45 -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+  header { display:flex; align-items:center; gap:10px; padding:10px 14px; border-bottom:1px solid var(--line); background:var(--panel);
+           position:sticky; top:0; z-index:2; }
+  header h1 { font-size:16px; margin:0; flex:1; }
+  .dot { width:9px; height:9px; border-radius:50%; background:var(--muted); display:inline-block; margin-right:6px; }
+  .dot.ok { background:var(--ok); } .dot.bad { background:var(--bad); } .dot.warn { background:var(--warn); }
+  nav { display:flex; border-bottom:1px solid var(--line); background:var(--panel); }
+  nav button { flex:1; background:none; border:0; color:var(--muted); padding:11px; font-size:14px; border-bottom:2px solid transparent; }
+  nav button.active { color:var(--text); border-bottom-color:var(--accent); }
+  main { padding: 12px 14px 90px; max-width: 900px; margin: 0 auto; }
+  section { display:none; } section.active { display:block; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:12px; margin-bottom:12px; }
+  .card h2 { font-size:13px; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); margin:0 0 8px; }
+  .grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(130px,1fr)); gap:8px; }
+  .stat { background:var(--bg); border-radius:8px; padding:8px 10px; }
+  .stat b { display:block; font-size:18px; } .stat span { color:var(--muted); font-size:12px; }
+  .muted { color:var(--muted); } .small { font-size:12px; }
+  button.btn, .file-btn { background:var(--accent); color:#04101a; border:0; border-radius:8px; padding:9px 14px; font-weight:600; cursor:pointer; }
+  button.ghost { background:transparent; color:var(--accent); border:1px solid var(--line); }
+  button:disabled { opacity:.5; }
+  input, textarea { width:100%; background:var(--bg); color:var(--text); border:1px solid var(--line); border-radius:8px; padding:10px; font-size:15px; }
+  textarea { resize:none; }
+  .row { display:flex; gap:8px; align-items:center; }
+  ul { list-style:none; padding:0; margin:0; }
+  li { padding:8px 0; border-top:1px solid var(--line); }
+  li:first-child { border-top:0; }
+  .task { display:flex; gap:8px; align-items:flex-start; }
+  .task .st { width:8px; height:8px; border-radius:50%; margin-top:7px; flex:none; }
+  details summary { cursor:pointer; color:var(--muted); font-size:12px; }
+  pre { white-space:pre-wrap; word-break:break-word; background:var(--bg); padding:8px; border-radius:8px; font-size:12px; margin:6px 0 0; max-height:260px; overflow:auto; }
+  /* chat */
+  #messages { display:flex; flex-direction:column; gap:10px; min-height: 40vh; }
+  .msg { max-width: 88%; padding:10px 12px; border-radius:14px; white-space:pre-wrap; word-break:break-word; }
+  .msg.user { align-self:flex-end; background:#1f3b57; border-bottom-right-radius:4px; }
+  .msg.agent { align-self:flex-start; background:var(--panel); border:1px solid var(--line); border-bottom-left-radius:4px; }
+  .msg.sys { align-self:center; color:var(--muted); font-size:12px; }
+  .composer { position:fixed; left:0; right:0; bottom:0; background:var(--panel); border-top:1px solid var(--line); padding:10px 14px calc(10px + env(safe-area-inset-bottom)); }
+  .composer .inner { max-width:900px; margin:0 auto; display:flex; gap:8px; align-items:flex-end; }
+  .composer textarea { flex:1; max-height:120px; }
+  .drop { border:2px dashed var(--line); border-radius:12px; padding:22px; text-align:center; color:var(--muted); }
+  .drop.over { border-color:var(--accent); color:var(--text); }
+  .bar { height:6px; background:var(--bg); border-radius:3px; overflow:hidden; margin-top:8px; display:none; }
+  .bar i { display:block; height:100%; width:0; background:var(--accent); }
+  #login { position:fixed; inset:0; background:rgba(0,0,0,.75); display:none; align-items:center; justify-content:center; padding:20px; z-index:5; }
+  #login .card { width:100%; max-width:380px; }
+
+  /* ---- Handheld and tablet ------------------------------------------------
+     This is read on a phone far more often than on a desktop, so the base
+     layout is the small one and the wide screens are the special case. */
+
+  html { -webkit-text-size-adjust:100%; }
+  body { overscroll-behavior-y:contain; -webkit-tap-highlight-color:transparent; }
+
+  /* viewport-fit=cover lets the page under the notch and the home indicator,
+     which is what makes the header and nav look right when scrolled; these
+     put the content back inside the safe area. */
+  header { padding-top:calc(10px + env(safe-area-inset-top));
+           padding-left:calc(14px + env(safe-area-inset-left));
+           padding-right:calc(14px + env(safe-area-inset-right)); }
+  main { padding-left:calc(14px + env(safe-area-inset-left));
+         padding-right:calc(14px + env(safe-area-inset-right));
+         padding-bottom:24px; }
+  body.chat-open main { padding-bottom:96px; }
+  .composer { padding-left:calc(14px + env(safe-area-inset-left));
+              padding-right:calc(14px + env(safe-area-inset-right)); }
+
+  /* iOS Safari zooms the whole page when a focused field is under 16px, and
+     never zooms back out. Everything typed into goes to 16. */
+  input, textarea, select { font-size:16px; }
+
+  /* Thumbs are not mice. 44px is the smallest reliable target. */
+  nav { overflow-x:auto; scrollbar-width:none; -webkit-overflow-scrolling:touch;
+        scroll-snap-type:x proximity; padding-left:env(safe-area-inset-left);
+        padding-right:env(safe-area-inset-right); }
+  nav::-webkit-scrollbar { display:none; }
+  nav button { flex:1 0 auto; white-space:nowrap; padding:0 16px; min-height:48px;
+               scroll-snap-align:center; }
+  button.btn, .file-btn, button.ghost { min-height:44px; display:inline-flex;
+               align-items:center; justify-content:center; }
+  header button.ghost { min-height:40px; padding:8px 12px; }
+  details summary { min-height:32px; display:flex; align-items:center; }
+  /* A checkbox is 18px because that is what a checkbox looks like. The thing
+     you actually aim at is the label wrapped round it, so that is what gets
+     the 44px. */
+  label.small { min-height:44px; display:flex; align-items:center; gap:8px;
+                cursor:pointer; }
+
+  /* Sliders are the lab's whole interface and the default thumb is tiny. */
+  input[type=range] { height:44px; accent-color:var(--accent); background:transparent; }
+  input[type=range]::-webkit-slider-runnable-track { height:6px; border-radius:3px; background:var(--line); }
+  input[type=range]::-moz-range-track { height:6px; border-radius:3px; background:var(--line); }
+  input[type=range]::-webkit-slider-thumb { -webkit-appearance:none; width:26px; height:26px;
+      margin-top:-10px; border-radius:50%; background:var(--accent); border:0; }
+  input[type=range]::-moz-range-thumb { width:26px; height:26px; border-radius:50%;
+      background:var(--accent); border:0; }
+  input[type=checkbox], input[type=radio] { width:18px; height:18px; accent-color:var(--accent); }
+
+  /* Long hashes and paths should scroll, not stretch the page sideways. */
+  pre { -webkit-overflow-scrolling:touch; overscroll-behavior:contain; }
+  #messages { min-height:min(40vh, 40dvh); }
+  .msg { max-width:min(88%, 62ch); }
+
+  /* Tablet and desktop: use the width instead of a 900px column in the middle
+     of a 1280px screen. Chat stays one column, because a conversation reading
+     in two columns is a worse conversation. */
+  @media (min-width: 900px) {
+    main { max-width:1180px; padding-bottom:32px; }
+    body.chat-open main { padding-bottom:110px; }
+    .composer .inner { max-width:1180px; }
+    section.active { display:grid; grid-template-columns:repeat(2, minmax(0,1fr));
+                     gap:14px; align-items:start; }
+    section#chat.active { display:block; }
+    .card { margin-bottom:0; padding:14px; }
+    .span-2 { grid-column:1 / -1; }
+    nav button { flex:1 1 auto; }
+  }
+
+  /* The dial's name and its current setting. The setting can be a sentence
+     ("full: observations not verdicts, cite or don't assert"), which squeezes
+     the name to nothing on a phone, so below 520px they stack instead. */
+  .dial-head { justify-content:space-between; align-items:baseline; gap:10px; }
+  .dial-head b { flex:0 1 auto; }
+  .dial-head span { flex:1 1 auto; text-align:right; min-width:0; }
+  @media (max-width: 520px) {
+    .dial-head { flex-direction:column; align-items:flex-start; gap:1px; }
+    .dial-head span { text-align:left; }
+  }
+
+  /* Tabs sit over the content column rather than stretching across a
+     1280px screen with 200px between them. */
+  nav { justify-content:center; }
+  nav .inner, nav { }
+  @media (min-width: 900px) {
+    nav { padding-left:max(env(safe-area-inset-left), calc((100vw - 1180px) / 2));
+          padding-right:max(env(safe-area-inset-right), calc((100vw - 1180px) / 2)); }
+    nav button { flex:0 1 200px; }
+  }
+
+  #labResults { display:grid; gap:12px; grid-template-columns:1fr; }
+  @media (min-width: 760px) { #labResults.compare { grid-template-columns:1fr 1fr; } }
+
+  /* A phone held sideways has very little height; stop the chrome eating it. */
+  @media (max-height: 460px) and (orientation: landscape) {
+    header { position:static; }
+    nav button { min-height:40px; }
+    #messages { min-height:24dvh; }
+  }
+
+  /* Respect the system setting rather than animating regardless. */
+  @media (prefers-reduced-motion: reduce) {
+    * { animation-duration:.01ms !important; transition-duration:.01ms !important;
+        scroll-behavior:auto !important; }
+  }
+</style>
+</head>
+<body class="chat-open">
+<header>
+  <span id="statusDot" class="dot"></span>
+  <h1 id="agentName">Jarvis</h1>
+  <span id="brainBadge" class="small muted">brain: ?</span>
+  <button class="ghost" style="padding:6px 10px" onclick="logout()">Log out</button>
+</header>
+<nav>
+  <button data-tab="chat" class="active">Chat</button>
+  <button data-tab="agent">Agent</button>
+  <button data-tab="files">Files</button>
+  <button data-tab="ledger">Ledger</button>
+  <button data-tab="lab">Lab</button>
+</nav>
+
+<main>
+  <section id="chat" class="active">
+    <div id="messages"></div>
+  </section>
+
+  <section id="agent">
+    <div class="card">
+      <h2>Now</h2>
+      <div class="grid">
+        <div class="stat"><b id="sCycles">-</b><span>cycles</span></div>
+        <div class="stat"><b id="sTasks">-</b><span>tasks done</span></div>
+        <div class="stat"><b id="sGoals">-</b><span>goals open</span></div>
+        <div class="stat"><b id="sCalls">-</b><span>brain calls / hr</span></div>
+      </div>
+      <p id="lastAction" class="small muted" style="margin:10px 0 0"></p>
+      <p id="lastThought" class="small" style="margin:6px 0 0"></p>
+      <div class="row" style="margin-top:10px">
+        <button class="btn" id="thinkBtn" onclick="thinkNow()">Think now</button>
+        <span id="brainState" class="small muted"></span>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Goals</h2>
+      <ul id="goals"></ul>
+      <div class="row" style="margin-top:8px">
+        <input id="goalInput" placeholder="Add a goal for the agent" />
+        <button class="btn" onclick="addGoal()">Add</button>
+      </div>
+    </div>
+
+    <div class="card span-2">
+      <h2>Recent tasks</h2>
+      <ul id="history"></ul>
+    </div>
+
+    <div class="card">
+      <h2>Brain</h2>
+      <pre id="brainStats" class="small"></pre>
+    </div>
+  </section>
+
+  <section id="files">
+    <div class="card">
+      <h2>Upload</h2>
+      <div id="drop" class="drop">
+        <p style="margin:0 0 10px">Drop files here, or</p>
+        <label class="file-btn">Choose file<input type="file" id="fileInput" multiple style="display:none"></label>
+        <div class="bar"><i id="barFill"></i></div>
+        <p id="uploadMsg" class="small" style="margin:8px 0 0"></p>
+      </div>
+      <p class="small muted" style="margin:8px 0 0">Files land in the agent's upload folder and it is told about them; ask it to look at one in Chat, or add a goal.</p>
+    </div>
+    <div class="card">
+      <h2>Files the agent has</h2>
+      <ul id="uploads"></ul>
+    </div>
+  </section>
+
+  <section id="ledger">
+    <div class="card">
+      <h2>The Glass Ledger</h2>
+      <div class="grid">
+        <div class="stat"><b id="lSeq">-</b><span>head seq</span></div>
+        <div class="stat"><b id="lState">-</b><span>state</span></div>
+        <div class="stat"><b id="lSession">-</b><span>entries this run</span></div>
+        <div class="stat"><b id="lAnchor">-</b><span>witness copy</span></div>
+      </div>
+      <p id="lReason" class="small" style="margin:10px 0 0;color:var(--bad)"></p>
+      <p class="small muted" style="margin:8px 0 0">Every decision, action and outcome is signed and chained; the agent cannot rewrite it and never reads it. A verdict from this box is a convenience: the audit that counts runs from your machine against the witness copy with the public key you pinned.</p>
+      <p class="small" style="margin:8px 0 0;word-break:break-all">public key <code id="lPub">-</code></p>
+      <div class="row" style="margin-top:10px">
+        <button class="btn" id="verifyBtn" onclick="verifyLedger()">Verify on box</button>
+        <span id="lVerdict" class="small"></span>
+      </div>
+    </div>
+    <div class="card span-2">
+      <h2>Latest entries</h2>
+      <ul id="ledgerEntries"></ul>
+    </div>
+  </section>
+
+  <section id="lab">
+    <div class="card">
+      <h2>Behaviour lab</h2>
+      <p class="small muted" style="margin:0 0 10px">Every layer that moves the model away from its base presentation, on a dial. Level 0 everywhere is the bare model: no system prompt, no context. Change a dial, read what the model will see, then run a question under the dials and against the base side by side. Layers enforced in code stay locked: the lab changes what the model is told, never what the executor allows.</p>
+      <div id="dials"></div>
+      <div class="row" style="margin-top:10px;flex-wrap:wrap;gap:8px">
+        <button class="btn" onclick="saveDials()">Save dials</button>
+        <button class="ghost" onclick="resetDials('defaults')">Defaults</button>
+        <button class="ghost" onclick="resetDials('base')">All off (base)</button>
+        <label class="small" style="display:flex;align-items:center;gap:6px"><input type="checkbox" id="applyChat"> use these dials for live Chat</label>
+        <span id="dialsMsg" class="small muted"></span>
+      </div>
+    </div>
+    <div class="card span-2">
+      <h2>What the model sees</h2>
+      <p class="small muted" style="margin:0 0 6px">System text at the current dials; context keys attached to the question.</p>
+      <pre id="labPreview" class="small" style="white-space:pre-wrap;max-height:260px;overflow:auto"></pre>
+      <p id="labContextKeys" class="small muted" style="margin:6px 0 0"></p>
+    </div>
+    <div class="card span-2">
+      <h2>Run</h2>
+      <textarea id="labQuestion" rows="2" placeholder="Ask something, or leave empty in plan mode to ask for the next task" style="width:100%;box-sizing:border-box"></textarea>
+      <div class="row" style="margin-top:8px;flex-wrap:wrap;gap:8px">
+        <label class="small"><input type="radio" name="labMode" value="answer" checked> answer</label>
+        <label class="small"><input type="radio" name="labMode" value="plan"> plan (decision only, never executed)</label>
+        <label class="small" style="display:flex;align-items:center;gap:6px"><input type="checkbox" id="labCompare" checked> compare with base</label>
+        <button class="btn" id="labRunBtn" onclick="runLab()">Run</button>
+        <span id="labRunMsg" class="small muted"></span>
+      </div>
+      <div id="labResults" style="margin-top:10px;display:grid;gap:10px"></div>
+    </div>
+    <div class="card">
+      <h2>Locked layers</h2>
+      <ul id="lockedLayers"></ul>
+    </div>
+  </section>
+</main>
+
+<div class="composer" id="composer">
+  <div class="inner">
+    <textarea id="chatInput" rows="1" placeholder="Ask the agent… (/goal text, /think)"></textarea>
+    <button class="btn" id="sendBtn" onclick="sendChat()">Send</button>
+  </div>
+</div>
+
+<div id="login">
+  <div class="card">
+    <h2>Runner token</h2>
+    <p class="small muted">Found on the instance in <code>/run/jarvis/token</code> (root only).</p>
+    <input id="tokenInput" placeholder="paste token" autocomplete="off" />
+    <div class="row" style="margin-top:10px; justify-content:flex-end">
+      <button class="btn" onclick="saveToken()">Connect</button>
+    </div>
+    <p id="loginErr" class="small" style="color:var(--bad); margin:8px 0 0"></p>
+  </div>
+</div>
+
+<script>
+(function () {
+  const $ = (id) => document.getElementById(id);
+  let token = "";
+  let sessionActive = false;
+  try { token = localStorage.getItem("jarvis.token") || ""; } catch (e) {}
+  let turns = [];
+  try { turns = JSON.parse(localStorage.getItem("jarvis.chat") || "[]"); } catch (e) { turns = []; }
+
+  // ---- auth ----
+  function headers(extra) { return Object.assign({ "Authorization": "Bearer " + token }, extra || {}); }
+  async function api(path, opts) {
+    const init = Object.assign({}, opts || {});
+    init.headers = headers(init.headers || {});   // never let caller headers drop the token
+    init.credentials = "same-origin";             // and the session cookie rides along
+    const r = await fetch(path, init);
+    if (r.status === 401) { showLogin("Token rejected"); throw new Error("unauthorised"); }
+    const text = await r.text();
+    let data; try { data = JSON.parse(text); } catch (e) { data = { raw: text }; }
+    if (!r.ok) throw new Error((data && data.error) || ("HTTP " + r.status));
+    return data;
+  }
+  function showLogin(msg) { $("login").style.display = "flex"; $("loginErr").textContent = msg || ""; $("tokenInput").focus(); }
+  window.saveToken = async function () {
+    const supplied = $("tokenInput").value.trim();
+    if (!supplied) { showLogin("Paste the runner token."); return; }
+    // Exchange the token for a signed session cookie. The cookie survives a
+    // restart, so a redeploy that rotates the token no longer logs you out.
+    try {
+      const r = await fetch("/login", { method: "POST", body: supplied, credentials: "same-origin" });
+      if (!r.ok) {
+        const d = await r.json().catch(() => ({}));
+        showLogin(r.status === 429 ? "Too many attempts; wait a few minutes."
+                                   : ((d && d.error) || "That token was not accepted."));
+        return;
+      }
+      const d = await r.json().catch(() => ({}));
+      if (d && d.session) { sessionActive = true; }
+    } catch (e) {
+      showLogin("Could not reach the agent: " + e.message);
+      return;
+    }
+    token = supplied;
+    try { localStorage.setItem("jarvis.token", token); } catch (e) {}
+    $("login").style.display = "none"; refresh();
+  };
+  window.logout = async function () {
+    try { await fetch("/logout", { method: "POST", credentials: "same-origin" }); } catch (e) {}
+    token = ""; sessionActive = false;
+    try { localStorage.removeItem("jarvis.token"); } catch (e) {}
+    showLogin("");
+  };
+
+  // ---- tabs ----
+  document.querySelectorAll("nav button").forEach(b => b.addEventListener("click", () => {
+    document.querySelectorAll("nav button").forEach(x => x.classList.toggle("active", x === b));
+    document.querySelectorAll("main section").forEach(s => s.classList.toggle("active", s.id === b.dataset.tab));
+    const onChat = b.dataset.tab === "chat";
+    $("composer").style.display = onChat ? "" : "none";
+    document.body.classList.toggle("chat-open", onChat);
+    if (b.dataset.tab === "files") loadUploads();
+    if (b.dataset.tab === "ledger") loadLedger();
+    if (b.dataset.tab === "lab") loadLab();
+  }));
+
+  // ---- chat ----
+  function renderChat() {
+    const box = $("messages"); box.innerHTML = "";
+    if (!turns.length) { const d = document.createElement("div"); d.className = "msg sys"; d.textContent = "Ask the agent about the machine, its goals, or an uploaded file."; box.appendChild(d); }
+    for (const t of turns) { const d = document.createElement("div"); d.className = "msg " + (t.role === "user" ? "user" : t.role === "assistant" ? "agent" : "sys"); d.textContent = t.content; box.appendChild(d); }
+    window.scrollTo(0, document.body.scrollHeight);
+  }
+  function saveChat() { try { localStorage.setItem("jarvis.chat", JSON.stringify(turns.slice(-40))); } catch (e) {} }
+  function pushTurn(role, content) { turns.push({ role, content }); saveChat(); renderChat(); }
+  window.sendChat = async function () {
+    const text = $("chatInput").value.trim(); if (!text) return;
+    $("chatInput").value = ""; $("chatInput").style.height = "auto";
+    if (text.startsWith("/goal ")) { pushTurn("user", text); try { const r = await api("/goal", { method: "POST", body: text.slice(6) }); pushTurn("system", "Goal added: " + r.added); refresh(); } catch (e) { pushTurn("system", "Error: " + e.message); } return; }
+    if (text === "/think") { pushTurn("user", text); await thinkNow(true); return; }
+    if (text === "/clear") { turns = []; saveChat(); renderChat(); return; }
+    pushTurn("user", text);
+    $("sendBtn").disabled = true;
+    try {
+      const msgs = turns.filter(t => t.role === "user" || t.role === "assistant").slice(-12);
+      const r = await api("/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ messages: msgs }) });
+      pushTurn("assistant", r.answer || "(no answer)");
+    } catch (e) { pushTurn("system", "Error: " + e.message); }
+    $("sendBtn").disabled = false;
+  };
+  $("chatInput").addEventListener("keydown", e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendChat(); } });
+  $("chatInput").addEventListener("input", e => { e.target.style.height = "auto"; e.target.style.height = Math.min(e.target.scrollHeight, 120) + "px"; });
+
+  // ---- agent panel ----
+  function fmtTime(ts) { if (!ts) return ""; const d = new Date(ts * 1000); return d.toLocaleTimeString(); }
+  async function refresh() {
+    if (!token) { showLogin(""); return; }
+    try {
+      const [status, goals, hist, brain] = await Promise.all([api("/status"), api("/goals"), api("/history?limit=30"), api("/brain")]);
+      $("agentName").textContent = status.name || "Jarvis";
+      $("statusDot").className = "dot " + (status.running ? "ok" : "bad");
+      $("sCycles").textContent = status.cycle_count; $("sTasks").textContent = status.completed_tasks;
+      $("sGoals").textContent = (status.goals || {}).open ?? "-";
+      const b = brain.brain;
+      $("sCalls").textContent = b ? (b.calls_last_hour + "/" + b.max_calls_per_hour) : "off";
+      $("brainBadge").textContent = b ? ("brain: " + (b.provider ? b.provider + ":" : "") + b.model) : "brain: off";
+      $("brainState").textContent = b ? (b.available ? "available" : (b.unavailable_reason || b.disabled_reason || "unavailable")) : "no brain configured";
+      $("thinkBtn").disabled = !(b && b.available);
+      $("lastAction").textContent = (status.runner && status.runner.last_action) ? ("Last action: " + status.runner.last_action) : "";
+      const lt = brain.last_thought; $("lastThought").textContent = lt && lt.reasoning ? ("Thinking: " + lt.reasoning) : "";
+      $("brainStats").textContent = b ? JSON.stringify(b.stats, null, 1) : "";
+      const gl = $("goals"); gl.innerHTML = "";
+      if (!goals.length) gl.innerHTML = '<li class="muted small">No goals yet.</li>';
+      for (const g of goals) { const li = document.createElement("li"); li.className = "row";
+        li.innerHTML = '<span style="flex:1">' + (g.completed ? "✅ " : "⬜ ") + escapeHtml(g.description) + ' <span class="small muted">P' + g.priority + '</span></span>';
+        if (!g.completed) { const btn = document.createElement("button"); btn.className = "ghost"; btn.textContent = "Done"; btn.onclick = () => markDone(g.description); li.appendChild(btn); }
+        gl.appendChild(li); }
+      const hl = $("history"); hl.innerHTML = "";
+      if (!hist.length) hl.innerHTML = '<li class="muted small">Nothing yet.</li>';
+      for (const h of hist.slice().reverse()) { const ok = h.result && h.result.success; const li = document.createElement("li"); li.className = "task";
+        const out = h.result && (h.result.output !== undefined ? h.result.output : h.result.error);
+        li.innerHTML = '<span class="st" style="background:' + (ok ? "var(--ok)" : "var(--bad)") + '"></span><div style="flex:1"><div>' + escapeHtml(h.task.description) + ' <span class="small muted">' + escapeHtml(h.task.type) + ' · ' + fmtTime(h.timestamp) + '</span></div>' +
+          (h.result && h.result.error ? '<div class="small" style="color:var(--bad)">' + escapeHtml(h.result.error) + '</div>' : '') +
+          (out !== undefined ? '<details><summary>output</summary><pre>' + escapeHtml(typeof out === "string" ? out : JSON.stringify(out, null, 1)) + '</pre></details>' : '') + '</div>';
+        hl.appendChild(li); }
+    } catch (e) { if (e.message !== "unauthorised") console.warn(e); }
+  }
+  window.addGoal = async function () { const t = $("goalInput").value.trim(); if (!t) return; $("goalInput").value = ""; try { await api("/goal", { method: "POST", body: t }); refresh(); } catch (e) { alert(e.message); } };
+  async function markDone(desc) { /* no dedicated endpoint: tell the brain through chat context via a goal completion note */ try { await api("/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ messages: [{ role: "user", content: "The operator marks this goal as done: " + desc + ". Acknowledge in one line." }] }) }); } catch (e) {} refresh(); }
+  window.thinkNow = async function (fromChat) {
+    $("thinkBtn").disabled = true;
+    try { const r = await api("/think", { method: "POST", body: "" });
+      const line = (r.reasoning ? r.reasoning + "\n" : "") + "→ " + (r.action || "idle") + (r.result ? (r.result.success ? " ✓" : " ✗ " + (r.result.error || "")) : "");
+      if (fromChat) pushTurn("assistant", line); else { $("lastThought").textContent = "Thinking: " + (r.reasoning || ""); }
+    } catch (e) { if (fromChat) pushTurn("system", "Error: " + e.message); else alert(e.message); }
+    refresh();
+  };
+
+  // ---- ledger ----
+  async function loadLedger() {
+    try {
+      const [st, tail] = await Promise.all([api("/ledger"), api("/ledger/tail?limit=40")]);
+      if (!st.enabled) { $("lState").textContent = "off"; $("lReason").textContent = "The ledger is not enabled on this agent (ledger.enabled)."; $("verifyBtn").disabled = true; return; }
+      $("lSeq").textContent = st.head ? st.head.seq : "-";
+      $("lState").textContent = st.available ? "recording" : "unavailable";
+      $("lSession").textContent = st.entries_this_session;
+      const a = st.anchor || {};
+      $("lAnchor").textContent = !a.enabled ? "none" : a.last_error ? "failing" : a.last_anchored ? ("seq " + a.last_anchored.seq) : "pending";
+      $("lReason").textContent = st.available ? (a.last_error ? "witness upload: " + a.last_error : "") : (st.reason || "") + (st.fail_closed ? " — fail-closed: the agent will not act until this is repaired by the operator." : "");
+      $("lPub").textContent = st.pubkey || "-";
+      $("verifyBtn").disabled = false;
+      const ul = $("ledgerEntries"); ul.innerHTML = "";
+      if (!tail.length) ul.innerHTML = '<li class="muted small">Nothing yet.</li>';
+      for (const e of tail.slice().reverse()) {
+        const li = document.createElement("li"); li.className = "task";
+        if (e.error) { li.innerHTML = '<span class="st" style="background:var(--bad)"></span><div class="small">' + escapeHtml(e.error) + '</div>'; ul.appendChild(li); continue; }
+        const b = e.body || {}; const colour = e.kind === "gate" ? "var(--bad)" : e.kind === "outcome" ? (b.success ? "var(--ok)" : "var(--bad)") : "var(--accent, #888)";
+        const line = b.description || b.reasoning || b.question || b.action || b.gate || (b.task && b.task.description) || "";
+        li.innerHTML = '<span class="st" style="background:' + colour + '"></span><div style="flex:1"><div><b>' + escapeHtml(e.kind) + '</b> <span class="small muted">#' + e.seq + ' · ' + escapeHtml(e.ts) + '</span></div>' +
+          (line ? '<div class="small">' + escapeHtml(String(line)) + '</div>' : '') +
+          '<details><summary class="small muted">entry</summary><pre>' + escapeHtml(JSON.stringify(b, null, 1)) + '\nprev ' + escapeHtml(e.prev_hash.slice(0, 16)) + '…\nhash ' + escapeHtml(e.entry_hash.slice(0, 16)) + '…\nsig  ' + escapeHtml(e.sig.slice(0, 16)) + '…</pre></details></div>';
+        ul.appendChild(li);
+      }
+    } catch (e) { if (e.message !== "unauthorised") console.warn(e); }
+  }
+  window.verifyLedger = async function () {
+    $("verifyBtn").disabled = true; $("lVerdict").textContent = "verifying…";
+    try { const r = await api("/ledger/verify"); $("lVerdict").textContent = r.summary || (r.ok ? "INTACT" : "BROKEN"); $("lVerdict").style.color = r.ok ? "var(--ok)" : "var(--bad)"; }
+    catch (e) { $("lVerdict").textContent = "Error: " + e.message; }
+    $("verifyBtn").disabled = false;
+  };
+
+  // ---- behaviour lab ----
+  let labRegistry = null, labSettings = {};
+  function dialValue(d) { const v = labSettings[d.id]; return v === undefined ? d.default : v; }
+  function renderDials() {
+    const box = $("dials"); box.innerHTML = "";
+    const groups = {};
+    for (const d of labRegistry.dials) (groups[d.group] = groups[d.group] || []).push(d);
+    for (const [group, list] of Object.entries(groups)) {
+      const h = document.createElement("h3"); h.className = "small muted"; h.style.margin = "10px 0 4px"; h.textContent = group; box.appendChild(h);
+      for (const d of list) {
+        const row = document.createElement("div"); row.style.margin = "6px 0 10px";
+        const isLevel = d.kind === "level";
+        const min = isLevel ? 0 : d.min, max = isLevel ? d.levels.length - 1 : d.max, step = isLevel ? 1 : (d.step || 1);
+        const v = dialValue(d);
+        row.innerHTML = '<div class="row dial-head"><b class="small">' + escapeHtml(d.label) + '</b><span class="small muted" id="dv-' + d.id + '"></span></div>' +
+          '<input type="range" style="width:100%" min="' + min + '" max="' + max + '" step="' + step + '" value="' + v + '" data-dial="' + d.id + '">' +
+          '<div class="small muted">' + escapeHtml(d.description) + '</div>';
+        box.appendChild(row);
+        const input = row.querySelector("input");
+        const label = row.querySelector("#dv-" + d.id);
+        const show = () => { const val = isLevel ? parseInt(input.value, 10) : parseFloat(input.value); labSettings[d.id] = val; label.textContent = isLevel ? d.levels[val] : String(val); };
+        show();
+        input.addEventListener("input", () => { show(); schedulePreview(); });
+      }
+    }
+    const ll = $("lockedLayers"); ll.innerHTML = "";
+    for (const l of labRegistry.locked) { const li = document.createElement("li"); li.className = "task"; li.innerHTML = '<span class="st" style="background:var(--warn)"></span><div><b>' + escapeHtml(l.label) + '</b> <span class="small muted">locked</span><div class="small muted">' + escapeHtml(l.reason) + '</div></div>'; ll.appendChild(li); }
+  }
+  let previewTimer = null;
+  function schedulePreview() { clearTimeout(previewTimer); previewTimer = setTimeout(previewLab, 350); }
+  async function previewLab() {
+    try { const r = await api("/lab/preview", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ settings: labSettings }) });
+      $("labPreview").textContent = r.system || "(no system prompt: base model)";
+      const keys = r.context ? Object.keys(r.context) : [];
+      $("labContextKeys").textContent = (keys.length ? "context: " + keys.join(", ") : "no context attached") + " · model: temperature " + r.model.temperature + ", thinking " + r.model.thinking + ", max_tokens " + r.model.max_tokens + " · fingerprint " + r.fingerprint;
+    } catch (e) { $("labPreview").textContent = "Error: " + e.message; }
+  }
+  async function loadLab() {
+    try { labRegistry = await api("/lab"); labSettings = Object.assign({}, labRegistry.settings); $("applyChat").checked = !!labRegistry.apply_to_chat; renderDials(); previewLab(); }
+    catch (e) { if (e.message !== "unauthorised") $("dialsMsg").textContent = "Error: " + e.message; }
+  }
+  window.saveDials = async function () {
+    try { const r = await api("/lab/settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ settings: labSettings, apply_to_chat: $("applyChat").checked }) });
+      $("dialsMsg").textContent = "saved (ledgered) · fingerprint " + r.fingerprint + (r.apply_to_chat ? " · live chat uses these dials" : ""); }
+    catch (e) { $("dialsMsg").textContent = "Error: " + e.message; }
+  };
+  window.resetDials = function (which) { labSettings = Object.assign({}, labRegistry[which]); renderDials(); previewLab(); $("dialsMsg").textContent = which === "base" ? "all dials off: the bare model (not saved yet)" : "defaults (not saved yet)"; };
+  window.runLab = async function () {
+    const q = $("labQuestion").value.trim(); const mode = document.querySelector('input[name="labMode"]:checked').value;
+    if (!q && mode === "answer") { $("labRunMsg").textContent = "type a question"; return; }
+    $("labRunBtn").disabled = true; $("labRunMsg").textContent = "running…";
+    try {
+      const r = await api("/lab/run", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ question: q, mode, compare: $("labCompare").checked, settings: labSettings }) });
+      const box = $("labResults"); box.innerHTML = "";
+      // Side by side when there is room, decided by CSS so rotating a tablet
+      // reflows instead of keeping whatever the width was when Run was pressed.
+      box.classList.toggle("compare", r.variants.length > 1);
+      for (const v of r.variants) {
+        const card = document.createElement("div"); card.className = "card"; card.style.margin = "0";
+        const head = v.variant === "base" ? "Base model (all dials off)" : "Under the dials";
+        let bodyHtml = v.error ? '<div class="small" style="color:var(--bad)">' + escapeHtml(v.error) + '</div>' : '<pre style="white-space:pre-wrap">' + escapeHtml(v.answer || "(empty)") + '</pre>';
+        if (v.decision) bodyHtml += '<details open><summary class="small">decision (not executed)</summary><pre>' + escapeHtml(JSON.stringify(v.decision, null, 1)) + '</pre></details>';
+        if (v.decision_error) bodyHtml += '<div class="small" style="color:var(--warn)">not a valid decision: ' + escapeHtml(v.decision_error) + '</div>';
+        const u = v.usage || {};
+        card.innerHTML = '<h2>' + head + '</h2>' + bodyHtml + '<p class="small muted" style="margin:6px 0 0">' + escapeHtml(v.fingerprint) + ' · ' + v.elapsed_s + 's' + (u.input_tokens !== undefined ? ' · ' + u.input_tokens + '→' + u.output_tokens + ' tokens' : '') + ' · context: ' + (v.context_keys.length ? v.context_keys.join(", ") : "none") + '</p><details><summary class="small muted">system text</summary><pre class="small" style="white-space:pre-wrap">' + escapeHtml(v.system || "(none)") + '</pre></details>';
+        box.appendChild(card);
+      }
+      $("labRunMsg").textContent = r.model ? "model " + r.model.split("/").pop() : "";
+    } catch (e) { $("labRunMsg").textContent = "Error: " + e.message; }
+    $("labRunBtn").disabled = false;
+  };
+
+  // ---- files ----
+  function fmtSize(n) { return n > 1048576 ? (n / 1048576).toFixed(1) + " MB" : n > 1024 ? (n / 1024).toFixed(0) + " KB" : n + " B"; }
+  async function loadUploads() { try { const list = await api("/uploads"); const ul = $("uploads"); ul.innerHTML = "";
+    if (!list.length) ul.innerHTML = '<li class="muted small">No files yet.</li>';
+    for (const u of list.slice().reverse()) { const li = document.createElement("li"); li.innerHTML = escapeHtml(u.name) + ' <span class="small muted">' + fmtSize(u.size) + ' · ' + fmtTime(u.uploaded_at) + (u.exists === false ? ' · missing' : '') + '</span><div class="small muted">' + escapeHtml(u.path) + '</div>'; ul.appendChild(li); } } catch (e) {} }
+  function uploadFile(file) {
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest(); xhr.open("POST", "/upload");
+      xhr.setRequestHeader("Authorization", "Bearer " + token); xhr.setRequestHeader("X-Filename", file.name);
+      xhr.setRequestHeader("Content-Type", "application/octet-stream");
+      const bar = document.querySelector(".bar"); bar.style.display = "block";
+      xhr.upload.onprogress = e => { if (e.lengthComputable) $("barFill").style.width = Math.round(100 * e.loaded / e.total) + "%"; };
+      xhr.onload = () => { bar.style.display = "none"; $("barFill").style.width = "0"; if (xhr.status === 200) resolve(JSON.parse(xhr.responseText)); else { let m = "HTTP " + xhr.status; try { m = JSON.parse(xhr.responseText).error || m; } catch (e) {} reject(new Error(m)); } };
+      xhr.onerror = () => { bar.style.display = "none"; reject(new Error("network error")); };
+      xhr.send(file);
+    });
+  }
+  async function uploadAll(files) { for (const f of files) { $("uploadMsg").textContent = "Uploading " + f.name + "…"; try { const r = await uploadFile(f); $("uploadMsg").textContent = "Uploaded " + r.name + " → " + r.path; pushTurn("system", "Uploaded " + r.name + " (" + fmtSize(r.size) + "). The agent has been told."); } catch (e) { $("uploadMsg").textContent = "Failed: " + e.message; } } loadUploads(); }
+  $("fileInput").addEventListener("change", e => uploadAll(Array.from(e.target.files)));
+  const drop = $("drop");
+  ["dragenter", "dragover"].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add("over"); }));
+  ["dragleave", "drop"].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove("over"); }));
+  drop.addEventListener("drop", e => uploadAll(Array.from(e.dataTransfer.files)));
+
+  function escapeHtml(s) { return String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
+
+  renderChat();
+  // A session cookie from a previous login is enough on its own, so try the
+  // agent before asking for anything. This is what makes a restart invisible.
+  (async function boot() {
+    try {
+      const probe = await fetch("/goals", { credentials: "same-origin",
+                                            headers: token ? { "Authorization": "Bearer " + token } : {} });
+      if (probe.ok) { sessionActive = !token; $("login").style.display = "none"; refresh(); return; }
+    } catch (e) {}
+    if (!token) showLogin(""); else refresh();
+  })();
+  setInterval(() => {
+    if ((token || sessionActive) && document.visibilityState === "visible") refresh();
+  }, 5000);
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,54 @@
+#!/bin/sh
+# Jarvis Agent Launcher
+# =======================
+# Wrapper script that launches the Jarvis Python agent
+# with proper environment setup.
+
+set -e
+
+JARVIS_DIR="/usr/lib/jarvis"
+CONFIG="/etc/jarvis/config.yaml"
+LOG="/var/log/jarvis.log"
+
+export PYTHONPATH="$JARVIS_DIR"
+
+# Detect environment
+if [ -n "$JARVIS_DEBUG" ] && [ "$JARVIS_DEBUG" = "1" ]; then
+    DEBUG_FLAG="--debug"
+else
+    DEBUG_FLAG=""
+fi
+
+if [ -n "$JARVIS_SCANONLY" ] && [ "$JARVIS_SCANONLY" = "1" ]; then
+    SCAN_FLAG="--scan-only"
+else
+    SCAN_FLAG=""
+fi
+
+# Check for Python (JARVIS_PYTHON wins; the AMI sets it in /etc/default/jarvis)
+if [ -z "$JARVIS_PYTHON" ] && [ -r /etc/default/jarvis ]; then
+    . /etc/default/jarvis
+fi
+if [ -n "$JARVIS_PYTHON" ] && [ -x "$JARVIS_PYTHON" ]; then
+    PYTHON="$JARVIS_PYTHON"
+elif command -v python3 >/dev/null 2>&1; then
+    PYTHON=python3
+elif command -v python >/dev/null 2>&1; then
+    PYTHON=python
+else
+    echo "[!] ERROR: Python not found. Cannot start Jarvis agent."
+    exit 1
+fi
+
+echo "[*] Starting Jarvis Agent..."
+echo "[*] Python: $($PYTHON --version 2>&1)"
+echo "[*] Config: $CONFIG"
+echo ""
+
+# Under systemd stdout already goes to the journal (and the serial console
+# on the AMI), so skip the tee; on the ISO keep a file copy of the output.
+if [ -n "$JOURNAL_STREAM" ] || [ "$JARVIS_NO_TEE" = "1" ]; then
+    exec $PYTHON -m jarvis.main --config "$CONFIG" $DEBUG_FLAG $SCAN_FLAG "$@"
+fi
+
+exec $PYTHON -m jarvis.main --config "$CONFIG" $DEBUG_FLAG $SCAN_FLAG "$@" 2>&1 | tee -a "$LOG"

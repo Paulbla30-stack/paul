@@ -1,0 +1,58 @@
+#cloud-config
+# Example EC2 user data for a Jarvis agent-first instance.
+#
+# jarvis-bootstrap.service reads this block through IMDS at every boot
+# and writes /etc/jarvis/cloud.yaml, which the agent merges on top of
+# /etc/jarvis/config.yaml.  Everything under `jarvis:` is optional.
+#
+# Goals may also be given without user data by tagging the instance with
+#   jarvis:goal = "<text>"     and/or     jarvis:name = "<agent name>"
+# (enable "Allow tags in instance metadata" on the instance).
+
+jarvis:
+  agent:
+    name: paul-life-agent
+
+  goals:
+    - description: Keep the root filesystem under 80% used
+      priority: 2
+    - description: Report security posture every cycle
+      priority: 5
+    - Watch memory pressure and log when above 90%
+
+  cloud:
+    cycle_interval: 30        # seconds between idle cycles
+    status_port: 8471         # loopback status endpoint (0 disables)
+
+  security:
+    scan_on_boot: true
+    enforce_hardening: false
+
+  # LLM planner. The key itself never goes in user data: point at an AWS
+  # Secrets Manager secret (or an SSM SecureString) the instance role can
+  # read and the bootstrap writes it to /etc/jarvis/anthropic.key (0600)
+  # at every boot.  (An inline `api_key:` is accepted for quick tests; it is
+  # moved to the key file and stripped from cloud.yaml, but anyone who can
+  # read user data can read it.)
+  llm:
+    enabled: true
+    provider: anthropic
+    model: claude-opus-5
+    effort: medium
+    api_key_secret: jarvis/anthropic-api-key      # Secrets Manager name or ARN
+    # api_key_ssm_parameter: /jarvis/anthropic-api-key   # or SSM Parameter Store
+
+  # Or run an open-weight model, or your own, on Amazon Bedrock. No key
+  # needed: the instance role calls Bedrock directly (see aws/terraform).
+  # llm:
+  #   enabled: true
+  #   provider: bedrock
+  #   model: meta.llama3-3-70b-instruct-v1:0
+  #   # model: arn:aws:bedrock:eu-west-2:123456789012:imported-model/abc123   # Custom Model Import
+    max_calls_per_hour: 60
+    shell:
+      enabled: true          # brain may run deny-list-guarded commands
+
+# Regular cloud-init keys still work alongside the jarvis block:
+# packages:
+#   - htop
