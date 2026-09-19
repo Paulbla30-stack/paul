@@ -73,6 +73,9 @@ DEFAULT_SHELL_DENY_PATTERNS = [
     _CMD + r"cloud-init\s+clean\b",
     # --- the Glass Ledger: evidence about the agent, never context for it ---
     r"/(?:var/lib|etc)/jarvis/ledger",
+    # --- the agent's own durable memory: written through the agent, which
+    #     keeps its provenance and dedupe, never edited underneath itself ---
+    r"/var/lib/jarvis/memory\.db",
     r"\bjarvis\.ledger\b",
     # --- the agent's own control plane: its runner token, status API and UI ---
     r"/run/jarvis\b",

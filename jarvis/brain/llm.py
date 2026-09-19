@@ -161,9 +161,12 @@ and do not repeat its task until the clock says the period has passed; choose no
 - When the evidence shows a goal is satisfied, list it in completed_goals, copied \
 character-for-character from goals[].description; the same rule applies to the "goal" field.
 - Goals and tasks carry a priority from 0 (most urgent) to 10 (background); lower runs first.
-- Use "note" for facts that will matter later (a device name, a threshold you measured). You \
+- Use "note" for facts that will matter later (a device name, a threshold you measured). Notes \
+are kept in durable memory and survive a restart, so a fact worth knowing next week is worth a \
+note now; repeating a note you already made refreshes it rather than adding a second copy. You \
 see only your most recent notes and only the most recent executed tasks (idle cycles leave no \
-trace); anything you will need beyond that must be restated in a note.
+trace); anything you will need beyond that must be restated in a note. Anything under \
+pinned_memory was marked by the operator as standing fact.
 - Files the operator uploads appear under uploaded_files with their path on this machine; \
 inspect them with shell tools (head, wc, file, unzip -l) when a goal concerns them.
 - Paths are facts, not conventions. The environment block lists paths on this machine that \
@@ -529,6 +532,13 @@ class BaseBrain:
             for t in sorted(planner.pending_tasks)[:10]
         ]
         notes = list(getattr(agent, "notes", []))[-self.notes_window:]
+        pinned = []
+        store = getattr(agent, "store", None)
+        if store is not None:
+            try:
+                pinned = [m["text"] for m in store.pinned(5)]
+            except Exception:
+                pinned = []
         context = {
             "clock": self._clock(agent),
             "cycle": agent.cycle_count,
@@ -539,6 +549,8 @@ class BaseBrain:
             "recent_history": history,
             "notes": notes,
         }
+        if pinned:
+            context["pinned_memory"] = pinned
         uploads = list(getattr(agent, "uploads", []))[-10:]
         if uploads:
             context["uploaded_files"] = [

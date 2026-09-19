@@ -66,7 +66,8 @@ class AgentCore:
     """
 
     def __init__(self, config: dict, hardware: dict, logger: logging.Logger,
-                 brain=None, shell_policy: Optional[dict] = None, ledger=None):
+                 brain=None, shell_policy: Optional[dict] = None, ledger=None,
+                 store=None):
         self.config = config
         self.hardware = hardware
         self.log = logger.getChild("agent")
@@ -99,9 +100,17 @@ class AgentCore:
         # takes before the brain is asked again, up to this cap.
         self.brain_repeat_streak = 0
         self.brain_repeat_cooldown_max = int(config.get("brain_repeat_cooldown_max", 20))
+        # Durable operational memory: what the agent learned about this
+        # machine, kept across restarts. Separate from the ledger, which is
+        # evidence about the agent and which the brain may never read, and
+        # separate from any personal store, which is not the agent's to hold.
+        from jarvis.agent.store import NullStore
+        self.store = store if store is not None else NullStore()
         # Brain notes live here, not in the evictable AgentMemory, so they
-        # survive however busy the loop gets.
+        # survive however busy the loop gets. The deque is the hot cache;
+        # the store is what makes them outlive the process.
         self.notes = deque(maxlen=config.get("notes_limit", 20))
+        self._restore_notes()
         # Files handed to the agent through the UI / API; the brain sees them.
         self.uploads = deque(maxlen=50)
 
@@ -110,6 +119,39 @@ class AgentCore:
         self.cycle_count = 0
         self.current_task: Optional[Task] = None
         self.task_history: list[dict] = []
+
+    def _restore_notes(self):
+        """Refill the note cache from durable memory after a restart."""
+        try:
+            recovered = [m["text"] for m in
+                         reversed(self.store.recent(self.notes.maxlen, kind="note"))]
+        except Exception as exc:
+            self.log.warning("Could not restore notes: %s", exc)
+            return
+        if not recovered:
+            return
+        self.notes.extend(recovered)
+        self.log.info("Restored %d note(s) from durable memory", len(recovered))
+
+    def remember(self, text: str, kind: str = "note", source: str = "brain",
+                 pinned: bool = False) -> Optional[dict]:
+        """Record something learned, in the cache and durably.
+
+        Returns the stored row, or None when there is nothing to store. A
+        repeat refreshes the existing entry rather than adding another, so a
+        planner that keeps restating itself cannot crowd out older memories.
+        """
+        text = (text or "").strip()
+        if not text:
+            return None
+        if kind == "note":
+            self.notes.append(text)
+        try:
+            return self.store.remember(text, kind=kind, source=source,
+                                       cycle=self.cycle_count, pinned=pinned)
+        except Exception as exc:                      # memory is never fatal
+            self.log.warning("Could not store memory: %s", exc)
+            return None
 
     def observe(self) -> dict:
         """Gather observations from all available hardware interfaces."""
@@ -228,7 +270,7 @@ class AgentCore:
                 self.memory.store(category="goal_completed",
                                   data={"description": goal, "cycle": self.cycle_count})
         if decision.note:
-            self.notes.append(decision.note)
+            self.remember(decision.note, kind="note", source="brain")
             self.memory.store(category="llm_note",
                               data={"note": decision.note, "cycle": self.cycle_count})
         self.last_thought = {
@@ -567,7 +609,8 @@ class AgentCore:
         entry = {"name": name, "path": path, "size": size, "uploaded_at": time.time()}
         self.uploads.append(entry)
         self.memory.store(category="upload", data=entry)
-        self.notes.append(f"Operator uploaded {name} ({size} bytes) at {path}")
+        self.remember(f"Operator uploaded {name} ({size} bytes) at {path}",
+                      kind="note", source="operator")
         self.ledger.record("action", {"cycle": self.cycle_count, "actor": "operator",
                                       "action": "upload", "name": str(name)[:200],
                                       "path": str(path)[:300], "size": int(size),
@@ -596,6 +639,7 @@ class AgentCore:
             "brain": self.brain.status() if self.brain is not None else None,
             "last_thought": self.last_thought or None,
             "ledger": self.ledger.status(),
+            "memory_store": self.store.stats(),
         }
 
     def shutdown(self):

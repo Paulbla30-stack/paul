@@ -231,6 +231,41 @@ conventions; name one only if it appears in `environment`, in
 `uploaded_files`, or in a task result; and saying a path has not been
 checked is a correct answer.
 
+## Memory
+
+Two stores, kept apart on purpose.
+
+**The agent's own** (`jarvis/agent/store.py`) is what it learned about the
+machine it runs on. Before it, the agent's working memory was bounded and
+evictable and its notes were a twenty-entry deque, both living only in the
+process: a restart, a crash or a deploy left it knowing nothing it had
+worked out. The only durable record was the Glass Ledger, which is evidence
+*about* the agent and which the planner is forbidden to read, so the agent
+was amnesiac by design and re-learned the same facts every day.
+
+It is local SQLite at `memory.path`, so it works when the network does not.
+Three properties matter. Every entry carries its provenance, because a
+memory whose origin is unknown is a rumour and an agent that cannot tell its
+own inference from its operator's instruction will act on the wrong one.
+Remembering the same thing twice refreshes one row rather than adding a
+second, so a planner that repeats itself cannot crowd out its older
+memories. And a broken or unwritable database degrades to memory-only and
+says so, because losing the loop would be worse than forgetting. Notes are
+restored into the planner's context at startup; entries can be pinned, and
+pinned ones survive the row cap and appear to the model as standing fact.
+The database is on the shell deny-list: memory is written through the agent,
+which keeps its provenance and dedupe, never edited underneath itself.
+
+**Personal memory is not the agent's to hold.** Who the operator is, who he
+works with and what he is dealing with belong in a separate store with
+different sensitivity, different retention and different rules about who may
+write to it. Nothing in the agent reaches for it. An autonomous root process
+on an internet-facing box is the wrong thing to hand a personal history to,
+and an agent writing its own inferences into a record whose value is that it
+contains only what a person actually said would quietly destroy that value.
+
+`GET /memory/store?q=&limit=` returns the stats and the matching entries.
+
 ## Headless mode
 
 `jarvis --headless` runs the same agent loop without the console. It is

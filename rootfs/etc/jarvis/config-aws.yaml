@@ -52,6 +52,16 @@ cloud:
 
 goals: []                    # add goals via user data or the jarvis:goal tag
 
+# The agent's own durable operational memory: what it learned about THIS
+# machine, kept across restarts. Deliberately separate from the ledger
+# (evidence about the agent, which the brain may never read) and from any
+# personal memory store (not the agent's to hold). Written through the
+# agent, so the deny-list refuses shell access to the file.
+memory:
+  enabled: true
+  path: /var/lib/jarvis/memory.db
+  max_rows: 2000             # oldest unpinned entries drop past this
+
 # The Glass Ledger: a signed, hash-chained, append-only journal of every
 # decision, action and outcome (Blatherwick, The Glass Ledger v2,
 # doi:10.5281/zenodo.21515861). fail_closed means the agent does not

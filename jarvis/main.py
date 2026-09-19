@@ -159,6 +159,11 @@ def load_config(path, extra_paths=()):
                 "copy": True,
             },
         },
+        "memory": {                        # the agent's own durable operational memory
+            "enabled": True,               # what it learned about THIS machine, across restarts
+            "path": "/var/lib/jarvis/memory.db",
+            "max_rows": 2000,              # oldest unpinned entries drop past this
+        },
         "llm": {
             "enabled": False,
             "provider": "anthropic",       # anthropic | bedrock
@@ -347,6 +352,11 @@ class JarvisSystem:
             self.log.error("Glass Ledger could not be set up: %s", e)
             return None
 
+    def build_store(self):
+        """Open the agent's durable memory; a NullStore when it cannot."""
+        from jarvis.agent.store import build_store
+        return build_store(self.config.get("memory"), self.log)
+
     def build_agent(self):
         """Construct the AgentCore and seed it with configured goals."""
         hardware = {
@@ -358,6 +368,7 @@ class JarvisSystem:
 
         llm_cfg = self.config.get("llm") or {}
         self.ledger = self.build_ledger()
+        self.store = self.build_store()
         self.agent = AgentCore(
             config=self.config["agent"],
             hardware=hardware,
@@ -365,6 +376,7 @@ class JarvisSystem:
             brain=self.build_brain(),
             shell_policy=llm_cfg.get("shell"),
             ledger=self.ledger,
+            store=self.store,
         )
         if self.ledger is not None:
             brain = self.agent.brain

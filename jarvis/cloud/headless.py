@@ -48,6 +48,7 @@ import ssl
 import subprocess
 import threading
 import time
+import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Optional
 
@@ -257,12 +258,15 @@ class HeadlessRunner:
                 if path == "/uploads":
                     return self._send(200, runner.list_uploads())
                 limit = 20
+                search = ""
                 for part in query.split("&"):
                     if part.startswith("limit="):
                         try:
                             limit = max(1, min(int(part[6:]), 200))
                         except ValueError:
                             pass
+                    elif part.startswith("q="):
+                        search = urllib.parse.unquote_plus(part[2:])[:200].strip()
                 with runner._lock:
                     if path in ("/", "/health"):
                         self._send(200, {"ok": True, "agent": runner.agent.name,
@@ -271,6 +275,12 @@ class HeadlessRunner:
                         self._send(200, runner.snapshot())
                     elif path == "/memory":
                         self._send(200, runner.agent.memory.get_summary())
+                    elif path == "/memory/store":
+                        store = runner.agent.store
+                        entries = (store.search(search, limit) if search
+                                   else store.recent(limit))
+                        self._send(200, {"stats": store.stats(), "query": search or None,
+                                         "entries": entries})
                     elif path == "/history":
                         self._send(200, runner.agent.task_history[-limit:])
                     elif path == "/brain":
