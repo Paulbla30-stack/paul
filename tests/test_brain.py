@@ -1178,3 +1178,52 @@ class TestConfigAndBootstrap(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestEveryCapabilityIsReachable(unittest.TestCase):
+    """A handler the planner cannot ask for is not a capability.
+
+    notify_operator and estate_report each shipped with a handler, an
+    authority classification, an IAM grant and passing tests, and the model
+    could pick neither, because the enum in the plan schema is the whole of
+    what it is able to request. Adding a handler is half of adding a
+    capability. This is the test for the other half.
+    """
+
+    def _plannable(self):
+        from jarvis.brain.llm import PLANNABLE_TASK_TYPES
+        return set(PLANNABLE_TASK_TYPES) - {"none"}
+
+    def test_the_schema_and_the_executor_agree(self):
+        from jarvis.agent.executor import TaskExecutor
+        from jarvis.agent.memory import AgentMemory
+        executor = TaskExecutor({}, AgentMemory(max_entries=10), LOG)
+        handled = {t.value for t in executor._handlers}
+        unreachable = self._plannable() - handled
+        self.assertEqual(unreachable, set(),
+                         f"the model can ask for tasks nothing handles: {unreachable}")
+
+    def test_nothing_is_handled_but_unreachable_except_by_intent(self):
+        from jarvis.agent.planner import TaskType
+        # user_command is raised by an operator event, never planned.
+        deliberately_not_plannable = {"user_command"}
+        orphaned = ({t.value for t in TaskType} - self._plannable()
+                    - deliberately_not_plannable)
+        self.assertEqual(orphaned, set(),
+                         f"capabilities the planner cannot reach: {orphaned}. Add them "
+                         f"to PLANNABLE_TASK_TYPES or to the exclusion above, on purpose.")
+
+    def test_the_schema_enum_is_what_the_model_is_actually_given(self):
+        from jarvis.brain.llm import PLAN_SCHEMA, PLANNABLE_TASK_TYPES
+        self.assertEqual(PLAN_SCHEMA["properties"]["task_type"]["enum"],
+                         PLANNABLE_TASK_TYPES)
+
+    def test_every_plannable_type_is_classified_by_the_permission_spine(self):
+        """An unclassified task falls through to CHANGE, which at the default
+        rung means it silently becomes a proposal instead of running."""
+        from jarvis.agent import authority
+        from jarvis.agent.planner import Task, TaskType
+        for name in self._plannable():
+            task = Task(task_type=TaskType(name), description="probe", priority=5)
+            verdict = authority.classify_task(task)
+            self.assertIn(verdict, (authority.READ, authority.CHANGE), name)

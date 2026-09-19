@@ -52,6 +52,12 @@ HIGH_EFFORT_MIN_TOKENS = 64000
 STREAM_ABOVE_TOKENS = 16000
 
 # Task types the model may choose. "none" means idle this cycle.
+#
+# A capability missing from this list is unreachable however complete the rest
+# of it is. notify_operator and estate_report each had a handler, an authority
+# classification and an IAM grant, and the planner could not pick either,
+# because the enum in the plan schema is the whole of what it can ask for.
+# Adding a handler is half of adding a capability; this is the other half.
 PLANNABLE_TASK_TYPES = [
     "none",
     "system_check",
@@ -63,6 +69,8 @@ PLANNABLE_TASK_TYPES = [
     "cloud_probe",
     "shell_command",
     "inspect_path",
+    "notify_operator",
+    "estate_report",
 ]
 
 PLAN_SCHEMA = {
@@ -180,6 +188,16 @@ note now; repeating a note you already made refreshes it rather than adding a se
 see only your most recent notes and only the most recent executed tasks (idle cycles leave no \
 trace); anything you will need beyond that must be restated in a note. Anything under \
 pinned_memory was marked by the operator as standing fact.
+- Use "notify_operator" to reach the operator when he is not looking at the UI: \
+metadata "subject" (short, the thing itself), "body" (one or two sentences), and \
+"severity" -- "notice" for something he would want to know today, "alert" for something he \
+would want to know now. You do not choose who is told or whether the message goes: there is \
+one destination, fixed, and a budget of four an hour with fifteen minutes between them and \
+quiet hours overnight that only an alert crosses. A held message is not a failure and must \
+not be retried; the reason comes back so you can learn the shape of the budget. Silence is \
+the default. An agent he mutes is worse than one that cannot reach him.
+- Use "estate_report" to see what the account spends and what it is accumulating -- old \
+machine images, snapshots, buckets. It only reads; deleting is not yours and is not offered.
 - Use "proposal" when you think this machine should be changed and your mandate does not let \
 you change it. Do not write the recommendation into "note" or "reasoning" instead: a note is \
 prose the operator has no way to answer, and an unanswered recommendation teaches you nothing. \

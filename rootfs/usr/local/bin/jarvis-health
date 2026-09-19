@@ -150,6 +150,33 @@ access_section() {
             echo "         if no inbound rule is open. Reach the box over SSM."
         fi
     fi
+    # Whether the agent can reach the operator at all. Once this is the
+    # only way it can speak unprompted, a channel that is configured but
+    # broken is worse than one that is absent, because it looks like it
+    # works. Read from the snapshot the runner already publishes; this
+    # script never touches the destination file itself.
+    ${JARVIS_PYTHON:-python3} - "$STATUS_FILE" <<'PYEOF' 2>/dev/null || true
+import json, sys
+try:
+    with open(sys.argv[1]) as f:
+        n = (json.load(f) or {}).get('notify') or {}
+except Exception:
+    sys.exit(0)
+if not n:
+    sys.exit(0)
+if not n.get('enabled'):
+    print('  %-20s %s' % ('Operator channel', 'disabled; it can only speak in the UI'))
+elif not n.get('configured'):
+    print('  %-20s %s' % ('Operator channel', 'enabled but no destination'))
+    print('  ALERT: notifications are on with nowhere to send them')
+else:
+    stats = n.get('stats') or {}
+    print('  %-20s %s to %s (%d sent, %d held, %d failed)' % (
+        'Operator channel', n.get('channel'), n.get('destination'),
+        stats.get('sent', 0), stats.get('held', 0), stats.get('failed', 0)))
+    if n.get('last_error'):
+        print('  ALERT: last message failed: %s' % str(n['last_error'])[:120])
+PYEOF
     if ss -H -tln 2>/dev/null | grep -qE '0\.0\.0\.0:8443|\*:8443'; then
         note "UI listener" "bound on all interfaces:8443"
         echo "  NOTE: whether that is reachable depends on the security group,"

@@ -122,7 +122,8 @@ class HeadlessRunner:
                  session_days: int = 30,
                  ui: Optional[dict] = None,
                  max_idle_wait: Optional[float] = None,
-                 consolidate_every_s: Optional[float] = None):
+                 consolidate_every_s: Optional[float] = None,
+                 first_consolidation_s: Optional[float] = None):
         self.agent = agent
         self.log = logger.getChild("headless")
         self.interval = max(0.0, float(interval))
@@ -168,7 +169,15 @@ class HeadlessRunner:
         # Memory consolidation runs on its own slow clock, not every cycle:
         # an hour of observations is the unit worth reorganising, not one.
         self.consolidate_every_s = float(consolidate_every_s or 3600.0)
-        self._last_consolidation = time.time()
+        # Start the clock in the past so the first pass lands a few minutes
+        # after boot rather than a full interval later. Seeding it with "now"
+        # meant a box restarted more often than the interval never
+        # consolidated at all -- which is exactly the box being worked on, and
+        # why this had not run once in a day of deploys.
+        self.first_consolidation_s = float(first_consolidation_s or 300.0)
+        self._last_consolidation = (time.time() - self.consolidate_every_s
+                                    + min(self.first_consolidation_s,
+                                          self.consolidate_every_s))
         self.last_consolidation: Optional[dict] = None
         # Behaviour lab: the current dial settings and whether live chat uses them.
         from jarvis.brain import dials as _dials
