@@ -313,6 +313,30 @@ lock it out for five minutes — but a narrow CIDR, or a tunnel in front, is
 the wall. Only the loopback API on 127.0.0.1:8471 serves `/status` without
 a token, because nothing off the box can reach it.
 
+## The current image
+
+`ami-04efe6ce12b65e6a3` (`jarvis-agent-al2023-x86_64-20260919-222617`, us-west-2,
+built from the tree at `f86c0cd`). It carries everything: the permission spine,
+filesystem grounding, durable memory with consolidation, ledger-derived
+self-knowledge, the operator channel, estate reporting, the standing system
+goals, the responsive UI, and `cloudflared` 2026.9.1
+(sha256 `03f1f25d1cc93b9ad6c60569d44060bc4f17ed97075760ed8cfca4b12dcd68cc`).
+
+Verified by launching it on a throwaway instance with no inbound rules: the
+agent came up on its own, ran 25 cycles, opened its ledger, seeded its five
+standing goals at the proposer rung, and reported its own health. The instance
+was terminated afterwards.
+
+**Rebuilding the image is not the same as replacing the running instance.**
+Changing `ami_id` makes Terraform destroy and recreate `aws_instance.jarvis`,
+which means a new volume: the agent's durable memory, its ledger chain and its
+signing key, the runner token and the session key all go with the old one. The
+ledger's *evidence* survives in the witness bucket, but the new writer starts a
+new chain. Decide deliberately whether to carry the signing key across (same
+writer identity, the chain continues against your existing pin) or to stop the
+old writer cleanly, audit its complete ledger INTACT, and let the new one
+begin. Copy `/var/lib/jarvis/memory.db` and the uploads either way.
+
 ## Reaching the UI through a Cloudflare Tunnel
 
 Opening 8443 in the security group is the wrong shape for a phone: narrow it
