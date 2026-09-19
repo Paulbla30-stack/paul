@@ -290,6 +290,19 @@ class Notifier:
 def build_notifier(config: Optional[dict], logger: Optional[logging.Logger] = None,
                    backend=None) -> Notifier:
     """From the cloud.notify block. Absent means a notifier that holds
-    everything and says why, which is better than one that raises."""
+    everything and says why, which is better than one that raises.
+
+    The region falls back to the instance's own, because nothing sets
+    AWS_DEFAULT_REGION in the unit and boto3 raises NoRegionError rather
+    than guessing. Without this the first real send failed at the last
+    step, after passing every rule -- and it failed as a verdict rather
+    than an exception, which is the only reason it was a nuisance and not
+    an outage.
+    """
     cloud = (config or {}).get("cloud") or {}
-    return Notifier(cloud.get("notify") or {}, logger, backend=backend)
+    settings = dict(cloud.get("notify") or {})
+    if not settings.get("region"):
+        settings["region"] = ((cloud.get("instance") or {}).get("region")
+                              or (config or {}).get("region")
+                              or (config or {}).get("llm", {}).get("region"))
+    return Notifier(settings, logger, backend=backend)

@@ -168,6 +168,29 @@ class TestTheDestinationIsNotTheModelsToChoose(unittest.TestCase):
             self.assertIsNotNone(check_command_allowed(command, policy), command)
 
 
+class TestTheRegionIsInherited(unittest.TestCase):
+    """Nothing sets AWS_DEFAULT_REGION in the unit and boto3 raises rather
+    than guessing, so the first real send passed every rule and then failed
+    at the last step with NoRegionError."""
+
+    def test_it_falls_back_to_the_instance_region(self):
+        n = notify.build_notifier({
+            "cloud": {"instance": {"region": "us-west-2"},
+                      "notify": {"enabled": True, "destination": "+447700900123"}}})
+        self.assertEqual(n.region, "us-west-2")
+
+    def test_an_explicit_region_still_wins(self):
+        n = notify.build_notifier({
+            "cloud": {"instance": {"region": "us-west-2"},
+                      "notify": {"enabled": True, "region": "eu-west-2",
+                                 "destination": "+447700900123"}}})
+        self.assertEqual(n.region, "eu-west-2")
+
+    def test_no_region_anywhere_is_not_a_crash(self):
+        n = notify.build_notifier({"cloud": {"notify": {"enabled": True}}})
+        self.assertIsNone(n.region)
+
+
 class TestReportingIsWithinEveryRung(unittest.TestCase):
     """An observer that may look but not say what it saw is not an observer."""
 
