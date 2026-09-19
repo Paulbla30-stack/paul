@@ -78,8 +78,23 @@ class Estate:
                 Granularity="DAILY", Metrics=["UnblendedCost"],
                 GroupBy=[{"Type": "DIMENSION", "Key": "SERVICE"}])
         except Exception as exc:
-            return {"available": False,
-                    "reason": f"{type(exc).__name__}: {exc}"[:200]}
+            # These need different things from the operator and must not read
+            # the same. "Not enabled" means go and click something, once.
+            # "No data yet" means Cost Explorer was just switched on and is
+            # backfilling, which takes up to a day and needs nothing at all.
+            text = str(exc)
+            if "not enabled" in text.lower():
+                state = "not_enabled"
+                reason = ("Cost Explorer is not switched on for this account. "
+                          "It is a one-time opt-in in the billing console.")
+            elif "DataUnavailable" in type(exc).__name__ or "not available" in text:
+                state = "no_data_yet"
+                reason = ("Cost Explorer is on but has no data for this period "
+                          "yet; it backfills for up to a day after being enabled.")
+            else:
+                state = "error"
+                reason = f"{type(exc).__name__}: {text}"[:200]
+            return {"available": False, "state": state, "reason": reason}
         by_service: dict = {}
         currency = "USD"
         for period in resp.get("ResultsByTime", []):
@@ -177,8 +192,11 @@ class Estate:
             out.append(f"The account spent {cost['total']} {cost['currency']} over "
                        f"{cost['days']} days, about {cost['per_day']} a day. "
                        f"Mostly: {top}.")
+        elif cost.get("state") == "no_data_yet":
+            out.append("Spend is not visible yet: " + cost["reason"]
+                       + " Nothing to do but wait.")
         else:
-            out.append(f"Spend is not visible from here ({cost.get('reason')}).")
+            out.append("Spend is not visible from here. " + str(cost.get("reason")))
         left = report["leftovers"]
         # Age is not the only way something accumulates. Nine machine images
         # built this week, of which one is deployed, are eight nobody needs

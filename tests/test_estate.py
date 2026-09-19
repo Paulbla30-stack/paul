@@ -86,6 +86,25 @@ class TestSpend(unittest.TestCase):
         lines = estate(ce=FakeCE(fail=RuntimeError("AccessDenied"))).lines()
         self.assertTrue(any("not visible" in l for l in lines))
 
+    def test_the_two_kinds_of_invisible_are_told_apart(self):
+        """One means go and click something once; the other means wait a day.
+        They must not read the same, or the operator cannot tell which."""
+        class DataUnavailableException(Exception):
+            pass
+
+        off = estate(ce=FakeCE(fail=RuntimeError(
+            "User not enabled for cost explorer access"))).cost(7)
+        self.assertEqual(off["state"], "not_enabled")
+        self.assertIn("one-time opt-in", off["reason"])
+
+        waiting = estate(ce=FakeCE(fail=DataUnavailableException(
+            "Data is not available. Please try to adjust the time period"))).cost(7)
+        self.assertEqual(waiting["state"], "no_data_yet")
+        self.assertIn("backfills", waiting["reason"])
+        line = " ".join(estate(ce=FakeCE(fail=DataUnavailableException(
+            "Data is not available"))).lines())
+        self.assertIn("Nothing to do but wait", line)
+
     def test_rounding_noise_is_left_out(self):
         cost = estate(ce=FakeCE({"Tax": "0.001", "Amazon EC2": "1.00"})).cost(7)
         services = [c["service"] for c in cost["by_service"]]
