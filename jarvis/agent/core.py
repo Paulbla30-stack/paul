@@ -462,7 +462,8 @@ class AgentCore:
         gate = self.ledger.gate()
         if gate:
             return f"Not answering: {gate}"
-        answer = self.brain.chat(self, turns, self.observe(), settings=settings)
+        extra = {"settings": settings} if settings is not None else {}
+        answer = self.brain.chat(self, turns, self.observe(), **extra)
         last_user = ""
         for t in reversed(list(turns or [])):
             if isinstance(t, dict) and t.get("role") == "user":
