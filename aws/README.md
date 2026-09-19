@@ -361,6 +361,15 @@ tunnel is up without reading the token.
 `terraform output ui_exposure` says who can reach the listener at the network
 level, and says so loudly when the answer is everyone.
 
+Inbound rules are `aws_vpc_security_group_ingress_rule` resources rather than
+inline `ingress` blocks, deliberately. On `aws_security_group` that attribute
+is Optional *and* Computed, so a `dynamic` block whose `for_each` goes to zero
+renders it unset rather than empty, and an unset Computed attribute keeps
+whatever is already on the group: `ui_cidr = ""` produced a plan saying "no
+changes" while the port stayed open to the internet. Separate rule resources
+are deleted when their count reaches zero, so closing the port is something
+the plan shows you. Egress stays inline because it is never empty.
+
 The Jarvis token login still sits behind Access, deliberately: two
 independent locks, and the inner one is what the agent itself enforces.
 

@@ -262,33 +262,24 @@ resource "aws_iam_instance_profile" "jarvis" {
 
 # ---- Network: outbound only unless ssh_cidr is set ------------------------
 
+# Inbound rules are separate resources, NOT inline ingress blocks, and this is
+# not a style preference. On aws_security_group the inline ingress attribute is
+# Optional AND Computed: a dynamic block whose for_each goes to zero renders the
+# attribute unset rather than empty, and an unset Computed attribute keeps
+# whatever is already on the group. So setting ui_cidr = "" produced a plan that
+# said "no changes" while the port stayed open to the whole internet. A control
+# that silently does nothing is worse than no control, because you stop looking.
+# Separate rule resources are deleted when their count goes to zero, so closing
+# the port is a thing the plan actually shows you.
+#
+# The egress blocks below stay inline because they are never empty: lock_egress
+# false yields one rule and true yields at least four, so the zero case that
+# triggers the bug cannot arise. If that ever changes, move them out too.
 resource "aws_security_group" "jarvis" {
   name_prefix = "${var.name}-"
   description = "Jarvis agent instance"
   vpc_id      = data.aws_vpc.selected.id
   tags        = local.tags
-
-  dynamic "ingress" {
-    for_each = var.ssh_cidr != "" ? [var.ssh_cidr] : []
-    content {
-      description = "SSH"
-      from_port   = 22
-      to_port     = 22
-      protocol    = "tcp"
-      cidr_blocks = [ingress.value]
-    }
-  }
-
-  dynamic "ingress" {
-    for_each = var.ui_cidr != "" ? [var.ui_cidr] : []
-    content {
-      description = "Jarvis web UI (HTTPS, token login)"
-      from_port   = var.ui_port
-      to_port     = var.ui_port
-      protocol    = "tcp"
-      cidr_blocks = [ingress.value]
-    }
-  }
 
   # Outbound. The default used to be every protocol to the whole internet,
   # which meant a reverse shell, an scp or a DNS tunnel on any port were a
@@ -377,6 +368,28 @@ resource "aws_security_group" "jarvis" {
 }
 
 # ---- Instance ---------------------------------------------------------------
+
+resource "aws_vpc_security_group_ingress_rule" "ssh" {
+  count             = var.ssh_cidr != "" ? 1 : 0
+  security_group_id = aws_security_group.jarvis.id
+  description       = "SSH"
+  cidr_ipv4         = var.ssh_cidr
+  from_port         = 22
+  to_port           = 22
+  ip_protocol       = "tcp"
+  tags              = local.tags
+}
+
+resource "aws_vpc_security_group_ingress_rule" "ui" {
+  count             = var.ui_cidr != "" ? 1 : 0
+  security_group_id = aws_security_group.jarvis.id
+  description       = "Jarvis web UI (HTTPS, token login)"
+  cidr_ipv4         = var.ui_cidr
+  from_port         = var.ui_port
+  to_port           = var.ui_port
+  ip_protocol       = "tcp"
+  tags              = local.tags
+}
 
 resource "aws_instance" "jarvis" {
   ami                         = var.ami_id
