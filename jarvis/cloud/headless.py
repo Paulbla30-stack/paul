@@ -121,7 +121,8 @@ class HeadlessRunner:
                  session_key_file: Optional[str] = None,
                  session_days: int = 30,
                  ui: Optional[dict] = None,
-                 max_idle_wait: Optional[float] = None):
+                 max_idle_wait: Optional[float] = None,
+                 consolidate_every_s: Optional[float] = None):
         self.agent = agent
         self.log = logger.getChild("headless")
         self.interval = max(0.0, float(interval))
@@ -164,6 +165,11 @@ class HeadlessRunner:
         # goal, upload or chat wakes the loop and resets the streak.
         self.idle_streak = 0
         self.max_idle_wait = max(self.interval, float(300.0 if max_idle_wait is None else max_idle_wait))
+        # Memory consolidation runs on its own slow clock, not every cycle:
+        # an hour of observations is the unit worth reorganising, not one.
+        self.consolidate_every_s = float(consolidate_every_s or 3600.0)
+        self._last_consolidation = time.time()
+        self.last_consolidation: Optional[dict] = None
         # Behaviour lab: the current dial settings and whether live chat uses them.
         from jarvis.brain import dials as _dials
         self.lab_settings = _dials.defaults()
@@ -690,6 +696,35 @@ class HeadlessRunner:
         self._wake.set()
         self.agent.running = False
 
+    def _consolidation_tick(self):
+        """Tidy the agent's own memory on a slow clock, like sleep.
+
+        Deliberately on the idle path rather than driven by the planner. An
+        agent that has to decide to consolidate will not, because there is
+        always something more interesting; and a consolidation pass the model
+        chose is one it can also choose to skip forever. This costs nothing,
+        touches only the agent's own notes, and cannot destroy anything.
+        """
+        consolidator = getattr(self.agent, "consolidator", None)
+        if consolidator is None or not consolidator.enabled:
+            return
+        now = time.time()
+        if now - self._last_consolidation < self.consolidate_every_s:
+            return
+        self._last_consolidation = now
+        try:
+            report = consolidator.run()
+        except Exception as e:                       # never stops the loop
+            self.log.warning("consolidation failed: %s", e)
+            return
+        if report.get("merged") or report.get("superseded") or report.get("promoted"):
+            self.log.info("Consolidated memory: %d merged, %d superseded, "
+                          "%d promoted, %d decayed (of %d scanned)",
+                          len(report["merged"]), len(report["superseded"]),
+                          len(report["promoted"]), report["decayed"],
+                          report["scanned"])
+        self.last_consolidation = report
+
     def wake(self):
         """Cut short an idle wait: something new arrived for the planner."""
         self.idle_streak = 0
@@ -721,6 +756,7 @@ class HeadlessRunner:
                     self.agent.ledger.tick()
                 except Exception as e:  # the witness copy never stops the loop
                     self.log.warning("ledger anchor tick failed: %s", e)
+                self._consolidation_tick()
                 if self.max_cycles and cycles >= self.max_cycles:
                     break
                 # Idle cycles wait the full interval; successful work goes

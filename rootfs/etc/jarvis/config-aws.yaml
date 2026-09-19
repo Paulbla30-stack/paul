@@ -89,7 +89,26 @@ goals: []                    # add goals via user data or the jarvis:goal tag
 memory:
   enabled: true
   path: /var/lib/jarvis/memory.db
-  max_rows: 2000             # oldest unpinned entries drop past this
+  max_rows: 2000             # weakest unpinned entries drop past this
+  # Consolidation: what sleep does, not what defragmenting does. Weight that
+  # strengthens on use and fades without it; repeated observations merged into
+  # one entry that cites them; two measurements of the same thing resolved by
+  # recency, the older kept as history; what keeps being re-established
+  # promoted to standing fact.
+  #
+  # Two rules that do not bend. Nothing is destroyed: a merge writes a new
+  # entry and the sources go dormant, still on disk with their provenance. And
+  # a derived entry is never consolidated again -- summarising summaries is how
+  # a memory becomes a confident fiction with nothing to check it against.
+  consolidate:
+    enabled: true
+    every_s: 3600            # a slow clock; an hour of observations is the unit
+    min_group: 3             # observations before a merge is worth writing
+    promote_at: 5            # confirmations before something becomes standing
+    similarity: 0.6          # overlap in content words to count as the same thing
+    decay: 0.9               # weight multiplier for anything unused
+    decay_after_s: 86400
+    max_merges: 8            # per pass; consolidation is not the agent's job
 
 # The Glass Ledger: a signed, hash-chained, append-only journal of every
 # decision, action and outcome (Blatherwick, The Glass Ledger v2,

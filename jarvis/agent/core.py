@@ -114,6 +114,13 @@ class AgentCore:
         # Brain notes live here, not in the evictable AgentMemory, so they
         # survive however busy the loop gets. The deque is the hot cache;
         # the store is what makes them outlive the process.
+        # What decides the shape of that memory over time: weight that
+        # strengthens on use and fades without it, repeated observations
+        # merged into one that cites them, contradictions resolved by
+        # recency. Never destroys an original; see consolidate.py.
+        from jarvis.agent.consolidate import Consolidator
+        self.consolidator = Consolidator(self.store, self.log,
+                                         config.get("consolidate") or {}, self.ledger)
         self.notes = deque(maxlen=config.get("notes_limit", 20))
         self._restore_notes()
         # Files handed to the agent through the UI / API; the brain sees them.
@@ -136,10 +143,20 @@ class AgentCore:
         self.task_history: list[dict] = []
 
     def _restore_notes(self):
-        """Refill the note cache from durable memory after a restart."""
+        """Refill the note cache from durable memory after a restart.
+
+        Pulling a memory back into the planner's context is what "used"
+        means, and it is the only place the agent can honestly observe it, so
+        the restored rows are reinforced here. `seen` counts the agent
+        writing the same thing again, which says the agent is repetitive;
+        `used` counts a memory earning its place, which is a different claim
+        and the one worth weighting on.
+        """
         try:
-            recovered = [m["text"] for m in
-                         reversed(self.store.recent(self.notes.maxlen, kind="note"))]
+            rows = list(reversed(self.store.recent(self.notes.maxlen, kind="note")))
+            recovered = [m["text"] for m in rows]
+            if rows:
+                self.store.reinforce([m["id"] for m in rows])
         except Exception as exc:
             self.log.warning("Could not restore notes: %s", exc)
             return

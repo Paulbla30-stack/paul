@@ -393,8 +393,12 @@ class JarvisSystem:
         self.ledger = self.build_ledger()
         self.store = self.build_store()
         self.notifier = self.build_notifier()
+        # Consolidation is configured beside the store it reorganises, under
+        # memory:, and handed to the agent with the rest of its settings.
+        agent_cfg = dict(self.config["agent"])
+        agent_cfg["consolidate"] = (self.config.get("memory") or {}).get("consolidate") or {}
         self.agent = AgentCore(
-            config=self.config["agent"],
+            config=agent_cfg,
             hardware=hardware,
             logger=self.log,
             brain=self.build_brain(),
@@ -452,6 +456,8 @@ class JarvisSystem:
                 session_key_file=cloud.get("session_key_file"),
                 session_days=int((cloud.get("ui") or {}).get("session_days") or 30),
                 max_idle_wait=cloud.get("max_idle_wait"),
+                consolidate_every_s=((self.config.get("memory") or {})
+                                     .get("consolidate") or {}).get("every_s"),
                 ui=cloud.get("ui"),
             )
             self.runner.run()

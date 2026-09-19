@@ -51,12 +51,40 @@ CREATE INDEX IF NOT EXISTS memories_ts ON memories(ts);
 CREATE INDEX IF NOT EXISTS memories_kind ON memories(kind);
 """
 
+# Added after the fact, so they are applied as migrations rather than baked
+# into SCHEMA: an existing box must keep the memories it already has.
+#
+#   weight     how much this matters. Strengthens when it proves useful,
+#              decays when it does not. Ordering and pruning read it.
+#   used       times it was actually retrieved into the model's context, as
+#              opposed to `seen`, which counts times it was written again.
+#   used_at    when that last happened, so decay has something to measure.
+#   state      live | dormant | superseded. Nothing is ever deleted by
+#              consolidation; it stops being current.
+#   derived    0 for an observation, 1 for something consolidation wrote.
+#              A derived entry is never consolidated again: summarising
+#              summaries is how a memory becomes a confident fiction.
+#   sources    the ids a derived entry was made from, comma separated, so
+#              provenance survives the merge.
+MIGRATIONS = (
+    ("weight", "ALTER TABLE memories ADD COLUMN weight REAL NOT NULL DEFAULT 1.0"),
+    ("used", "ALTER TABLE memories ADD COLUMN used INTEGER NOT NULL DEFAULT 0"),
+    ("used_at", "ALTER TABLE memories ADD COLUMN used_at REAL"),
+    ("state", "ALTER TABLE memories ADD COLUMN state TEXT NOT NULL DEFAULT 'live'"),
+    ("derived", "ALTER TABLE memories ADD COLUMN derived INTEGER NOT NULL DEFAULT 0"),
+    ("sources", "ALTER TABLE memories ADD COLUMN sources TEXT"),
+)
+
+STATES = ("live", "dormant", "superseded")
+
 KINDS = ("note", "fact", "upload", "goal", "operator", "proposal")
 SOURCES = ("brain", "operator", "system")
 
 DEFAULT_PATH = "/var/lib/jarvis/memory.db"
 DEFAULT_MAX_ROWS = 2000
 TEXT_LIMIT = 2000
+WEIGHT_MIN = 0.05
+WEIGHT_MAX = 5.0
 
 
 def _digest(text: str) -> str:
@@ -84,6 +112,25 @@ class NullStore:
 
     def forget(self, memory_id: int) -> bool:
         return False
+
+    # The consolidation surface, so a box with no durable memory takes the
+    # same code path and simply has nothing to consolidate.
+    def reinforce(self, memory_ids, amount: float = 0.25) -> int:
+        return 0
+
+    def decay(self, factor: float = 0.9, older_than_s: float = 86400,
+              floor: float = 0.05) -> int:
+        return 0
+
+    def set_state(self, memory_id: int, state: str) -> bool:
+        return False
+
+    def remember_derived(self, text, sources, kind="fact", weight=2.0, pinned=False):
+        return None
+
+    def live(self, limit: int = 200, kind: Optional[str] = None,
+             include_derived: bool = True) -> list:
+        return []
 
     def prune(self, max_rows: Optional[int] = None) -> int:
         return 0
@@ -121,6 +168,7 @@ class MemoryStore:
             db.execute("PRAGMA journal_mode=WAL")
             db.execute("PRAGMA synchronous=FULL")
             db.executescript(SCHEMA)
+            self._migrate(db)
             db.commit()
             try:
                 os.chmod(self.path, 0o600)
@@ -135,6 +183,21 @@ class MemoryStore:
             self.reason = f"{exc.__class__.__name__}: {exc}"
             self.log.error("Memory store unavailable (%s); running without durable memory",
                            self.reason)
+
+    @staticmethod
+    def _migrate(db):
+        """Add the consolidation columns to a database that predates them.
+
+        A box that has been running for weeks has memories worth keeping, so
+        the columns arrive as ALTERs rather than a rebuild. Each one is
+        independent: a half-applied migration leaves a usable store.
+        """
+        have = {r["name"] for r in db.execute("PRAGMA table_info(memories)")}
+        for column, statement in MIGRATIONS:
+            if column not in have:
+                db.execute(statement)
+        db.execute("CREATE INDEX IF NOT EXISTS memories_state ON memories(state)")
+        db.execute("CREATE INDEX IF NOT EXISTS memories_weight ON memories(weight)")
 
     def close(self):
         with self._lock:
@@ -181,6 +244,112 @@ class MemoryStore:
         self.prune()
         return {"id": new_id, "text": text, "kind": kind, "repeat": False, "seen": 1}
 
+    # ---- consolidation ---------------------------------------------------
+
+    def reinforce(self, memory_ids, amount: float = 0.25) -> int:
+        """Strengthen memories that were actually used.
+
+        `seen` counts times the agent wrote the same thing again, which says
+        the agent is repetitive. This counts times a memory was pulled into
+        the model's context, which says the memory was worth keeping. They
+        are different claims and the second is the one worth weighting on.
+        """
+        ids = [int(i) for i in (memory_ids or [])]
+        if self._db is None or not ids:
+            return 0
+        now = time.time()
+        marks = ",".join("?" * len(ids))
+        try:
+            with self._lock:
+                cur = self._db.execute(
+                    f"UPDATE memories SET weight = MIN(weight + ?, {WEIGHT_MAX}),"
+                    f" used = used + 1, used_at = ? WHERE id IN ({marks})",
+                    (float(amount), now, *ids))
+                self._db.commit()
+                return cur.rowcount
+        except Exception as exc:
+            self.log.warning("Could not reinforce memories: %s", exc)
+            return 0
+
+    def decay(self, factor: float = 0.9, older_than_s: float = 86400,
+              floor: float = WEIGHT_MIN) -> int:
+        """Fade what has not been used lately. Pinned entries do not fade.
+
+        Decay is what makes weight mean anything: without it every memory
+        drifts upward and the ordering stops discriminating.
+        """
+        if self._db is None:
+            return 0
+        cutoff = time.time() - max(0.0, float(older_than_s))
+        try:
+            with self._lock:
+                cur = self._db.execute(
+                    "UPDATE memories SET weight = MAX(weight * ?, ?)"
+                    " WHERE pinned = 0 AND state = 'live'"
+                    "   AND COALESCE(used_at, ts) < ?",
+                    (float(factor), float(floor), cutoff))
+                self._db.commit()
+                return cur.rowcount
+        except Exception as exc:
+            self.log.warning("Could not decay memories: %s", exc)
+            return 0
+
+    def set_state(self, memory_id: int, state: str) -> bool:
+        """Retire a memory without destroying it.
+
+        Consolidation never deletes. A merged observation becomes dormant and
+        a contradicted one becomes superseded, both still on disk with their
+        provenance, because a model that can quietly erase its own past is
+        the failure the ledger exists to prevent -- and this is the one store
+        the ledger does not cover.
+        """
+        if self._db is None or state not in STATES:
+            return False
+        try:
+            with self._lock:
+                cur = self._db.execute("UPDATE memories SET state = ? WHERE id = ?",
+                                       (state, int(memory_id)))
+                self._db.commit()
+                return cur.rowcount > 0
+        except Exception as exc:
+            self.log.warning("Could not set memory state: %s", exc)
+            return False
+
+    def remember_derived(self, text: str, sources, kind: str = "fact",
+                         weight: float = 2.0, pinned: bool = False) -> Optional[dict]:
+        """Write what consolidation concluded, carrying its sources with it.
+
+        Marked derived so it can never be consolidated again: summarising a
+        summary, and then that summary, is how a memory becomes a confident
+        fiction with no provenance left. Depth is capped at one, forever.
+        """
+        ids = [int(i) for i in (sources or [])]
+        entry = self.remember(text, kind=kind, source="system", pinned=pinned)
+        if not entry or self._db is None:
+            return entry
+        try:
+            with self._lock:
+                self._db.execute(
+                    "UPDATE memories SET derived = 1, sources = ?, weight = ?"
+                    " WHERE id = ?",
+                    (",".join(str(i) for i in ids), float(weight), entry["id"]))
+                self._db.commit()
+        except Exception as exc:
+            self.log.warning("Could not mark derived memory: %s", exc)
+        entry["derived"] = True
+        entry["sources"] = ids
+        return entry
+
+    def live(self, limit: int = 200, kind: Optional[str] = None,
+             include_derived: bool = True) -> list:
+        """Current memories, strongest first. What consolidation works on."""
+        sql = ("SELECT * FROM memories WHERE state = 'live'"
+               + ("" if include_derived else " AND derived = 0")
+               + ("" if kind is None else " AND kind = ?")
+               + " ORDER BY pinned DESC, weight DESC, ts DESC LIMIT ?")
+        args = ((kind, int(limit)) if kind is not None else (int(limit),))
+        return self._query(sql, args)
+
     def forget(self, memory_id: int) -> bool:
         if self._db is None:
             return False
@@ -203,10 +372,15 @@ class MemoryStore:
                 total = self._db.execute("SELECT COUNT(*) AS n FROM memories").fetchone()["n"]
                 if total <= cap:
                     return 0
+                # Weakest first, oldest to break ties. Age alone would drop a
+                # hard-won fact from week one to make room for this morning's
+                # sixth "disk is fine", which is exactly backwards. Anything
+                # consolidation derived is protected with the pinned entries:
+                # it is the distilled form of memories already let go.
                 cur = self._db.execute(
                     "DELETE FROM memories WHERE id IN ("
-                    "  SELECT id FROM memories WHERE pinned = 0"
-                    "  ORDER BY ts ASC LIMIT ?)", (total - cap,))
+                    "  SELECT id FROM memories WHERE pinned = 0 AND derived = 0"
+                    "  ORDER BY weight ASC, ts ASC LIMIT ?)", (total - cap,))
                 self._db.commit()
                 dropped = cur.rowcount
         except Exception as exc:
@@ -220,9 +394,18 @@ class MemoryStore:
 
     @staticmethod
     def _row(row) -> dict:
-        return {"id": row["id"], "ts": row["ts"], "kind": row["kind"],
-                "source": row["source"], "cycle": row["cycle"], "text": row["text"],
-                "pinned": bool(row["pinned"]), "seen": row["seen"]}
+        keys = row.keys()
+        out = {"id": row["id"], "ts": row["ts"], "kind": row["kind"],
+               "source": row["source"], "cycle": row["cycle"], "text": row["text"],
+               "pinned": bool(row["pinned"]), "seen": row["seen"]}
+        for extra, default in (("weight", 1.0), ("used", 0), ("used_at", None),
+                               ("state", "live"), ("derived", 0), ("sources", None)):
+            if extra in keys:
+                out[extra] = row[extra]
+        out["derived"] = bool(out.get("derived"))
+        if out.get("sources"):
+            out["sources"] = [int(x) for x in str(out["sources"]).split(",") if x.strip()]
+        return out
 
     def _query(self, sql: str, args: tuple) -> list:
         if self._db is None:
