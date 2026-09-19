@@ -380,6 +380,12 @@ class JarvisSystem:
                           "speak when someone opens the UI")
         return notifier
 
+    def build_estate(self):
+        """Read-only view of spend and accumulation; None when switched off."""
+        from jarvis.agent.estate import build_estate
+        estate = build_estate(self.config, self.log)
+        return estate if estate.enabled else None
+
     def build_agent(self):
         """Construct the AgentCore and seed it with configured goals."""
         hardware = {
@@ -406,6 +412,7 @@ class JarvisSystem:
             ledger=self.ledger,
             store=self.store,
             notifier=self.notifier,
+            estate=self.build_estate(),
         )
         from jarvis.agent.selfknowledge import build_self_knowledge
         self.agent.self_knowledge = build_self_knowledge(self.config, self.log)
@@ -420,6 +427,16 @@ class JarvisSystem:
                 "instance_id": ((self.config.get("cloud") or {}).get("instance") or {}).get("instance_id")
                 if isinstance((self.config.get("cloud") or {}).get("instance"), dict) else None,
             })
+        # The agent's own standing duties, seeded before the operator's
+        # instructions and separate from them: these say what it is for, and
+        # they are not completable. Operator goals then sit on top.
+        for goal in self.config.get("system_goals") or []:
+            if isinstance(goal, str):
+                self.agent.planner.add_goal(goal, 5, standing=True)
+            elif isinstance(goal, dict) and goal.get("description"):
+                self.agent.planner.add_goal(goal["description"],
+                                            int(goal.get("priority", 5)),
+                                            standing=True)
         for goal in self.config.get("goals") or []:
             if isinstance(goal, str):
                 self.agent.add_goal(goal)

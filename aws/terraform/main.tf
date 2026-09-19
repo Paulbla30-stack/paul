@@ -178,6 +178,31 @@ resource "aws_iam_role_policy" "notify" {
   })
 }
 
+# What the agent costs and what the account is accumulating. Read-only, and
+# every action here is a Describe or a List: there is no delete in this policy,
+# so "tell me what is piling up" cannot become "tidy it away". Cost Explorer
+# only answers in us-east-1 and charges a cent a call, which is why the agent
+# asks it on a slow clock rather than every cycle.
+resource "aws_iam_role_policy" "estate" {
+  count = var.estate_reporting ? 1 : 0
+  name  = "jarvis-estate"
+  role  = aws_iam_role.jarvis.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect = "Allow"
+      Action = [
+        "ce:GetCostAndUsage",
+        "ec2:DescribeImages",
+        "ec2:DescribeSnapshots",
+        "ec2:DescribeVolumes",
+        "s3:ListAllMyBuckets",
+      ]
+      Resource = "*"
+    }]
+  })
+}
+
 # Bedrock: let the instance role invoke catalog models, inference profiles
 # and imported models. Scope var.bedrock_model_arns down once you know the
 # exact model or imported-model ARN.

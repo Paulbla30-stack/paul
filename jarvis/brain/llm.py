@@ -505,6 +505,37 @@ class BaseBrain:
         except Exception as exc:                  # never lose a cycle over it
             return {"error": f"environment unavailable: {exc}"}
 
+    def provenance(self) -> dict:
+        """What this model actually is, told to it as fact.
+
+        Not the weights: reading your own parameters is not introspection, and
+        a 32B model handed its own tensors learns nothing it could act on. This
+        is the other thing the operator was reaching for and the useful half of
+        it -- knowing which model you are, on whose hardware, with how much room
+        to think. A model that does not know its own provenance cannot reason
+        about its own limits, and will cheerfully claim capabilities belonging
+        to whatever it read most about in training.
+        """
+        model = str(getattr(self, "model", "") or "")
+        identifier = model.rsplit("/", 1)[-1] if "/" in model else model
+        family = self.config.get("family") or self.config.get("model_family")
+        # An imported model's identifier is a random handle: telling the model
+        # it is "jfu3j2ssmqvx" is worse than telling it nothing, because it
+        # reads as a name. The family is the part that means something.
+        out = {"model": str(family) if family else (identifier or "unknown"),
+               "provider": getattr(self, "provider", None)}
+        if family and identifier and identifier != str(family):
+            out["deployment_id"] = identifier
+        if model.startswith("arn:aws:bedrock:") and ":imported-model/" in model:
+            out["weights"] = ("open weights imported into Amazon Bedrock; they run "
+                              "on Amazon's hardware and you cannot read or change them")
+        window = self.config.get("context_window")
+        if window:
+            out["context_window_tokens"] = int(window)
+        out["runs_as"] = ("the planner inside Jarvis, a root service on an EC2 "
+                          "instance; this process is not the model, it calls it")
+        return out
+
     def build_context(self, agent, observations: Optional[dict]) -> dict:
         """Everything the model needs to decide, bounded in size."""
         planner = agent.planner
@@ -548,6 +579,7 @@ class BaseBrain:
                 pinned = []
         context = {
             "clock": self._clock(agent),
+            "self": self.provenance(),
             "cycle": agent.cycle_count,
             "observations": compact_observations(observations or {}),
             "environment": self._environment(),

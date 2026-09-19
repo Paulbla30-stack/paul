@@ -67,7 +67,7 @@ class AgentCore:
 
     def __init__(self, config: dict, hardware: dict, logger: logging.Logger,
                  brain=None, shell_policy: Optional[dict] = None, ledger=None,
-                 store=None, notifier=None):
+                 store=None, notifier=None, estate=None):
         self.config = config
         self.hardware = hardware
         self.log = logger.getChild("agent")
@@ -82,9 +82,13 @@ class AgentCore:
         # Everything the agent works out is stuck in the box without it.
         from jarvis.agent.notify import Notifier
         self.notifier = notifier if notifier is not None else Notifier({}, self.log)
+        # What the agent costs and what it is leaving behind. Read-only:
+        # "never permanently delete" is not a rule this asks to be excused
+        # from, and an Object Lock bucket would refuse anyway.
+        self.estate = estate
         self.executor = TaskExecutor(hardware, self.memory, self.log,
                                      shell_policy=shell_policy,
-                                     notifier=self.notifier)
+                                     notifier=self.notifier, estate=self.estate)
         # Optional LLM planner (jarvis.brain.ClaudeBrain). When present it
         # is consulted before the rule-based planner; when it cannot answer
         # the rule-based planner takes over for that cycle.

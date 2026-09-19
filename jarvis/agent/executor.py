@@ -219,7 +219,7 @@ class TaskExecutor:
     """
 
     def __init__(self, hardware: dict, memory: AgentMemory, logger: logging.Logger,
-                 shell_policy: Optional[dict] = None, notifier=None):
+                 shell_policy: Optional[dict] = None, notifier=None, estate=None):
         self.hardware = hardware
         self.memory = memory
         self.log = logger.getChild("executor")
@@ -229,6 +229,8 @@ class TaskExecutor:
         # The one way out to the operator. None means nothing was configured,
         # and the handler says so rather than pretending the message landed.
         self.notifier = notifier
+        # Read-only view of spend and what the account is accumulating.
+        self.estate = estate
 
         # Map task types to handlers
         self._handlers = {
@@ -243,6 +245,7 @@ class TaskExecutor:
             TaskType.SHELL_COMMAND: self._handle_shell_command,
             TaskType.INSPECT_PATH: self._handle_inspect_path,
             TaskType.NOTIFY_OPERATOR: self._handle_notify_operator,
+            TaskType.ESTATE_REPORT: self._handle_estate_report,
         }
 
     def execute(self, task: Task) -> dict:
@@ -404,6 +407,25 @@ class TaskExecutor:
         # A path that is not there is a useful answer, not a failure: it is
         # the answer that stops the planner inventing one.
         return {"success": True, "output": result}
+
+    def _handle_estate_report(self, task: Task) -> dict:
+        """What the account is spending and what it is holding on to.
+
+        Reads only. It cannot delete and does not ask to: whether an old image
+        is still wanted is judgement about the future, which belongs to the
+        operator. A missing IAM grant comes back as "I cannot see that" rather
+        than an error, because a partial view is still worth having.
+        """
+        if self.estate is None:
+            return {"success": False, "error": "estate reporting not configured"}
+        try:
+            days = int((task.metadata or {}).get("days", 7))
+        except (TypeError, ValueError):
+            days = 7
+        report = self.estate.report(days)
+        report["summary"] = self.estate.lines(days)
+        self.memory.store(category="estate", data=report)
+        return {"success": True, "output": report}
 
     def _handle_notify_operator(self, task: Task) -> dict:
         """Say something to the operator when he is not looking at the UI.

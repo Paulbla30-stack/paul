@@ -160,3 +160,9 @@ variable "notify_channel" {
     error_message = "notify_channel must be sns_sms, sns_topic, ses_email or none."
   }
 }
+
+variable "estate_reporting" {
+  description = "Let the agent read what the account spends (Cost Explorer) and what it is accumulating (old images, snapshots, buckets). Read-only: the policy contains no delete. Cost Explorer charges roughly a cent per query."
+  type        = bool
+  default     = true
+}

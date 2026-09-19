@@ -44,7 +44,7 @@ CHANGE = "change"
 # everything else here reads the machine or records the agent's own state.
 READ_ONLY_TASKS = frozenset({
     "system_check", "hardware_probe", "security_scan", "observation",
-    "cloud_probe", "goal_step", "inspect_path",
+    "cloud_probe", "goal_step", "inspect_path", "estate_report",
 })
 
 # Telling the operator something is reporting, and every rung may report --

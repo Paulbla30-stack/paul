@@ -31,6 +31,7 @@ class TaskType(Enum):
     SHELL_COMMAND = "shell_command"
     INSPECT_PATH = "inspect_path"
     NOTIFY_OPERATOR = "notify_operator"
+    ESTATE_REPORT = "estate_report"
 
 
 # Boot-task profiles: what the agent should look at first depends on
@@ -80,13 +81,22 @@ class TaskPlanner:
         self.goals: list[dict] = []
         self._boot_tasks_generated = False
 
-    def add_goal(self, description: str, priority: int = 5):
-        """Add a high-level goal that generates sub-tasks."""
+    def add_goal(self, description: str, priority: int = 5,
+                 standing: bool = False):
+        """Add a high-level goal that generates sub-tasks.
+
+        A standing goal is one of the agent's own duties -- look after this
+        machine, know what you are costing, know when to say nothing -- rather
+        than an instruction the operator gave. It is never "completed", and
+        withdrawing it is a change to what the agent is for, not a change of
+        mind about a task, so it is marked here and treated as permanent.
+        """
         self.goals.append({
             "description": description,
             "priority": priority,
             "created_at": time.time(),
             "completed": False,
+            "standing": bool(standing),
         })
 
     @staticmethod

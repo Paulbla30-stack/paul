@@ -67,6 +67,16 @@ cloud:
   #
   # The limits are enforced in code below the model, because a prompt asking
   # a model to be judicious is a hope and a rate limit is a fact.
+  # What the agent costs and what the account is accumulating. Read-only:
+  # the IAM policy behind it contains no delete, because whether an old image
+  # is still wanted is judgement about the future and belongs to the operator.
+  # Cost Explorer charges about a cent a query, so this is asked on a slow
+  # clock, never per cycle.
+  estate:
+    enabled: true
+    stale_days: 30           # how old before something counts as left behind
+    max_items: 20
+
   notify:
     enabled: false           # set true once a destination secret exists
     channel: sns_sms         # sns_sms | sns_topic | ses_email | none
@@ -79,7 +89,43 @@ cloud:
     quiet_hours: [22, 7]     # local; an alert goes through anyway
     timezone: Europe/London
 
-goals: []                    # add goals via user data or the jarvis:goal tag
+# The agent's own standing duties: what it is for, as opposed to what it has
+# been asked to do today. Seeded before operator goals, never completable, and
+# kept here rather than in user data so they survive a rebuild and do not need
+# an instance replacement to change.
+#
+# Written as things to know rather than things to do, because a goal phrased as
+# an action gets performed on a schedule whether or not it is warranted, and
+# that is how an agent becomes noise.
+system_goals:
+  - description: >-
+      Know the state of this machine well enough to report it honestly,
+      including the parts you have not checked. An absence of findings is not
+      a finding of none.
+    priority: 4
+  - description: >-
+      Know what you have been wrong about. Your own record is summarised back
+      to you; a check that never finds anything and an approach that keeps
+      being refused are both worth changing.
+    priority: 3
+  - description: >-
+      Know what you cost to run, and what is piling up in the account behind
+      you. Report both; deleting is the operator's call.
+    priority: 2
+  - description: >-
+      Keep your memory in a shape you can use: what matters, weighted; what
+      repeats, merged; what changed, current. Never at the price of losing
+      what was originally observed.
+    priority: 2
+  - description: >-
+      Tell the operator when something changes that he would want to know,
+      and not otherwise. Silence is the default and the budget is small: four
+      messages an hour is a ceiling, not a target, and a thing worth saying
+      today is rarely worth saying at 3am. An agent he mutes is worse than one
+      that cannot reach him, because it looks like it works.
+    priority: 5
+
+goals: []                    # operator instructions; add via user data or the jarvis:goal tag
 
 # The agent's own durable operational memory: what it learned about THIS
 # machine, kept across restarts. Deliberately separate from the ledger
@@ -142,6 +188,14 @@ llm:
                              # inference profile, or your imported model's ARN
                              # arn:aws:bedrock:REGION:ACCOUNT:imported-model/ID
   region: null               # bedrock: null = the instance's region
+  # Told to the model as fact, in the context block "self". An imported
+  # model's ARN ends in a random handle, and telling the planner it is
+  # "jfu3j2ssmqvx" is worse than telling it nothing, because it reads as a
+  # name. A model that does not know its own provenance cannot reason about
+  # its own limits, and will claim capabilities belonging to whatever it read
+  # most about in training.
+  family: null               # e.g. "Qwen3-32B"; null leaves it out
+  context_window: null       # tokens; null leaves it out
   bedrock:
     temperature: 0.2
     json_retries: 1          # re-ask once when the plan is not valid JSON
