@@ -34,10 +34,11 @@ from typing import Optional
 from jarvis.cloud.imds import IMDSClient
 from jarvis.brain.credentials import (DEFAULT_KEY_FILE, fetch_ssm_parameter,
                                         fetch_secretsmanager_secret, install_key_file)
+from jarvis.cloud import tunnel as _tunnel
 
 DEFAULT_OUTPUT = "/etc/jarvis/cloud.yaml"
 DEFAULT_BASE_CONFIG = "/etc/jarvis/config.yaml"
-CONFIG_KEYS = ("agent", "goals", "cloud", "security", "hardware", "llm")
+CONFIG_KEYS = ("agent", "goals", "cloud", "security", "hardware", "llm", "tunnel")
 LLM_DEFAULT_KEYS = ("api_key_secret", "api_key_ssm_parameter", "api_key_file")
 
 
@@ -132,6 +133,10 @@ def build_cloud_config(imds: IMDSClient) -> dict:
         config.setdefault("llm", {})["api_key_ssm_parameter"] = tags["jarvis:llm-key-parameter"]
     if tags.get("jarvis:ledger-bucket"):
         config.setdefault("ledger", {}).setdefault("anchor", {})["bucket"] = tags["jarvis:ledger-bucket"]
+    if tags.get("jarvis:tunnel-token-secret"):
+        config.setdefault("tunnel", {})["token_secret"] = tags["jarvis:tunnel-token-secret"]
+    if tags.get("jarvis:tunnel-token-parameter"):
+        config.setdefault("tunnel", {})["token_ssm_parameter"] = tags["jarvis:tunnel-token-parameter"]
     if instance:
         config["agent"] = config.get("agent", {})
         config["agent"].setdefault("profile", "cloud")
@@ -166,10 +171,13 @@ def _read(path: str) -> str:
 
 
 def strip_secrets(config: dict) -> None:
-    """Never let an inline API key reach the world-readable overlay."""
+    """Never let an inline API key or tunnel token reach the world-readable
+    overlay. The tunnel token is the tunnel: whoever holds it can re-point
+    the hostname at their own machine."""
     llm = config.get("llm")
     if isinstance(llm, dict):
         llm.pop("api_key", None)
+    _tunnel.strip_secrets(config)
 
 
 def provision_llm_key(config: dict, key_file: str = DEFAULT_KEY_FILE,
@@ -264,9 +272,13 @@ def main(argv=None):
     apply_base_llm_defaults(config, args.config)
 
     key_note = "skipped"
+    tunnel_note = "skipped"
     if not args.skip_llm_key and not args.print_only:
         key_note = provision_llm_key(config, args.key_file)
-    strip_secrets(config)  # whatever happened above, the overlay never carries a key
+    if not args.print_only:
+        tunnel_note = _tunnel.provision_token(config)
+    # Whatever happened above, the overlay never carries a credential.
+    strip_secrets(config)
 
     if args.print_only:
         sys.stdout.write(dump_config(config))
@@ -282,6 +294,7 @@ def main(argv=None):
         print(f"[bootstrap] IMDS not reachable; wrote defaults -> {path}")
     print(f"[bootstrap] goals: {len(config['goals'])}")
     print(f"[bootstrap] llm key: {key_note}")
+    print(f"[bootstrap] tunnel: {tunnel_note}")
     return 0
 
 

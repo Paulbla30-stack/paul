@@ -119,15 +119,51 @@ install -m 0644 "$SRC/aws/systemd/jarvis-bootstrap.service" /etc/systemd/system/
 install -m 0644 "$SRC/aws/systemd/jarvis.service" /etc/systemd/system/
 install -m 0644 "$SRC/aws/systemd/jarvis-health.service" /etc/systemd/system/
 install -m 0644 "$SRC/aws/systemd/jarvis-health.timer" /etc/systemd/system/
+install -m 0644 "$SRC/aws/systemd/cloudflared.service" /etc/systemd/system/
 install -m 0644 "$SRC/aws/scripts/motd.sh" /etc/profile.d/jarvis.sh
 mkdir -p /var/log /var/lib/jarvis/uploads /etc/jarvis/tls /etc/jarvis/ledger
 chmod 750 /var/lib/jarvis /var/lib/jarvis/uploads
 chmod 700 /etc/jarvis/tls /etc/jarvis/ledger
 touch /var/log/jarvis.log /var/log/jarvis-security.log
 
+# ---- 4b. Cloudflare Tunnel ----------------------------------------------
+# How the operator reaches the UI without an inbound port. cloudflared dials
+# out to Cloudflare and holds the connection open; the security group needs
+# no ingress rule at all. It runs as its own unprivileged user, and the unit
+# starts only when a token has been provisioned, so an instance without a
+# tunnel is unaffected.
+log "Installing cloudflared"
+id -u cloudflared >/dev/null 2>&1 || \
+    useradd --system --no-create-home --shell /sbin/nologin cloudflared
+case "$(uname -m)" in
+    aarch64|arm64) CF_ARCH=arm64 ;;
+    *)             CF_ARCH=amd64 ;;
+esac
+# "latest" is what the build resolves by default; set CLOUDFLARED_VERSION to a
+# tag (e.g. 2026.8.1) to pin the image to a known binary. Either way the
+# version and the SHA-256 go in the build log, so the AMI's provenance is a
+# matter of record rather than a matter of trust.
+CF_VER="${CLOUDFLARED_VERSION:-latest}"
+if [ "$CF_VER" = "latest" ]; then
+    CF_URL="https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-${CF_ARCH}"
+else
+    CF_URL="https://github.com/cloudflare/cloudflared/releases/download/${CF_VER}/cloudflared-linux-${CF_ARCH}"
+fi
+if curl -fsSL --retry 3 -o /usr/local/bin/cloudflared.new "$CF_URL"; then
+    chmod 0755 /usr/local/bin/cloudflared.new
+    mv /usr/local/bin/cloudflared.new /usr/local/bin/cloudflared
+    log "cloudflared $(/usr/local/bin/cloudflared --version 2>&1 | head -1)"
+    log "cloudflared sha256 $(sha256sum /usr/local/bin/cloudflared | cut -d" " -f1)"
+else
+    rm -f /usr/local/bin/cloudflared.new
+    log "WARNING: could not download cloudflared; the tunnel unit will not start"
+fi
+
 systemctl daemon-reload
 systemctl enable jarvis-bootstrap.service jarvis.service
 systemctl enable jarvis-health.timer
+# Conditioned on the token file, so it is a no-op without a tunnel.
+systemctl enable cloudflared.service
 
 # ---- 5. Agent-first OS tweaks -------------------------------------------
 log "Applying agent-first OS settings"

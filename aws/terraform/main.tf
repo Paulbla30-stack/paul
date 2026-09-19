@@ -104,6 +104,33 @@ locals {
   )
 }
 
+data "aws_secretsmanager_secret" "tunnel_token" {
+  count = var.tunnel_token_secret != "" ? 1 : 0
+  name  = startswith(var.tunnel_token_secret, "arn:") ? null : var.tunnel_token_secret
+  arn   = startswith(var.tunnel_token_secret, "arn:") ? var.tunnel_token_secret : null
+}
+
+locals {
+  tunnel_enabled = var.tunnel_token_secret != "" || var.tunnel_token_ssm_parameter != ""
+  tunnel_statements = concat(
+    var.tunnel_token_secret != "" ? [{
+      Effect   = "Allow"
+      Action   = ["secretsmanager:GetSecretValue"]
+      Resource = data.aws_secretsmanager_secret.tunnel_token[0].arn
+    }] : [],
+    var.tunnel_token_ssm_parameter != "" ? [{
+      Effect   = "Allow"
+      Action   = ["ssm:GetParameter"]
+      Resource = "arn:aws:ssm:${var.region}:${data.aws_caller_identity.current.account_id}:parameter/${trimprefix(var.tunnel_token_ssm_parameter, "/")}"
+    }] : [],
+  )
+
+  # cloudflared dials these on 7844. Published at
+  # https://developers.cloudflare.com/tunnel/configuration/#firewall-rules
+  # as individual addresses inside two /24s; the /24s are what the rule needs.
+  cloudflare_edge_cidrs = ["198.41.192.0/24", "198.41.200.0/24"]
+}
+
 # Bedrock: let the instance role invoke catalog models, inference profiles
 # and imported models. Scope var.bedrock_model_arns down once you know the
 # exact model or imported-model ARN.
@@ -216,6 +243,18 @@ resource "aws_iam_role_policy" "llm_key" {
   })
 }
 
+# The tunnel token is a credential, fetched at boot exactly like the LLM key
+# and written 0600 to a file only the cloudflared user can read.
+resource "aws_iam_role_policy" "tunnel_token" {
+  count = length(local.tunnel_statements) > 0 ? 1 : 0
+  name  = "jarvis-tunnel-token"
+  role  = aws_iam_role.jarvis.id
+  policy = jsonencode({
+    Version   = "2012-10-17"
+    Statement = local.tunnel_statements
+  })
+}
+
 resource "aws_iam_instance_profile" "jarvis" {
   name_prefix = "${var.name}-"
   role        = aws_iam_role.jarvis.name
@@ -289,6 +328,31 @@ resource "aws_security_group" "jarvis" {
     }
   }
 
+  # The tunnel dials out on 7844 and holds the connection open, which is what
+  # lets the UI have no inbound rule at all. Narrow to Cloudflare's published
+  # edge ranges rather than the whole internet.
+  dynamic "egress" {
+    for_each = var.lock_egress && local.tunnel_enabled ? [1] : []
+    content {
+      description = "Cloudflare Tunnel edge (http2)"
+      from_port   = 7844
+      to_port     = 7844
+      protocol    = "tcp"
+      cidr_blocks = local.cloudflare_edge_cidrs
+    }
+  }
+
+  dynamic "egress" {
+    for_each = var.lock_egress && local.tunnel_enabled ? [1] : []
+    content {
+      description = "Cloudflare Tunnel edge (quic)"
+      from_port   = 7844
+      to_port     = 7844
+      protocol    = "udp"
+      cidr_blocks = local.cloudflare_edge_cidrs
+    }
+  }
+
   dynamic "egress" {
     for_each = var.lock_egress ? [1] : []
     content {
@@ -348,6 +412,8 @@ resource "aws_instance" "jarvis" {
     var.llm_provider == "anthropic" && var.anthropic_api_key_secret != "" ? { "jarvis:llm-key-secret" = var.anthropic_api_key_secret } : {},
     var.llm_provider == "anthropic" && var.anthropic_api_key_ssm_parameter != "" ? { "jarvis:llm-key-parameter" = var.anthropic_api_key_ssm_parameter } : {},
     var.ledger_anchor ? { "jarvis:ledger-bucket" = aws_s3_bucket.ledger[0].bucket } : {},
+    var.tunnel_token_secret != "" ? { "jarvis:tunnel-token-secret" = var.tunnel_token_secret } : {},
+    var.tunnel_token_ssm_parameter != "" ? { "jarvis:tunnel-token-parameter" = var.tunnel_token_ssm_parameter } : {},
   )
 }
 

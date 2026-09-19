@@ -126,3 +126,21 @@ variable "lock_egress" {
   type        = bool
   default     = true
 }
+
+variable "tunnel_token_secret" {
+  type        = string
+  default     = ""
+  description = "AWS Secrets Manager secret (name or ARN) holding the Cloudflare Tunnel token, from `cloudflared tunnel token <name>` or the Zero Trust dashboard. Setting it turns the tunnel on: the instance dials out to Cloudflare and the UI needs no inbound rule. Empty disables it."
+}
+
+variable "tunnel_token_ssm_parameter" {
+  type        = string
+  default     = ""
+  description = "Alternative: SSM SecureString holding the Cloudflare Tunnel token. Empty disables it."
+}
+
+variable "tunnel_hostname" {
+  type        = string
+  default     = ""
+  description = "Informational: the hostname the tunnel publishes, e.g. jarvis.example.co.uk. The mapping itself lives in Cloudflare, not here, because a token-run tunnel is configured remotely."
+}

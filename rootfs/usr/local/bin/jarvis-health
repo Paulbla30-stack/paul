@@ -15,6 +15,7 @@ set -uo pipefail
 
 STATUS_FILE=${JARVIS_STATUS_FILE:-/run/jarvis/status.json}
 SECURITY_LOG=${JARVIS_SECURITY_LOG:-/var/log/jarvis-security.log}
+TUNNEL_ENV="${TUNNEL_ENV:-/etc/jarvis/cloudflared.env}"
 DISK_WARN_PCT=${JARVIS_DISK_WARN_PCT:-85}
 BUDGET_WARN_PCT=${JARVIS_BUDGET_WARN_PCT:-90}
 
@@ -132,7 +133,31 @@ security_section() {
     fi
 }
 
-report=$( { host_section; echo; agent_section; echo; security_section; } 2>&1 )
+access_section() {
+    # Once the tunnel is the way in, a tunnel that is down is the operator
+    # locked out, not a cosmetic fault. Reported by unit state and the
+    # token file's presence: this script never reads the token itself, the
+    # same fence the executor puts around it.
+    echo "-- access --"
+    if [ ! -e "$TUNNEL_ENV" ]; then
+        note "Cloudflare Tunnel" "not configured (no $TUNNEL_ENV)"
+    else
+        local state
+        state=$(systemctl is-active cloudflared 2>/dev/null || true)
+        note "Cloudflare Tunnel" "token installed; unit ${state:-unknown}"
+        if [ "$state" != "active" ]; then
+            echo "  ALERT: cloudflared is ${state:-unknown}; the UI is unreachable"
+            echo "         if no inbound rule is open. Reach the box over SSM."
+        fi
+    fi
+    if ss -H -tln 2>/dev/null | grep -qE '0\.0\.0\.0:8443|\*:8443'; then
+        note "UI listener" "bound on all interfaces:8443"
+        echo "  NOTE: whether that is reachable depends on the security group,"
+        echo "        which this script cannot see. Check ui_exposure in Terraform."
+    fi
+}
+
+report=$( { host_section; echo; agent_section; echo; access_section; echo; security_section; } 2>&1 )
 alerts=$(printf '%s\n' "$report" | grep -c '^  ALERT:' || true)
 
 echo "=== Jarvis health report: $(date -u +%Y-%m-%dT%H:%M:%SZ) ==="

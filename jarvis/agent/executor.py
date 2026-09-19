@@ -75,8 +75,11 @@ DEFAULT_SHELL_DENY_PATTERNS = [
     r"/etc/(?:shadow|gshadow|sudoers)",
     r"/etc/jarvis/anthropic\.key|/proc/\S*/environ",
     # the operator's own credentials: the runner token and the key that
-    # signs UI sessions are as good as a login
-    r"/etc/jarvis/(?:token|session\.key)\b",
+    # signs UI sessions are as good as a login, and the tunnel token is the
+    # tunnel itself -- whoever holds it can re-point the hostname at their
+    # own machine and collect the logins meant for this one
+    r"/etc/jarvis/(?:token|session\.key|cloudflared\.env)\b",
+    _CMD + r"cloudflared\b",
     r"\baws\s+ssm\s+get-parameter",
     r"~?/\.(?:ssh|aws|config/anthropic)\b",
     _CMD + r"crontab\s+(?:-\S+\s+)*-r\b",

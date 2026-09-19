@@ -19,7 +19,24 @@ output "serial_console_command" {
 }
 
 output "ui_url" {
-  value = var.ui_cidr != "" ? "https://${var.static_ip ? aws_eip.jarvis[0].public_ip : aws_instance.jarvis.public_ip}:${var.ui_port}/ui" : "(closed: set -var ui_cidr=<your ip>/32)"
+  value = (
+    local.tunnel_enabled && var.tunnel_hostname != ""
+    ? "https://${var.tunnel_hostname}/ui"
+    : local.tunnel_enabled
+    ? "(via the Cloudflare Tunnel; set -var tunnel_hostname=<host> to print it)"
+    : var.ui_cidr != ""
+    ? "https://${var.static_ip ? aws_eip.jarvis[0].public_ip : aws_instance.jarvis.public_ip}:${var.ui_port}/ui"
+    : "(closed: put a tunnel in front, or set -var ui_cidr=<your ip>/32)"
+  )
+}
+
+output "ui_exposure" {
+  description = "Who can reach the UI listener at the network level."
+  value = (
+    var.ui_cidr == "" ? "no inbound rule${local.tunnel_enabled ? "; reachable through the Cloudflare Tunnel only" : "; unreachable from off the box"}"
+    : var.ui_cidr == "0.0.0.0/0" ? "OPEN TO THE INTERNET on ${var.ui_port} -- narrow ui_cidr, or set tunnel_token_secret and clear ui_cidr"
+    : "${var.ui_cidr} on port ${var.ui_port}"
+  )
 }
 
 output "ledger_bucket" {

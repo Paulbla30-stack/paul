@@ -313,10 +313,62 @@ lock it out for five minutes — but a narrow CIDR, or a tunnel in front, is
 the wall. Only the loopback API on 127.0.0.1:8471 serves `/status` without
 a token, because nothing off the box can reach it.
 
+## Reaching the UI through a Cloudflare Tunnel
+
+Opening 8443 in the security group is the wrong shape for a phone: narrow it
+to one address and a carrier moving you locks you out, leave it at
+`0.0.0.0/0` and the login page is in front of every scanner on the internet.
+
+A tunnel inverts it. `cloudflared` dials **out** to Cloudflare on 7844 and
+holds the connection open; requests come back down it. The security group
+then needs no inbound rule at all, Cloudflare terminates TLS with a real
+certificate so the self-signed warning goes away, and Cloudflare Access can
+ask who you are before a request ever reaches the box.
+
+**In the Cloudflare dashboard** (Zero Trust > Networks > Tunnels), once for
+the account:
+
+1. Create a tunnel, name it `jarvis`, and copy the token it shows you. It is
+   a credential: whoever holds it can re-point the hostname at their own
+   machine.
+2. Add a public hostname on the tunnel: your subdomain (for example
+   `jarvis.<your-domain>`), service `HTTPS`, URL `127.0.0.1:8443`, and under
+   *Additional application settings > TLS* turn **No TLS Verify** on, because
+   the agent's certificate is self-signed and only ever seen over loopback.
+3. Zero Trust > Access > Applications: add a self-hosted application for that
+   hostname with a policy allowing your own email. Without this the tunnel is
+   just a nicer front door with the same lock behind it.
+
+**Then, on your side:**
+
+```bash
+aws secretsmanager create-secret --name jarvis/tunnel-token \
+    --secret-string '<the token from step 1>'
+
+terraform apply ... \
+    -var tunnel_token_secret=jarvis/tunnel-token \
+    -var tunnel_hostname=jarvis.<your-domain> \
+    -var ui_cidr=""                              # close the port
+```
+
+The instance fetches the token at boot with its own role, writes it 0600 to
+`/etc/jarvis/cloudflared.env` owned by the `cloudflared` user, and starts the
+tunnel. The overlay at `/etc/jarvis/cloud.yaml` never carries it, the agent's
+deny-list refuses that path and the `cloudflared` binary the same way it
+refuses the ledger's signing key, and `jarvis-health` reports whether the
+tunnel is up without reading the token.
+
+`terraform output ui_exposure` says who can reach the listener at the network
+level, and says so loudly when the answer is everyone.
+
+The Jarvis token login still sits behind Access, deliberately: two
+independent locks, and the inner one is what the agent itself enforces.
+
 ## Outbound
 
 `lock_egress` (on by default) restricts the instance to HTTPS on 443, DNS to
-the VPC resolver and NTP to the Amazon Time Sync service, instead of every
+the VPC resolver, NTP to the Amazon Time Sync service, and — when a tunnel is
+configured — 7844 to Cloudflare's published edge ranges, instead of every
 protocol to the whole internet:
 
 ```bash
