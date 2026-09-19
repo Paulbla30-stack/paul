@@ -146,6 +146,11 @@ kernel.randomize_va_space = 2
 kernel.kptr_restrict = 1
 kernel.dmesg_restrict = 1
 net.ipv4.ip_forward = 0
+# The distro ships yama ptrace_scope = 0; the scanner expects 1, so set it
+# here in the image rather than leaving the agent to find it every boot and
+# try to change a running kernel. Root is exempt at scope 1, so the agent's
+# own work is unaffected.
+kernel.yama.ptrace_scope = 1
 SYSCTL
 
 # ---- 6. Sanity check inside the build instance --------------------------

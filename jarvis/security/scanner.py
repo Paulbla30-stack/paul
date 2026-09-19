@@ -99,12 +99,6 @@ class SecurityScanner:
                 "severity": Finding.WARNING,
                 "remediation": "echo 1 > /proc/sys/kernel/yama/ptrace_scope",
             },
-            "/proc/sys/net/ipv4/conf/all/rp_filter": {
-                "name": "reverse path filtering",
-                "expected": "1",
-                "severity": Finding.WARNING,
-                "remediation": "echo 1 > /proc/sys/net/ipv4/conf/all/rp_filter",
-            },
             "/proc/sys/net/ipv4/icmp_ignore_bogus_error_responses": {
                 "name": "ICMP bogus error response ignore",
                 "expected": "1",
@@ -138,6 +132,8 @@ class SecurityScanner:
                         ))
                 except (PermissionError, OSError):
                     pass
+
+        self._check_rp_filter()
 
         # Check for kernel lockdown
         lockdown_path = "/sys/kernel/security/lockdown"
@@ -289,27 +285,110 @@ class SecurityScanner:
         except (FileNotFoundError, subprocess.TimeoutExpired):
             pass
 
-    def _scan_boot_integrity(self):
-        """Check boot chain integrity."""
-        # Check for Secure Boot
-        sb_path = "/sys/firmware/efi/efivars/SecureBoot-*"
-        sb_files = glob.glob(sb_path)
-        if not sb_files:
-            if os.path.isdir("/sys/firmware/efi"):
-                self.findings.append(Finding(
-                    title="Secure Boot not detected",
-                    description="System boots via UEFI but Secure Boot may be disabled",
-                    severity=Finding.WARNING,
-                    category="boot",
-                    remediation="Enable Secure Boot in UEFI firmware settings",
-                ))
+    def _check_rp_filter(self, base: str = "/proc/sys/net/ipv4/conf"):
+        """Reverse path filtering, judged the way the kernel judges it.
+
+        The effective setting for an interface is max(conf.all, conf.<iface>),
+        so conf.all on its own says nothing. Reading only conf.all reported
+        this machine as unprotected while every interface was set to 2, and
+        the planner then proposed a fix for a problem that did not exist.
+
+        Both 1 (strict) and 2 (loose) filter. Loose is the correct choice
+        where routing can be asymmetric, which is common on cloud instances,
+        so neither is a finding.
+        """
+        def read(path):
+            try:
+                with open(path, "r") as fh:
+                    return int(fh.read().strip())
+            except (OSError, ValueError):
+                return None
+
+        all_value = read(os.path.join(base, "all", "rp_filter"))
+        if all_value is None:
+            return
+        try:
+            names = sorted(n for n in os.listdir(base) if n not in ("all", "default", "lo"))
+        except OSError:
+            names = []
+
+        effective = {}
+        for name in names:
+            value = read(os.path.join(base, name, "rp_filter"))
+            if value is not None:
+                effective[name] = max(all_value, value)
+        if not effective:
+            return
+
+        unprotected = sorted(n for n, v in effective.items() if v < 1)
+        detail = ", ".join(f"{n}={v}" for n, v in sorted(effective.items()))
+        if unprotected:
+            self.findings.append(Finding(
+                title="reverse path filtering not properly configured",
+                description=(f"effective rp_filter (max of conf.all={all_value} and each "
+                             f"interface): {detail}; no filtering on {', '.join(unprotected)}"),
+                severity=Finding.WARNING,
+                category="kernel",
+                remediation=("set net.ipv4.conf.default.rp_filter=2 (loose) or 1 (strict) "
+                             "in a sysctl drop-in and rebuild the image"),
+            ))
         else:
             self.findings.append(Finding(
-                title="Secure Boot detected",
-                description="UEFI Secure Boot appears to be available",
+                title="reverse path filtering properly configured",
+                description=f"effective rp_filter per interface: {detail}",
                 severity=Finding.INFO,
-                category="boot",
+                category="kernel",
             ))
+
+    @staticmethod
+    def _secure_boot_state(pattern: str = "/sys/firmware/efi/efivars/SecureBoot-*"):
+        """True, False, or None when the variable cannot be read.
+
+        The efivar is four attribute bytes followed by the one-byte state.
+        """
+        for path in glob.glob(pattern):
+            try:
+                with open(path, "rb") as fh:
+                    data = fh.read()
+            except OSError:
+                continue
+            if len(data) >= 5:
+                return bool(data[4])
+            if len(data) == 1:
+                return bool(data[0])
+        return None
+
+    def _scan_boot_integrity(self):
+        """Check boot chain integrity."""
+        # Secure Boot: the variable exists on every UEFI system, so its
+        # presence says only that the firmware is UEFI. The state is in the
+        # value. Reporting presence as "Secure Boot detected" claimed it was
+        # on for a machine where it is off, next to a lockdown finding that
+        # said the opposite.
+        if os.path.isdir("/sys/firmware/efi"):
+            state = self._secure_boot_state()
+            if state is True:
+                self.findings.append(Finding(
+                    title="Secure Boot enabled",
+                    description="UEFI Secure Boot is on",
+                    severity=Finding.INFO,
+                    category="boot",
+                ))
+            elif state is False:
+                self.findings.append(Finding(
+                    title="Secure Boot disabled",
+                    description="System boots via UEFI with Secure Boot off",
+                    severity=Finding.WARNING,
+                    category="boot",
+                    remediation="Enable Secure Boot in the firmware, or in the image build",
+                ))
+            else:
+                self.findings.append(Finding(
+                    title="Secure Boot state unknown",
+                    description="UEFI system; the SecureBoot variable could not be read",
+                    severity=Finding.INFO,
+                    category="boot",
+                ))
 
         # Check GRUB config permissions
         for grub_cfg in ["/boot/grub/grub.cfg", "/boot/grub2/grub.cfg"]:

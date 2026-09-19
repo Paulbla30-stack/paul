@@ -772,6 +772,31 @@ class TestShellPolicy(unittest.TestCase):
         self.assertIsNone(check_command_allowed("dnf install -y nmap", allowed))
         self.assertIsNotNone(check_command_allowed("rm -rf /", allowed))
 
+    def test_kernel_tuning_is_denied_by_every_route(self):
+        """A planner refused once must not get there by rephrasing.
+
+        The live agent proposed `echo 1 > /proc/sys/kernel/yama/ptrace_scope`,
+        was refused, reasoned about the refusal and reached the same end with
+        `sysctl -w kernel.yama.ptrace_scope=1`, which was allowed. The change
+        landed on a running box after the guard rail had said no.
+        """
+        pol = normalise_shell_policy({"enabled": True})
+        for cmd in ["echo 1 > /proc/sys/kernel/yama/ptrace_scope",
+                    "echo 1 > /proc/sys/net/ipv4/conf/all/rp_filter",
+                    "sysctl -w kernel.yama.ptrace_scope=1",
+                    "sysctl kernel.yama.ptrace_scope=1",
+                    "sysctl -p",
+                    "sysctl --system",
+                    "echo net.ipv4.ip_forward=1 >> /etc/sysctl.conf",
+                    "tee /etc/sysctl.d/99-tuning.conf"]:
+            self.assertIsNotNone(check_command_allowed(cmd, pol), cmd)
+
+    def test_reading_kernel_parameters_is_still_allowed(self):
+        pol = normalise_shell_policy({"enabled": True})
+        for cmd in ["sysctl -a", "sysctl kernel.yama.ptrace_scope", "sysctl -n net.ipv4.ip_forward",
+                    "cat /proc/sys/net/ipv4/conf/all/rp_filter"]:
+            self.assertIsNone(check_command_allowed(cmd, pol), cmd)
+
     def test_custom_deny_patterns_extend_defaults(self):
         pol = normalise_shell_policy({"enabled": True, "deny_patterns": [r"\bfoo\b"]})
         self.assertIsNotNone(check_command_allowed("echo foo", pol))

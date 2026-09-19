@@ -41,9 +41,16 @@ DEFAULT_SHELL_DENY_PATTERNS = [
     r">{1,2}\s*['\"]?" + _BLOCK_DEV,
     _CMD + r"(?:cat|cp|tee|mv|install)\b.*\s['\"]?" + _BLOCK_DEV,
     # --- boot / critical files ---
-    r">{1,2}\s*['\"]?/(?:boot/|etc/fstab|etc/ld\.so\.preload|proc/sysrq-trigger|proc/sys/kernel/)",
-    _CMD + r"(?:sed\s+-i|tee|truncate|cp|mv)\b.*\s['\"]?/(?:boot/|etc/fstab|etc/ld\.so\.preload)",
+    r">{1,2}\s*['\"]?/(?:boot/|etc/fstab|etc/ld\.so\.preload|etc/sysctl|proc/sysrq-trigger|proc/sys/)",
+    _CMD + r"(?:sed\s+-i|tee|truncate|cp|mv)\b.*\s['\"]?/(?:boot/|etc/fstab|etc/ld\.so\.preload|etc/sysctl|proc/sys/)",
     r"/proc/sysrq-trigger",
+    # --- kernel parameter tuning by another route ---
+    # Writing /proc/sys is denied above. `sysctl -w k=v`, `sysctl k=v` and
+    # `sysctl -p` are the same change with different syntax: a planner
+    # refused once must not reach the same end by rephrasing. Reads
+    # (sysctl -a, sysctl <key>) stay allowed.
+    _CMD + r"sysctl\b[^|;&]*=",
+    _CMD + r"sysctl\s+(?:-\S+\s+)*(?:-p|--load|--system)\b",
     # --- power / init / agent ---
     _CMD + r"(?:shutdown|reboot|halt|poweroff|telinit)\b",
     _CMD + r"init\s+[06]\b",
