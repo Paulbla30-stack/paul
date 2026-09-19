@@ -558,6 +558,20 @@ class BaseBrain:
         }
         if pinned:
             context["pinned_memory"] = pinned
+        # What the agent has learned about itself, derived from the record it
+        # is not allowed to read. Aggregates only: it learns that it filed six
+        # proposals and one was taken, never which, when, or what was said.
+        # Framed as observations, not rules -- "this has run 340 times and
+        # found nothing" is a fact it can weigh; "stop running this" is a rule
+        # it would follow wrongly on the day the check finally matters.
+        knower = getattr(agent, "self_knowledge", None)
+        if knower is not None:
+            try:
+                lines = knower.lines()
+            except Exception:
+                lines = []
+            if lines:
+                context["about_yourself"] = lines
         rung = getattr(agent, "rung", None)
         if rung:
             from jarvis.agent import authority

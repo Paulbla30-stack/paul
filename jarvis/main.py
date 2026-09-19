@@ -407,6 +407,8 @@ class JarvisSystem:
             store=self.store,
             notifier=self.notifier,
         )
+        from jarvis.agent.selfknowledge import build_self_knowledge
+        self.agent.self_knowledge = build_self_knowledge(self.config, self.log)
         if self.ledger is not None:
             brain = self.agent.brain
             self.ledger.record("action", {

@@ -41,7 +41,16 @@ from typing import Optional
 FORMAT = "glass-ledger/v2"
 SIGN_DOMAIN = b"glass-ledger/v2:"
 GENESIS_PREV = "0" * 64
-KINDS = ("genesis", "thought", "decision", "gate", "action", "outcome", "alert")
+# The kinds of thing that can be said about the agent. Adding one is a format
+# change: a verifier written against the published spec rejects an entry whose
+# kind it does not know, and an older Jarvis reading a newer ledger would call
+# an honest chain corrupt. So they are append-only, in order, and each one is a
+# category of event rather than a convenience.
+#
+#   notification   a message that left the machine for the operator
+#   consolidation  the agent reorganising its own memory
+KINDS = ("genesis", "thought", "decision", "gate", "action", "outcome", "alert",
+         "notification", "consolidation")
 MAX_BODY_BYTES = 65536
 
 

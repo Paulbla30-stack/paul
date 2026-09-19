@@ -121,6 +121,10 @@ class AgentCore:
         from jarvis.agent.consolidate import Consolidator
         self.consolidator = Consolidator(self.store, self.log,
                                          config.get("consolidate") or {}, self.ledger)
+        # Behavioural self-knowledge: aggregates over the ledger, which the
+        # agent may not read. Set by main.py; None means it learns nothing
+        # about its own conduct, which is the state this was built to end.
+        self.self_knowledge = None
         self.notes = deque(maxlen=config.get("notes_limit", 20))
         self._restore_notes()
         # Files handed to the agent through the UI / API; the brain sees them.
