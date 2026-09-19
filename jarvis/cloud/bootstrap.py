@@ -35,6 +35,7 @@ from jarvis.cloud.imds import IMDSClient
 from jarvis.brain.credentials import (DEFAULT_KEY_FILE, fetch_ssm_parameter,
                                         fetch_secretsmanager_secret, install_key_file)
 from jarvis.cloud import tunnel as _tunnel
+from jarvis.agent import notify as _notify
 
 DEFAULT_OUTPUT = "/etc/jarvis/cloud.yaml"
 DEFAULT_BASE_CONFIG = "/etc/jarvis/config.yaml"
@@ -133,6 +134,9 @@ def build_cloud_config(imds: IMDSClient) -> dict:
         config.setdefault("llm", {})["api_key_ssm_parameter"] = tags["jarvis:llm-key-parameter"]
     if tags.get("jarvis:ledger-bucket"):
         config.setdefault("ledger", {}).setdefault("anchor", {})["bucket"] = tags["jarvis:ledger-bucket"]
+    if tags.get("jarvis:notify-destination-secret"):
+        config.setdefault("cloud", {}).setdefault("notify", {})["destination_secret"] = \
+            tags["jarvis:notify-destination-secret"]
     if tags.get("jarvis:tunnel-token-secret"):
         config.setdefault("tunnel", {})["token_secret"] = tags["jarvis:tunnel-token-secret"]
     if tags.get("jarvis:tunnel-token-parameter"):
@@ -178,6 +182,9 @@ def strip_secrets(config: dict) -> None:
     if isinstance(llm, dict):
         llm.pop("api_key", None)
     _tunnel.strip_secrets(config)
+    notify = (config.get("cloud") or {}).get("notify")
+    if isinstance(notify, dict):
+        notify.pop("destination", None)
 
 
 def provision_llm_key(config: dict, key_file: str = DEFAULT_KEY_FILE,
@@ -227,6 +234,51 @@ def provision_llm_key(config: dict, key_file: str = DEFAULT_KEY_FILE,
     return "; ".join(notes) if notes else "no key configured"
 
 
+def provision_notify_destination(config: dict,
+                                 dest_file: str = _notify.DEFAULT_DESTINATION_FILE,
+                                 fetch=fetch_ssm_parameter,
+                                 fetch_secret=fetch_secretsmanager_secret) -> str:
+    """Put the operator's address on disk 0600, out of the overlay.
+
+    Where the agent may speak to is the operator's decision, not the model's,
+    so it arrives the same way the LLM key and the tunnel token do: fetched
+    with the instance role from a secret, written root-only, and never left
+    in the world-readable cloud.yaml. Returns a note for the boot log; never
+    raises, because a box that cannot fetch it should still come up.
+    """
+    section = (config.get("cloud") or {}).get("notify")
+    if not isinstance(section, dict):
+        return "no notify section"
+    if section.get("enabled") is False:
+        section.pop("destination", None)
+        return "notifications disabled"
+    dest_file = section.get("destination_file") or dest_file
+    inline = section.pop("destination", None)
+    if isinstance(inline, str) and inline.strip():
+        install_key_file(inline.strip(), dest_file)
+        section["destination_file"] = dest_file
+        return f"inline destination moved to {dest_file}"
+    region = (config.get("cloud", {}).get("instance") or {}).get("region")
+    notes = []
+    secret = section.get("destination_secret")
+    if secret:
+        value = fetch_secret(secret, region)
+        if value:
+            install_key_file(value.strip(), dest_file)
+            section["destination_file"] = dest_file
+            return f"destination fetched from Secrets Manager {secret} -> {dest_file}"
+        notes.append(f"Secrets Manager secret {secret} not readable")
+    param = section.get("destination_ssm_parameter")
+    if param:
+        value = fetch(param, region)
+        if value:
+            install_key_file(value.strip(), dest_file)
+            section["destination_file"] = dest_file
+            return f"destination fetched from SSM {param} -> {dest_file}"
+        notes.append(f"SSM parameter {param} not readable")
+    return "; ".join(notes) if notes else "no destination configured"
+
+
 def dump_config(config: dict) -> str:
     try:
         import yaml
@@ -273,10 +325,12 @@ def main(argv=None):
 
     key_note = "skipped"
     tunnel_note = "skipped"
+    notify_note = "skipped"
     if not args.skip_llm_key and not args.print_only:
         key_note = provision_llm_key(config, args.key_file)
     if not args.print_only:
         tunnel_note = _tunnel.provision_token(config)
+        notify_note = provision_notify_destination(config)
     # Whatever happened above, the overlay never carries a credential.
     strip_secrets(config)
 
@@ -295,6 +349,7 @@ def main(argv=None):
     print(f"[bootstrap] goals: {len(config['goals'])}")
     print(f"[bootstrap] llm key: {key_note}")
     print(f"[bootstrap] tunnel: {tunnel_note}")
+    print(f"[bootstrap] notify: {notify_note}")
     return 0
 
 

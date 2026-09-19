@@ -47,6 +47,17 @@ READ_ONLY_TASKS = frozenset({
     "cloud_probe", "goal_step", "inspect_path",
 })
 
+# Telling the operator something is reporting, and every rung may report --
+# an observer that may look but not say what it saw is not an observer. So
+# this is within the mandate at observer, the lowest rung there is.
+#
+# It is not a loophole in the "never send anything externally" gate. The
+# notifier has exactly one destination, fixed at boot from a secret the model
+# cannot read, with a severity floor, an hourly cap, a gap and quiet hours
+# enforced in code below the model. The operator approved that destination and
+# those limits in advance; the agent chooses only whether this is worth saying.
+REPORTING_TASKS = frozenset({"notify_operator"})
+
 # Programs that only read. The list is deliberately short: anything not on
 # it is a change, so a missing entry costs a proposal, never a surprise.
 READ_ONLY_COMMANDS = frozenset({
@@ -189,7 +200,7 @@ def classify_task(task) -> str:
     kind = getattr(getattr(task, "task_type", None), "value", None) or ""
     if kind == "shell_command":
         return classify_command((task.metadata or {}).get("command", ""))
-    if kind in READ_ONLY_TASKS:
+    if kind in READ_ONLY_TASKS or kind in REPORTING_TASKS:
         return READ
     return CHANGE
 

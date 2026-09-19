@@ -67,7 +67,7 @@ class AgentCore:
 
     def __init__(self, config: dict, hardware: dict, logger: logging.Logger,
                  brain=None, shell_policy: Optional[dict] = None, ledger=None,
-                 store=None):
+                 store=None, notifier=None):
         self.config = config
         self.hardware = hardware
         self.log = logger.getChild("agent")
@@ -78,8 +78,13 @@ class AgentCore:
         # Sub-components
         self.memory = AgentMemory(max_entries=1000)
         self.planner = TaskPlanner(self.memory, profile=self.profile)
+        # The one way out to the operator when he is not looking at the UI.
+        # Everything the agent works out is stuck in the box without it.
+        from jarvis.agent.notify import Notifier
+        self.notifier = notifier if notifier is not None else Notifier({}, self.log)
         self.executor = TaskExecutor(hardware, self.memory, self.log,
-                                     shell_policy=shell_policy)
+                                     shell_policy=shell_policy,
+                                     notifier=self.notifier)
         # Optional LLM planner (jarvis.brain.ClaudeBrain). When present it
         # is consulted before the rule-based planner; when it cannot answer
         # the rule-based planner takes over for that cycle.
@@ -457,6 +462,24 @@ class AgentCore:
                                             "command": action.get("command", "")[:1000],
                                             "reason": str(policy)[:300]})
             self.ledger.record("outcome", outcome)
+            # A message that left the machine is a different kind of event
+            # from a command that ran on it, so it gets its own entry rather
+            # than an output digest. Only the destination *hint* goes in: the
+            # ledger is copied to an Object Lock bucket nobody can delete from
+            # for thirty days, and the operator's phone number is not a thing
+            # to publish there.
+            if task.task_type == TaskType.NOTIFY_OPERATOR:
+                verdict = result.get("output") or {}
+                self.ledger.record("notification", {
+                    "cycle": self.cycle_count,
+                    "subject": str(verdict.get("subject") or "")[:200],
+                    "severity": verdict.get("severity"),
+                    "sent": bool(verdict.get("sent")),
+                    "held": bool(verdict.get("held")),
+                    "reason": str(verdict.get("reason") or "")[:200] or None,
+                    "channel": self.notifier.channel,
+                    "destination": self.notifier.destination_hint(),
+                })
 
         self.current_task = None
         self.task_history.append({
@@ -716,6 +739,7 @@ class AgentCore:
             "ledger": self.ledger.status(),
             "memory_store": self.store.stats(),
             "authority": {"rung": self.rung, "proposals": len(self.proposals)},
+            "notify": self.notifier.status(),
         }
 
     def shutdown(self):

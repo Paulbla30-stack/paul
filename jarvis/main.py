@@ -367,6 +367,19 @@ class JarvisSystem:
         from jarvis.agent.store import build_store
         return build_store(self.config.get("memory"), self.log)
 
+    def build_notifier(self):
+        """The channel out to the operator; holds everything when unset."""
+        from jarvis.agent.notify import build_notifier
+        notifier = build_notifier(self.config, self.log)
+        if notifier.configured:
+            self.log.info("Operator channel ready: %s to %s (min %s, max %d/hr)",
+                          notifier.channel, notifier.destination_hint(),
+                          notifier.min_severity, notifier.max_per_hour)
+        else:
+            self.log.info("No operator channel configured; the agent can only "
+                          "speak when someone opens the UI")
+        return notifier
+
     def build_agent(self):
         """Construct the AgentCore and seed it with configured goals."""
         hardware = {
@@ -379,6 +392,7 @@ class JarvisSystem:
         llm_cfg = self.config.get("llm") or {}
         self.ledger = self.build_ledger()
         self.store = self.build_store()
+        self.notifier = self.build_notifier()
         self.agent = AgentCore(
             config=self.config["agent"],
             hardware=hardware,
@@ -387,6 +401,7 @@ class JarvisSystem:
             shell_policy=llm_cfg.get("shell"),
             ledger=self.ledger,
             store=self.store,
+            notifier=self.notifier,
         )
         if self.ledger is not None:
             brain = self.agent.brain

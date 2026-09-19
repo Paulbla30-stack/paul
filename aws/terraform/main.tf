@@ -131,6 +131,53 @@ locals {
   cloudflare_edge_cidrs = ["198.41.192.0/24", "198.41.200.0/24"]
 }
 
+data "aws_secretsmanager_secret" "notify_destination" {
+  count = var.notify_destination_secret != "" ? 1 : 0
+  name  = startswith(var.notify_destination_secret, "arn:") ? null : var.notify_destination_secret
+  arn   = startswith(var.notify_destination_secret, "arn:") ? var.notify_destination_secret : null
+}
+
+locals {
+  notify_enabled = var.notify_destination_secret != "" && var.notify_channel != "none"
+
+  # Publishing a text with no TopicArn is an account-wide action, so it cannot
+  # be narrowed by resource. It is narrowed instead by everything around it:
+  # one destination the model cannot read or change, a severity floor, an
+  # hourly cap, a gap and quiet hours, all in code below the planner.
+  notify_statements = local.notify_enabled ? concat(
+    [{
+      Effect   = "Allow"
+      Action   = ["secretsmanager:GetSecretValue"]
+      Resource = data.aws_secretsmanager_secret.notify_destination[0].arn
+    }],
+    var.notify_channel == "sns_sms" ? [{
+      Effect   = "Allow"
+      Action   = ["sns:Publish"]
+      Resource = "*"
+    }] : [],
+    var.notify_channel == "sns_topic" ? [{
+      Effect   = "Allow"
+      Action   = ["sns:Publish"]
+      Resource = "arn:aws:sns:${var.region}:${data.aws_caller_identity.current.account_id}:*"
+    }] : [],
+    var.notify_channel == "ses_email" ? [{
+      Effect   = "Allow"
+      Action   = ["ses:SendEmail"]
+      Resource = "*"
+    }] : [],
+  ) : []
+}
+
+resource "aws_iam_role_policy" "notify" {
+  count = length(local.notify_statements) > 0 ? 1 : 0
+  name  = "jarvis-notify"
+  role  = aws_iam_role.jarvis.id
+  policy = jsonencode({
+    Version   = "2012-10-17"
+    Statement = local.notify_statements
+  })
+}
+
 # Bedrock: let the instance role invoke catalog models, inference profiles
 # and imported models. Scope var.bedrock_model_arns down once you know the
 # exact model or imported-model ARN.
@@ -427,6 +474,7 @@ resource "aws_instance" "jarvis" {
     var.ledger_anchor ? { "jarvis:ledger-bucket" = aws_s3_bucket.ledger[0].bucket } : {},
     var.tunnel_token_secret != "" ? { "jarvis:tunnel-token-secret" = var.tunnel_token_secret } : {},
     var.tunnel_token_ssm_parameter != "" ? { "jarvis:tunnel-token-parameter" = var.tunnel_token_ssm_parameter } : {},
+    local.notify_enabled ? { "jarvis:notify-destination-secret" = var.notify_destination_secret } : {},
   )
 }
 

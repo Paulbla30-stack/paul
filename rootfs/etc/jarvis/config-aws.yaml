@@ -55,6 +55,29 @@ cloud:
     tls_dir: /etc/jarvis/tls
     upload_dir: /var/lib/jarvis/uploads
     max_upload_mb: 50
+  # The one way the agent can reach the operator when nobody is looking at
+  # the UI. Without it, everything it works out stays inside the box.
+  #
+  # The address is NOT set here: it arrives at boot from Secrets Manager or
+  # SSM (jarvis:notify-destination-secret) and lands 0600 in destination_file,
+  # which the shell deny-list refuses, so the model can neither read it nor
+  # send anywhere else. The constitution's "never send anything externally
+  # without approval" is satisfied structurally: the operator chose one
+  # destination and these limits in advance, in config the agent cannot edit.
+  #
+  # The limits are enforced in code below the model, because a prompt asking
+  # a model to be judicious is a hope and a rate limit is a fact.
+  notify:
+    enabled: false           # set true once a destination secret exists
+    channel: sns_sms         # sns_sms | sns_topic | ses_email | none
+    destination_file: /etc/jarvis/notify.dest
+    sender_id: Jarvis        # SMS sender ID where the carrier honours one
+    min_severity: notice     # info never sends on its own; alert ignores quiet hours
+    max_per_hour: 4
+    min_gap_s: 900           # 15 minutes between messages
+    dedupe_window_s: 21600   # the same subject at most once per 6 hours
+    quiet_hours: [22, 7]     # local; an alert goes through anyway
+    timezone: Europe/London
 
 goals: []                    # add goals via user data or the jarvis:goal tag
 

@@ -78,7 +78,7 @@ DEFAULT_SHELL_DENY_PATTERNS = [
     # signs UI sessions are as good as a login, and the tunnel token is the
     # tunnel itself -- whoever holds it can re-point the hostname at their
     # own machine and collect the logins meant for this one
-    r"/etc/jarvis/(?:token|session\.key|cloudflared\.env)\b",
+    r"/etc/jarvis/(?:token|session\.key|cloudflared\.env|notify\.dest)\b",
     _CMD + r"cloudflared\b",
     r"\baws\s+ssm\s+get-parameter",
     r"~?/\.(?:ssh|aws|config/anthropic)\b",
@@ -219,13 +219,16 @@ class TaskExecutor:
     """
 
     def __init__(self, hardware: dict, memory: AgentMemory, logger: logging.Logger,
-                 shell_policy: Optional[dict] = None):
+                 shell_policy: Optional[dict] = None, notifier=None):
         self.hardware = hardware
         self.memory = memory
         self.log = logger.getChild("executor")
         self.shell_policy = normalise_shell_policy(shell_policy, self.log)
         # Set by the agent; None leaves the executor unbounded, as before.
         self.rung = None
+        # The one way out to the operator. None means nothing was configured,
+        # and the handler says so rather than pretending the message landed.
+        self.notifier = notifier
 
         # Map task types to handlers
         self._handlers = {
@@ -239,6 +242,7 @@ class TaskExecutor:
             TaskType.CLOUD_PROBE: self._handle_cloud_probe,
             TaskType.SHELL_COMMAND: self._handle_shell_command,
             TaskType.INSPECT_PATH: self._handle_inspect_path,
+            TaskType.NOTIFY_OPERATOR: self._handle_notify_operator,
         }
 
     def execute(self, task: Task) -> dict:
@@ -400,6 +404,33 @@ class TaskExecutor:
         # A path that is not there is a useful answer, not a failure: it is
         # the answer that stops the planner inventing one.
         return {"success": True, "output": result}
+
+    def _handle_notify_operator(self, task: Task) -> dict:
+        """Say something to the operator when he is not looking at the UI.
+
+        The planner chooses whether a thing is worth saying and how urgent it
+        is. It does not choose who to tell, and it cannot talk its way past
+        the limits: the destination and the rate rules live in the notifier,
+        below this, set from config the agent cannot edit.
+
+        A held message is a success, not a failure. The agent did the right
+        thing by raising it; the notifier decided it was not worth a buzz, and
+        the reason comes back so the planner learns the shape of the budget
+        instead of retrying into it.
+        """
+        meta = task.metadata or {}
+        subject = str(meta.get("subject") or task.description or "").strip()
+        body = str(meta.get("body") or meta.get("detail") or "").strip()
+        severity = str(meta.get("severity") or "notice").strip().lower()
+        if not subject:
+            return {"success": False, "error": "notify_operator needs a subject"}
+        if self.notifier is None:
+            return {"success": False,
+                    "error": "no operator channel configured; nothing was sent"}
+        verdict = self.notifier.send(subject, body, severity=severity,
+                                     key=str(meta.get("key") or "") or None)
+        self.memory.store(category="notification", data=verdict)
+        return {"success": True, "output": verdict}
 
     def _handle_user_command(self, task: Task) -> dict:
         """Handle a user-initiated command via input devices."""

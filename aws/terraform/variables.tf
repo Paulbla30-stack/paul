@@ -144,3 +144,19 @@ variable "tunnel_hostname" {
   default     = ""
   description = "Informational: the hostname the tunnel publishes, e.g. jarvis.example.co.uk. The mapping itself lives in Cloudflare, not here, because a token-run tunnel is configured remotely."
 }
+
+variable "notify_destination_secret" {
+  type        = string
+  default     = ""
+  description = "AWS Secrets Manager secret (name or ARN) holding the operator's phone number in E.164 (+447700900123) or email address. Setting it lets the agent reach you when nobody is looking at the UI. Empty means the agent can only speak when the UI is open."
+}
+
+variable "notify_channel" {
+  type        = string
+  default     = "sns_sms"
+  description = "How the agent reaches the operator: sns_sms (a text), sns_topic (fan out to an existing topic), or ses_email."
+  validation {
+    condition     = contains(["sns_sms", "sns_topic", "ses_email", "none"], var.notify_channel)
+    error_message = "notify_channel must be sns_sms, sns_topic, ses_email or none."
+  }
+}
