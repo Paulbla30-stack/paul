@@ -151,6 +151,9 @@ memory:
     every_s: 3600            # a slow clock; an hour of observations is the unit
     min_group: 3             # observations before a merge is worth writing
     promote_at: 5            # confirmations before something becomes standing
+    promote_span_s: 21600    # ...and they must span at least this long. A count
+                             # says a thing was repeated; a span says it kept
+                             # being true, which is what "standing fact" claims.
     similarity: 0.6          # overlap in content words to count as the same thing
     decay: 0.9               # weight multiplier for anything unused
     decay_after_s: 86400

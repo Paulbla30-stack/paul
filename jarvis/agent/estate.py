@@ -103,7 +103,7 @@ class Estate:
         """Images, snapshots and buckets that have been sitting a while."""
         cutoff = self.clock() - self.stale_days * 86400
         out = {"stale_days": self.stale_days, "images": [], "snapshots": [],
-               "buckets": [], "unavailable": []}
+               "buckets": [], "unavailable": [], "totals": {}}
         self._images(out, cutoff)
         self._snapshots(out, cutoff)
         self._buckets(out, cutoff)
@@ -113,6 +113,7 @@ class Estate:
     def _images(self, out: dict, cutoff: float):
         try:
             images = self._client("ec2").describe_images(Owners=["self"])["Images"]
+            out["totals"]["images"] = len(images)
         except Exception as exc:
             out["unavailable"].append(f"images: {type(exc).__name__}")
             return
@@ -127,6 +128,7 @@ class Estate:
     def _snapshots(self, out: dict, cutoff: float):
         try:
             snaps = self._client("ec2").describe_snapshots(OwnerIds=["self"])["Snapshots"]
+            out["totals"]["snapshots"] = len(snaps)
         except Exception as exc:
             out["unavailable"].append(f"snapshots: {type(exc).__name__}")
             return
@@ -143,6 +145,7 @@ class Estate:
     def _buckets(self, out: dict, cutoff: float):
         try:
             buckets = self._client("s3").list_buckets()["Buckets"]
+            out["totals"]["buckets"] = len(buckets)
         except Exception as exc:
             out["unavailable"].append(f"buckets: {type(exc).__name__}")
             return
@@ -177,6 +180,17 @@ class Estate:
         else:
             out.append(f"Spend is not visible from here ({cost.get('reason')}).")
         left = report["leftovers"]
+        # Age is not the only way something accumulates. Nine machine images
+        # built this week, of which one is deployed, are eight nobody needs
+        # and none of them are "old". The count says that; the age does not.
+        totals = left.get("totals") or {}
+        if totals:
+            held = _join([f"{n} {_plural(k, n)}" for k, n in
+                          (("machine image", totals.get("images", 0)),
+                           ("snapshot", totals.get("snapshots", 0)),
+                           ("bucket", totals.get("buckets", 0))) if n])
+            if held:
+                out.append(f"The account holds {held}.")
         if left["total"]:
             bits = []
             for key, one, many in (("images", "machine image", "machine images"),
@@ -191,6 +205,10 @@ class Estate:
         if left["unavailable"]:
             out.append("Could not look at: " + ", ".join(left["unavailable"]) + ".")
         return out
+
+
+def _plural(noun: str, count: int) -> str:
+    return noun if count == 1 else noun + "s"
 
 
 def _join(items) -> str:

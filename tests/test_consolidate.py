@@ -157,17 +157,41 @@ class TestWeight(Base):
 
 
 class TestPromotion(Base):
+    """Repeated is not the same as durable.
 
-    def test_what_keeps_being_re_established_becomes_standing(self):
-        for _ in range(6):
+    Run against the live agent's real memory, promotion by count alone wanted
+    to make standing facts of "no new security findings to act on; idling
+    until the next cycle" -- a status line the planner had written six times
+    in one session. A count says a thing was repeated. A span says it kept
+    being true, which is the claim "standing fact" actually makes.
+    """
+
+    def _age(self, memory_id, seconds):
+        """Backdate when this was first written, leaving the last sighting."""
+        self.store._db.execute("UPDATE memories SET first_ts = ts - ? WHERE id = ?",
+                               (float(seconds), memory_id))
+        self.store._db.commit()
+
+    def test_what_keeps_being_true_across_days_becomes_standing(self):
+        entry = self.store.remember("the planner is an imported Qwen3-32B on Bedrock")
+        for _ in range(5):
             self.store.remember("the planner is an imported Qwen3-32B on Bedrock")
+        self._age(entry["id"], 3 * 86400)
         report = self.consolidator().run()
         self.assertEqual(len(report["promoted"]), 1)
         self.assertTrue(self.store.live(5)[0]["pinned"])
 
+    def test_a_status_line_repeated_in_one_session_is_not_a_fact(self):
+        for _ in range(8):
+            self.store.remember("no new security findings; idling until the next cycle")
+        report = self.consolidator().run()
+        self.assertEqual(report["promoted"], [])
+        self.assertFalse(self.store.live(5)[0]["pinned"])
+
     def test_something_seen_twice_is_not_promoted(self):
-        for _ in range(2):
-            self.store.remember("a passing observation")
+        entry = self.store.remember("a passing observation")
+        self.store.remember("a passing observation")
+        self._age(entry["id"], 10 * 86400)
         self.assertEqual(self.consolidator().run()["promoted"], [])
 
 

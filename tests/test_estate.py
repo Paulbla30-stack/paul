@@ -126,6 +126,20 @@ class TestAccumulation(unittest.TestCase):
         self.assertIn("1 machine image and 2 snapshots", line)
         self.assertNotIn("1 machine images", line)
 
+    def test_it_reports_the_count_even_when_nothing_is_old(self):
+        """Nine images built this week, of which one is deployed, are eight
+        nobody needs and none of them are old. The count says that."""
+        e = estate(ec2=FakeEC2(
+            images=[{"ImageId": f"ami-{i}", "Name": "x", "CreationDate": old_iso(1)}
+                    for i in range(9)],
+            snapshots=[{"SnapshotId": f"s{i}", "VolumeSize": 8,
+                        "StartTime": old_iso(1)} for i in range(9)]))
+        left = e.leftovers()
+        self.assertEqual(left["total"], 0)
+        self.assertEqual(left["totals"]["images"], 9)
+        line = " ".join(e.lines())
+        self.assertIn("holds 9 machine images and 9 snapshots", line)
+
     def test_join_reads_like_a_sentence(self):
         self.assertEqual(_join([]), "")
         self.assertEqual(_join(["a"]), "a")

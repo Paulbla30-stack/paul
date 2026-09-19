@@ -73,6 +73,10 @@ MIGRATIONS = (
     ("state", "ALTER TABLE memories ADD COLUMN state TEXT NOT NULL DEFAULT 'live'"),
     ("derived", "ALTER TABLE memories ADD COLUMN derived INTEGER NOT NULL DEFAULT 0"),
     ("sources", "ALTER TABLE memories ADD COLUMN sources TEXT"),
+    # When this was FIRST written, never updated after. `ts` moves to the most
+    # recent sighting, so on its own it cannot tell a fact re-established over
+    # a week from a status line repeated six times in five minutes.
+    ("first_ts", "ALTER TABLE memories ADD COLUMN first_ts REAL"),
 )
 
 STATES = ("live", "dormant", "superseded")
@@ -233,9 +237,9 @@ class MemoryStore:
                     return {"id": row["id"], "text": text, "kind": kind,
                             "repeat": True, "seen": row["seen"] + 1}
                 cur = self._db.execute(
-                    "INSERT INTO memories (ts, kind, source, cycle, text, digest, pinned)"
-                    " VALUES (?,?,?,?,?,?,?)",
-                    (now, kind, source, cycle, text, digest, int(bool(pinned))))
+                    "INSERT INTO memories (ts, first_ts, kind, source, cycle, text,"
+                    " digest, pinned) VALUES (?,?,?,?,?,?,?,?)",
+                    (now, now, kind, source, cycle, text, digest, int(bool(pinned))))
                 self._db.commit()
                 new_id = cur.lastrowid
         except Exception as exc:
@@ -399,7 +403,8 @@ class MemoryStore:
                "source": row["source"], "cycle": row["cycle"], "text": row["text"],
                "pinned": bool(row["pinned"]), "seen": row["seen"]}
         for extra, default in (("weight", 1.0), ("used", 0), ("used_at", None),
-                               ("state", "live"), ("derived", 0), ("sources", None)):
+                               ("state", "live"), ("derived", 0), ("sources", None),
+                               ("first_ts", None)):
             if extra in keys:
                 out[extra] = row[extra]
         out["derived"] = bool(out.get("derived"))

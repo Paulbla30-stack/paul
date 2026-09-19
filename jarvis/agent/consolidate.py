@@ -58,6 +58,12 @@ MEASUREMENT = re.compile(
 
 DEFAULT_MIN_GROUP = 3        # observations before a merge is worth writing
 DEFAULT_PROMOTE_AT = 5       # confirmations before something becomes standing
+# ...and they have to be spread out. Run against the live agent's real memory,
+# promotion by count alone wanted to make standing facts of "no new security
+# findings to act on; idling until the next cycle" -- a status line the planner
+# had written six times in one session. A count says a thing was repeated. A
+# span says it kept being true, which is the claim "standing fact" makes.
+DEFAULT_PROMOTE_SPAN_S = 6 * 3600
 DEFAULT_DECAY = 0.9
 DEFAULT_DECAY_AFTER_S = 86400
 DEFAULT_MAX_MERGES = 8       # per pass; consolidation is not the agent's job
@@ -114,6 +120,7 @@ class Consolidator:
         self.enabled = bool(cfg.get("enabled", True))
         self.min_group = max(2, int(cfg.get("min_group", DEFAULT_MIN_GROUP)))
         self.promote_at = max(2, int(cfg.get("promote_at", DEFAULT_PROMOTE_AT)))
+        self.promote_span_s = float(cfg.get("promote_span_s", DEFAULT_PROMOTE_SPAN_S))
         self.similarity_threshold = float(cfg.get("similarity", 0.6))
         self.decay_factor = float(cfg.get("decay", DEFAULT_DECAY))
         self.decay_after_s = float(cfg.get("decay_after_s", DEFAULT_DECAY_AFTER_S))
@@ -267,6 +274,12 @@ class Consolidator:
             if row.get("pinned") or row.get("derived"):
                 continue
             if int(row.get("seen") or 0) + int(row.get("used") or 0) < self.promote_at:
+                continue
+            # Repeated is not the same as durable. Something first seen and
+            # last seen within the same session is a status line, however
+            # many times it was written.
+            first = row.get("first_ts") or row.get("ts")
+            if first and (row["ts"] - float(first)) < self.promote_span_s:
                 continue
             if not dry_run:
                 self.store.reinforce([row["id"]], amount=1.0)
