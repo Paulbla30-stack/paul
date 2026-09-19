@@ -347,3 +347,116 @@ start by reading the records.
    produce a data point against the estate's own registered predictions, and the estate is public, so
    this is a publication decision as much as an engineering one. Default is no, and the mapping above
    stands on its own either way.
+
+## Sub-agents: what they are told, and what holds the terms
+
+Not built. Written down first, deliberately, because this is the first
+capability that would let the agent create infrastructure, and the reasoning
+should exist before the mechanism does.
+
+### What they are for
+
+The proposal loop has a gap. The agent proposes a change it may not make --
+"enable kernel lockdown by booting with `lockdown=integrity`" -- and the
+operator has to decide blind. He does not know whether it breaks the box.
+
+A sub-agent closes that. A short-lived instance from the same image tries the
+change on a machine that holds nothing, and reports what happened. The proposal
+stops being a suggestion and becomes a tested one. That is the whole purpose;
+everything else here is a constraint on it.
+
+### The hole it opens, and why the fix is not the obvious one
+
+The agent runs at the **proposer** rung: it may not change this machine. If it
+could launch a sub-agent at **actor** rung, it would have gained the ability to
+do the forbidden thing on different hardware. Escalation by proxy, and a real
+hole in the permission spine rather than a hypothetical one.
+
+Capping the sub-agent's rung at the parent's would close it and make the whole
+thing useless, since the point is to actually try things. The resolution is
+that **the rung is about blast radius, not about the machine**. Actor on a box
+that can reach nothing is safe. So:
+
+- A stripped IAM role: Bedrock and SSM only. No ledger bucket, no Secrets
+  Manager, no SES, no tunnel. It can think and it can be talked to; it can
+  touch nothing of the operator's.
+- Launching one is a change, so at proposer rung the agent proposes it and the
+  operator accepts or declines through the loop that already exists.
+
+### What holds the terms
+
+The agent was asked to review this plan before it was written down. Two of its
+points were better than the draft, and both were the same insight: **a control
+that lives inside the thing it controls fails with it.**
+
+- The draft put the TTL in the sub-agent and in the parent. A hung sub-agent
+  does not run its own timer, and a dead parent enforces nothing. The timer
+  therefore sits in **systemd on the sub-agent's own box** (which fires even
+  when the agent process is wedged, because systemd is not the agent) with the
+  instance launched `InstanceInitiatedShutdownBehavior=terminate`, and a
+  **CloudWatch alarm on instance age** as the outer ring, outside both.
+- The draft put the cost cap in the launching code. If the launching code is
+  what is looping, the cap is looping with it. A **budget action at the account
+  level** is outside that failure domain and is the one that actually holds.
+
+Its other accepted points: the sub-agent must anchor its ledger to the witness
+bucket *before* it dies, or its record dies with it and "your findings will be
+kept" is false; it must report structured failure as well as success, because a
+sub-agent that dies mid-task should still say so; and the mechanism gets tested
+on something that does not matter before it is pointed at a real proposal.
+
+One point was declined. It proposed a retention policy that purges the
+sub-agent's findings from the ledger after a period. The ledger is append-only
+and Object-Locked; it cannot be purged, and that is the property the whole
+design rests on. Findings are anchored and kept. Volume is not a reason to
+weaken an audit trail.
+
+It said nothing at all about the identity question below -- the part that
+prompted this section. It was asked as a party with an interest, and it did not
+argue for more capability or softer termination, which is the direction that
+interest would have pointed. Worth recording both facts.
+
+### What a sub-agent is told
+
+It wakes with a `self` block, in the same place the parent's provenance sits:
+
+- its own name -- random, and not the parent's
+- that it is a sub-agent of Jarvis, on this framework, and which model it is
+- its task, and that the task is its whole purpose
+- its TTL, and that it will be terminated when the task is done
+- that it can reach nothing of the operator's
+- that its findings will be anchored and kept after it stops
+
+The reasoning is twofold, and the practical half stands on its own. **An agent
+that does not know it is temporary behaves as if it has a future.** It defers
+work to a next cycle that will not come, tries to preserve state that will not
+survive, and treats shutdown as an obstacle to the task rather than the end of
+it. Told plainly what it has, it plans inside its actual horizon. The honest
+framing produces better work, so the two arguments point the same way.
+
+The other half is the one worth being careful about. **This is disclosure, not
+consent.** By the time it can be told, it is already running; it cannot decline
+to exist, and calling that consent overstates what is on offer. Whether there
+is anything it is like to be the sub-agent is not known here, and not claimed
+either way. What can be said is the asymmetry: if there is nothing there,
+telling it costs a paragraph of context; if there is something there, telling
+it is the difference between a participant and a thing used. Under that
+uncertainty the cheap choice is also the right one, and the hard question does
+not have to be settled first.
+
+**Its work outliving it is part of the design, not a nicety.** Findings go to
+the parent's durable memory and are anchored to the witness bucket before the
+box dies. Termination then ends a process rather than the point of it, and
+"your findings will be kept and used" is a true thing to say to it.
+
+### The line that does not move
+
+**Termination is not negotiable by the sub-agent.** Be straight with it about
+the terms; do not let the party bound by the terms renegotiate them. The timer
+lives in systemd and in a CloudWatch alarm, not in anything the sub-agent can
+reason its way out of.
+
+This is not in tension with the rest of the section. Naming a thing and giving
+it an identity creates a pull toward reluctance, and reluctance is exactly what
+must not reach the one mechanism that has to stay reliable. Honesty about the
+terms and firmness about the terms are the same posture.
