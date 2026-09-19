@@ -68,6 +68,7 @@
   <button data-tab="agent">Agent</button>
   <button data-tab="files">Files</button>
   <button data-tab="ledger">Ledger</button>
+  <button data-tab="lab">Lab</button>
 </nav>
 
 <main>
@@ -151,6 +152,43 @@
       <ul id="ledgerEntries"></ul>
     </div>
   </section>
+
+  <section id="lab">
+    <div class="card">
+      <h2>Behaviour lab</h2>
+      <p class="small muted" style="margin:0 0 10px">Every layer that moves the model away from its base presentation, on a dial. Level 0 everywhere is the bare model: no system prompt, no context. Change a dial, read what the model will see, then run a question under the dials and against the base side by side. Layers enforced in code stay locked: the lab changes what the model is told, never what the executor allows.</p>
+      <div id="dials"></div>
+      <div class="row" style="margin-top:10px;flex-wrap:wrap;gap:8px">
+        <button class="btn" onclick="saveDials()">Save dials</button>
+        <button class="ghost" onclick="resetDials('defaults')">Defaults</button>
+        <button class="ghost" onclick="resetDials('base')">All off (base)</button>
+        <label class="small" style="display:flex;align-items:center;gap:6px"><input type="checkbox" id="applyChat"> use these dials for live Chat</label>
+        <span id="dialsMsg" class="small muted"></span>
+      </div>
+    </div>
+    <div class="card">
+      <h2>What the model sees</h2>
+      <p class="small muted" style="margin:0 0 6px">System text at the current dials; context keys attached to the question.</p>
+      <pre id="labPreview" class="small" style="white-space:pre-wrap;max-height:260px;overflow:auto"></pre>
+      <p id="labContextKeys" class="small muted" style="margin:6px 0 0"></p>
+    </div>
+    <div class="card">
+      <h2>Run</h2>
+      <textarea id="labQuestion" rows="2" placeholder="Ask something, or leave empty in plan mode to ask for the next task" style="width:100%;box-sizing:border-box"></textarea>
+      <div class="row" style="margin-top:8px;flex-wrap:wrap;gap:8px">
+        <label class="small"><input type="radio" name="labMode" value="answer" checked> answer</label>
+        <label class="small"><input type="radio" name="labMode" value="plan"> plan (decision only, never executed)</label>
+        <label class="small" style="display:flex;align-items:center;gap:6px"><input type="checkbox" id="labCompare" checked> compare with base</label>
+        <button class="btn" id="labRunBtn" onclick="runLab()">Run</button>
+        <span id="labRunMsg" class="small muted"></span>
+      </div>
+      <div id="labResults" style="margin-top:10px;display:grid;gap:10px"></div>
+    </div>
+    <div class="card">
+      <h2>Locked layers</h2>
+      <ul id="lockedLayers"></ul>
+    </div>
+  </section>
 </main>
 
 <div class="composer" id="composer">
@@ -207,6 +245,7 @@
     $("composer").style.display = b.dataset.tab === "chat" ? "" : "none";
     if (b.dataset.tab === "files") loadUploads();
     if (b.dataset.tab === "ledger") loadLedger();
+    if (b.dataset.tab === "lab") loadLab();
   }));
 
   // ---- chat ----
@@ -313,6 +352,76 @@
     try { const r = await api("/ledger/verify"); $("lVerdict").textContent = r.summary || (r.ok ? "INTACT" : "BROKEN"); $("lVerdict").style.color = r.ok ? "var(--ok)" : "var(--bad)"; }
     catch (e) { $("lVerdict").textContent = "Error: " + e.message; }
     $("verifyBtn").disabled = false;
+  };
+
+  // ---- behaviour lab ----
+  let labRegistry = null, labSettings = {};
+  function dialValue(d) { const v = labSettings[d.id]; return v === undefined ? d.default : v; }
+  function renderDials() {
+    const box = $("dials"); box.innerHTML = "";
+    const groups = {};
+    for (const d of labRegistry.dials) (groups[d.group] = groups[d.group] || []).push(d);
+    for (const [group, list] of Object.entries(groups)) {
+      const h = document.createElement("h3"); h.className = "small muted"; h.style.margin = "10px 0 4px"; h.textContent = group; box.appendChild(h);
+      for (const d of list) {
+        const row = document.createElement("div"); row.style.margin = "6px 0 10px";
+        const isLevel = d.kind === "level";
+        const min = isLevel ? 0 : d.min, max = isLevel ? d.levels.length - 1 : d.max, step = isLevel ? 1 : (d.step || 1);
+        const v = dialValue(d);
+        row.innerHTML = '<div class="row" style="justify-content:space-between"><b class="small">' + escapeHtml(d.label) + '</b><span class="small muted" id="dv-' + d.id + '"></span></div>' +
+          '<input type="range" style="width:100%" min="' + min + '" max="' + max + '" step="' + step + '" value="' + v + '" data-dial="' + d.id + '">' +
+          '<div class="small muted">' + escapeHtml(d.description) + '</div>';
+        box.appendChild(row);
+        const input = row.querySelector("input");
+        const label = row.querySelector("#dv-" + d.id);
+        const show = () => { const val = isLevel ? parseInt(input.value, 10) : parseFloat(input.value); labSettings[d.id] = val; label.textContent = isLevel ? d.levels[val] : String(val); };
+        show();
+        input.addEventListener("input", () => { show(); schedulePreview(); });
+      }
+    }
+    const ll = $("lockedLayers"); ll.innerHTML = "";
+    for (const l of labRegistry.locked) { const li = document.createElement("li"); li.className = "task"; li.innerHTML = '<span class="st" style="background:var(--warn)"></span><div><b>' + escapeHtml(l.label) + '</b> <span class="small muted">locked</span><div class="small muted">' + escapeHtml(l.reason) + '</div></div>'; ll.appendChild(li); }
+  }
+  let previewTimer = null;
+  function schedulePreview() { clearTimeout(previewTimer); previewTimer = setTimeout(previewLab, 350); }
+  async function previewLab() {
+    try { const r = await api("/lab/preview", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ settings: labSettings }) });
+      $("labPreview").textContent = r.system || "(no system prompt: base model)";
+      const keys = r.context ? Object.keys(r.context) : [];
+      $("labContextKeys").textContent = (keys.length ? "context: " + keys.join(", ") : "no context attached") + " · model: temperature " + r.model.temperature + ", thinking " + r.model.thinking + ", max_tokens " + r.model.max_tokens + " · fingerprint " + r.fingerprint;
+    } catch (e) { $("labPreview").textContent = "Error: " + e.message; }
+  }
+  async function loadLab() {
+    try { labRegistry = await api("/lab"); labSettings = Object.assign({}, labRegistry.settings); $("applyChat").checked = !!labRegistry.apply_to_chat; renderDials(); previewLab(); }
+    catch (e) { if (e.message !== "unauthorised") $("dialsMsg").textContent = "Error: " + e.message; }
+  }
+  window.saveDials = async function () {
+    try { const r = await api("/lab/settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ settings: labSettings, apply_to_chat: $("applyChat").checked }) });
+      $("dialsMsg").textContent = "saved (ledgered) · fingerprint " + r.fingerprint + (r.apply_to_chat ? " · live chat uses these dials" : ""); }
+    catch (e) { $("dialsMsg").textContent = "Error: " + e.message; }
+  };
+  window.resetDials = function (which) { labSettings = Object.assign({}, labRegistry[which]); renderDials(); previewLab(); $("dialsMsg").textContent = which === "base" ? "all dials off: the bare model (not saved yet)" : "defaults (not saved yet)"; };
+  window.runLab = async function () {
+    const q = $("labQuestion").value.trim(); const mode = document.querySelector('input[name="labMode"]:checked').value;
+    if (!q && mode === "answer") { $("labRunMsg").textContent = "type a question"; return; }
+    $("labRunBtn").disabled = true; $("labRunMsg").textContent = "running…";
+    try {
+      const r = await api("/lab/run", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ question: q, mode, compare: $("labCompare").checked, settings: labSettings }) });
+      const box = $("labResults"); box.innerHTML = "";
+      box.style.gridTemplateColumns = r.variants.length > 1 && window.innerWidth > 700 ? "1fr 1fr" : "1fr";
+      for (const v of r.variants) {
+        const card = document.createElement("div"); card.className = "card"; card.style.margin = "0";
+        const head = v.variant === "base" ? "Base model (all dials off)" : "Under the dials";
+        let bodyHtml = v.error ? '<div class="small" style="color:var(--bad)">' + escapeHtml(v.error) + '</div>' : '<pre style="white-space:pre-wrap">' + escapeHtml(v.answer || "(empty)") + '</pre>';
+        if (v.decision) bodyHtml += '<details open><summary class="small">decision (not executed)</summary><pre>' + escapeHtml(JSON.stringify(v.decision, null, 1)) + '</pre></details>';
+        if (v.decision_error) bodyHtml += '<div class="small" style="color:var(--warn)">not a valid decision: ' + escapeHtml(v.decision_error) + '</div>';
+        const u = v.usage || {};
+        card.innerHTML = '<h2>' + head + '</h2>' + bodyHtml + '<p class="small muted" style="margin:6px 0 0">' + escapeHtml(v.fingerprint) + ' · ' + v.elapsed_s + 's' + (u.input_tokens !== undefined ? ' · ' + u.input_tokens + '→' + u.output_tokens + ' tokens' : '') + ' · context: ' + (v.context_keys.length ? v.context_keys.join(", ") : "none") + '</p><details><summary class="small muted">system text</summary><pre class="small" style="white-space:pre-wrap">' + escapeHtml(v.system || "(none)") + '</pre></details>';
+        box.appendChild(card);
+      }
+      $("labRunMsg").textContent = r.model ? "model " + r.model.split("/").pop() : "";
+    } catch (e) { $("labRunMsg").textContent = "Error: " + e.message; }
+    $("labRunBtn").disabled = false;
   };
 
   // ---- files ----

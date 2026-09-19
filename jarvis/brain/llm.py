@@ -164,6 +164,15 @@ inspect them with shell tools (head, wc, file, unzip -l) when a goal concerns th
 evidence about you, not context for you: never read, copy, repair or reason about it.
 - Reasoning is logged for the operator; keep it short and concrete."""
 
+# The task menu and answer format for behaviour-lab "plan" runs: the
+# interface a decision needs, kept apart from the behaviour rules the dials
+# switch on and off.
+PLAN_MENU = """You are asked for one planning decision for an agent that manages a Linux machine. \
+Tasks you can choose: system_check, hardware_probe, security_scan, maintenance, observation, \
+goal_step, cloud_probe, shell_command (a POSIX sh command line in "command"), or none. \
+Reply with ONE JSON object and nothing else, with fields: reasoning, task_type, description, \
+priority (0-10), command, goal, completed_goals (array), note. Nothing you choose is executed."""
+
 ASK_PROMPT = """You are the planner inside Jarvis, an agent-first operating system, answering \
 an operator's question about the machine you run on. Use the context (observations, goals, \
 recent task results, notes) as evidence, say what you do not know, and keep the answer \
@@ -689,20 +698,32 @@ class BaseBrain:
             clean.pop(0)
         return clean
 
-    def chat(self, agent, turns, observations: Optional[dict] = None) -> Optional[str]:
+    def chat(self, agent, turns, observations: Optional[dict] = None,
+             settings: Optional[dict] = None) -> Optional[str]:
         """Multi-turn conversation with the operator, grounded in agent context.
 
         ``turns`` is the transcript so far ([{role, content}, ...], last one
         from the user). The context is attached to the first user turn.
+        With ``settings`` (behaviour-lab dials) the system text, context and
+        model parameters come from the dials instead of the defaults.
         """
         messages = self._normalise_turns(turns)
         if not messages or messages[-1]["role"] != "user":
             return None
         try:
-            context = self.build_context(agent, observations)
-            preface = "Context as JSON:\n" + json.dumps(context, default=str, indent=1) + "\n\n"
-            messages[0] = {"role": "user", "content": preface + messages[0]["content"]}
-            completion = self._call(ASK_PROMPT, messages, structured=False, cache=False)
+            if settings is None:
+                context = self.build_context(agent, observations)
+                system = ASK_PROMPT
+                params = None
+            else:
+                from jarvis.brain import dials
+                composed = dials.compose(settings, self, agent, observations)
+                context, system, params = composed["context"], composed["system"], composed["model"]
+            if context is not None:
+                preface = "Context as JSON:\n" + json.dumps(context, default=str, indent=1) + "\n\n"
+                messages[0] = {"role": "user", "content": preface + messages[0]["content"]}
+            with self._lab_params(params):
+                completion = self._call(system, messages, structured=False, cache=False)
         except Exception as e:
             self.last_error = f"chat failed: {e.__class__.__name__}: {e}"
             self.log.error("LLM %s", self.last_error)
@@ -710,6 +731,87 @@ class BaseBrain:
         if completion is None:
             return None
         return completion.text.strip() or None
+
+    # ---- behaviour lab ----------------------------------------------------------
+
+    class _ParamOverride:
+        def __init__(self, brain, params):
+            self.brain, self.params, self.saved = brain, params, {}
+
+        def __enter__(self):
+            if not self.params:
+                return self
+            b = self.brain
+            for attr, value in self.brain._lab_attribute_map(self.params).items():
+                if hasattr(b, attr):
+                    self.saved[attr] = getattr(b, attr)
+                    setattr(b, attr, value)
+            return self
+
+        def __exit__(self, *exc):
+            for attr, value in self.saved.items():
+                setattr(self.brain, attr, value)
+            return False
+
+    def _lab_params(self, params: Optional[dict]):
+        return BaseBrain._ParamOverride(self, params)
+
+    def _lab_attribute_map(self, params: dict) -> dict:
+        """Provider hook: dial values -> brain attributes to override for one call."""
+        out = {"max_tokens": int(params.get("max_tokens") or self.max_tokens)}
+        if hasattr(self, "temperature") and params.get("temperature") is not None:
+            out["temperature"] = float(params["temperature"])
+        if hasattr(self, "think_mode") and params.get("thinking"):
+            out["think_mode"] = "on" if params["thinking"] == "on" else "off"
+        return out
+
+    def experiment(self, agent, question: str, settings: Optional[dict] = None,
+                   compare: bool = True, mode: str = "answer",
+                   observations: Optional[dict] = None) -> dict:
+        """Run one question under the dials (and, optionally, under the base model).
+
+        ``mode`` is "answer" (a conversational reply) or "plan" (ask for a
+        planning decision; the decision is returned, never executed). Each
+        variant is one budgeted model call; nothing here touches the agent's
+        state or the planning loop.
+        """
+        from jarvis.brain import dials
+        question = (question or "").strip()
+        variants = [("dials", dials.normalise(settings))]
+        if compare:
+            variants.insert(0, ("base", dials.base()))
+        results = []
+        for name, s in variants:
+            composed = dials.compose(s, self, agent, observations)
+            system = composed["system"]
+            user = question
+            if composed["context"] is not None:
+                user = ("Context as JSON:\n" + json.dumps(composed["context"], default=str, indent=1)
+                        + "\n\n" + question)
+            structured = mode == "plan"
+            if structured:
+                system = (system + "\n\n" if system else "") + PLAN_MENU
+                user = user or "Choose the next task."
+            started = time.time()
+            with self._lab_params(composed["model"]):
+                completion = self._call(system, [{"role": "user", "content": user}],
+                                        structured=structured, cache=False)
+            item = {"variant": name, "settings": s, "fingerprint": composed["fingerprint"],
+                    "system": system, "context_keys": sorted(composed["context"]) if composed["context"] else [],
+                    "model_params": composed["model"], "elapsed_s": round(time.time() - started, 2)}
+            if completion is None:
+                item["error"] = self.last_error or self.unavailable_reason() or "no completion"
+            else:
+                item["answer"] = completion.text.strip()
+                item["usage"] = completion.usage
+                if structured:
+                    try:
+                        item["decision"] = self._parse_plan(completion.text)
+                    except ValueError as e:
+                        item["decision_error"] = str(e)
+            results.append(item)
+        return {"question": question, "mode": mode, "model": self.model,
+                "provider": self.provider, "variants": results}
 
 
 class ClaudeBrain(BaseBrain):
@@ -751,19 +853,26 @@ class ClaudeBrain(BaseBrain):
             self.log.warning("LLM brain disabled: %s", self._disabled_reason)
             return None
 
+    def _lab_attribute_map(self, params: dict) -> dict:
+        out = super()._lab_attribute_map(params)
+        if params.get("thinking") and self.thinking != "omit":
+            out["thinking"] = "adaptive" if params["thinking"] == "on" else "disabled"
+        return out
+
     def _request_kwargs(self, system: str, messages, structured: bool,
                         cache: bool = True) -> dict:
         if isinstance(messages, str):
             messages = [{"role": "user", "content": messages}]
-        system_block = {"type": "text", "text": system}
-        if cache:
-            system_block["cache_control"] = {"type": "ephemeral"}
         kwargs = {
             "model": self.model,
             "max_tokens": self.max_tokens,
-            "system": [system_block],
             "messages": [{"role": m["role"], "content": m["content"]} for m in messages],
         }
+        if system:
+            system_block = {"type": "text", "text": system}
+            if cache:
+                system_block["cache_control"] = {"type": "ephemeral"}
+            kwargs["system"] = [system_block]
         if self.thinking != "omit":
             kwargs["output_config"] = {"effort": self.effort}
             kwargs["thinking"] = {"type": self.thinking}

@@ -451,28 +451,63 @@ class AgentCore:
         """Answer an operator question with the agent's context."""
         return self.chat([{"role": "user", "content": question}])
 
-    def chat(self, turns) -> str:
-        """Continue an operator conversation with the agent's context."""
+    def chat(self, turns, settings: Optional[dict] = None) -> str:
+        """Continue an operator conversation with the agent's context.
+
+        ``settings`` are behaviour-lab dials; when given, the answer is
+        produced under them and the ledger entry carries their fingerprint.
+        """
         if self.brain is None:
             return "No LLM brain configured (set llm.enabled and an API key)."
         gate = self.ledger.gate()
         if gate:
             return f"Not answering: {gate}"
-        answer = self.brain.chat(self, turns, self.observe())
+        answer = self.brain.chat(self, turns, self.observe(), settings=settings)
         last_user = ""
         for t in reversed(list(turns or [])):
             if isinstance(t, dict) and t.get("role") == "user":
                 last_user = str(t.get("content") or "")
                 break
-        self.ledger.record("thought", {"cycle": self.cycle_count, "kind": "chat",
-                                       "question": last_user[:500],
-                                       "answered": bool(answer),
-                                       "answer_sha256": _sha256(answer or ""),
-                                       "answer_head": (answer or "")[:300],
-                                       "model": getattr(self.brain, "model", None)})
+        body = {"cycle": self.cycle_count, "kind": "chat",
+                "question": last_user[:500],
+                "answered": bool(answer),
+                "answer_sha256": _sha256(answer or ""),
+                "answer_head": (answer or "")[:300],
+                "model": getattr(self.brain, "model", None)}
+        if settings is not None:
+            from jarvis.brain import dials
+            body["dials"] = dials.fingerprint(settings)
+        self.ledger.record("thought", body)
         return answer or ("Brain could not answer: "
                           + (self.brain.unavailable_reason() or self.brain.last_error
                              or "unavailable"))
+
+    def experiment(self, question: str, settings: Optional[dict] = None, compare: bool = True,
+                   mode: str = "answer") -> dict:
+        """Behaviour-lab run: the question under the dials and, optionally, the base model.
+
+        Nothing is executed and no agent state changes; each variant is
+        ledgered as a thought with its dial fingerprint so the return address
+        of any behaviour change is on the record.
+        """
+        if self.brain is None:
+            return {"error": "no LLM brain configured (llm.enabled)"}
+        gate = self.ledger.gate()
+        if gate:
+            return {"error": gate}
+        if not self.brain.available():
+            return {"error": "LLM brain unavailable: " + (self.brain.unavailable_reason() or "backing off")}
+        result = self.brain.experiment(self, question, settings=settings, compare=compare,
+                                       mode=mode, observations=self.observe())
+        for v in result.get("variants", []):
+            self.ledger.record("thought", {
+                "cycle": self.cycle_count, "kind": "experiment", "mode": mode,
+                "variant": v.get("variant"), "dials": v.get("fingerprint"),
+                "settings": v.get("settings"), "question": (question or "")[:500],
+                "answered": "answer" in v, "answer_sha256": _sha256(v.get("answer") or ""),
+                "answer_head": (v.get("answer") or "")[:300], "error": v.get("error"),
+                "model": result.get("model")})
+        return result
 
     def record_upload(self, name: str, path: str, size: int) -> dict:
         """Register an operator-uploaded file so the brain can act on it."""

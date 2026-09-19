@@ -172,6 +172,24 @@ uploads that land in `cloud.ui.upload_dir` and are handed to the brain as
 /chat` (multi-turn), `POST /upload` (raw body + `X-Filename`), `GET
 /uploads`, plus everything the loopback status server offers.
 
+## Behaviour lab
+
+The **Lab** tab of the web UI puts every layer that moves the model away from
+its base presentation on a dial: identity, the constitution's hard gates and
+operating rules, the honesty rules, voice and report format, whether the
+model is told about the ledger and about the shell deny-list, how much live
+context it gets, how many recent tasks it sees, and the model parameters
+(temperature, thinking, answer length). Level 0 on every dial is the bare
+model: no system prompt, no context. The panel shows the exact system text
+and context the model will receive, then runs a question under the dials and
+under the base model side by side, or asks for a planning decision that is
+returned but never executed. Layers enforced in code (the deny-list,
+fail-closed recording, planner containment, the off-box witness) are listed
+and locked: the lab changes what the model is told, never what the executor
+allows. Every dial change and every run is ledgered with a fingerprint of
+the settings, so a behaviour change always has a return address. API:
+`GET /lab`, `POST /lab/settings`, `POST /lab/preview`, `POST /lab/run`.
+
 ## Headless mode
 
 `jarvis --headless` runs the same agent loop without the console. It is

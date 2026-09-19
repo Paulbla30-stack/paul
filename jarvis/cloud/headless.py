@@ -26,6 +26,9 @@ Endpoints (default 127.0.0.1:8471):
 A second listener (``ui`` settings) can serve the same handler on a
 public address with TLS, so the UI works from a phone without a tunnel.
 
+    GET  /lab      -> behaviour-lab dials, current settings, locked layers
+    POST /lab/settings {settings, apply_to_chat}, /lab/preview {settings},
+         /lab/run {question, settings?, compare, mode: answer|plan}
     GET  /ledger, /ledger/tail?limit=N, /ledger/verify, /ledger/pubkey
                   -> Glass Ledger status, last entries, on-box verdict, key
 
@@ -136,6 +139,10 @@ class HeadlessRunner:
         # goal, upload or chat wakes the loop and resets the streak.
         self.idle_streak = 0
         self.max_idle_wait = max(self.interval, float(300.0 if max_idle_wait is None else max_idle_wait))
+        # Behaviour lab: the current dial settings and whether live chat uses them.
+        from jarvis.brain import dials as _dials
+        self.lab_settings = _dials.defaults()
+        self.lab_apply_to_chat = False
         self._stop = threading.Event()
         self._wake = threading.Event()
         # Serialises agent cycles between the loop and HTTP-triggered work.
@@ -145,6 +152,15 @@ class HeadlessRunner:
         self.last_cycle: dict = {}
 
     # ---- status --------------------------------------------------------
+
+    def lab_state(self) -> dict:
+        from jarvis.brain import dials as _dials
+        state = _dials.registry()
+        state["settings"] = dict(self.lab_settings)
+        state["fingerprint"] = _dials.fingerprint(self.lab_settings)
+        state["apply_to_chat"] = self.lab_apply_to_chat
+        state["brain"] = self.agent.brain.status() if self.agent.brain else None
+        return state
 
     def snapshot(self) -> dict:
         status = self.agent.get_status()
@@ -263,6 +279,8 @@ class HeadlessRunner:
                                          "last_thought": runner.agent.last_thought or None})
                     elif path == "/goals":
                         self._send(200, runner.agent.planner.goals)
+                    elif path == "/lab":
+                        self._send(200, runner.lab_state())
                     elif path == "/ledger":
                         self._send(200, runner.agent.ledger.status())
                     elif path == "/ledger/tail":
@@ -329,10 +347,48 @@ class HeadlessRunner:
                     turns = payload.get("messages") if isinstance(payload, dict) else None
                     if not isinstance(turns, list) or not turns:
                         return self._send(400, {"error": "messages list required"})
+                    settings = runner.lab_settings if runner.lab_apply_to_chat else None
                     with runner._lock:
-                        answer = runner.agent.chat(turns)
+                        answer = runner.agent.chat(turns, settings=settings)
                     runner.wake()
-                    self._send(200, {"answer": answer})
+                    self._send(200, {"answer": answer, "dials": settings is not None})
+                elif path in ("/lab/settings", "/lab/preview", "/lab/run"):
+                    try:
+                        payload = json.loads(body or "{}")
+                    except ValueError:
+                        return self._send(400, {"error": "body must be JSON"})
+                    if not isinstance(payload, dict):
+                        return self._send(400, {"error": "JSON object required"})
+                    from jarvis.brain import dials as _dials
+                    if path == "/lab/settings":
+                        settings = _dials.normalise(payload.get("settings") or {})
+                        apply = payload.get("apply_to_chat")
+                        with runner._lock:
+                            runner.lab_settings = settings
+                            if isinstance(apply, bool):
+                                runner.lab_apply_to_chat = apply
+                            runner.agent.ledger.record("action", {
+                                "cycle": runner.agent.cycle_count, "actor": "operator",
+                                "action": "dials_set", "dials": _dials.fingerprint(settings),
+                                "settings": settings, "apply_to_chat": runner.lab_apply_to_chat})
+                        self._send(200, runner.lab_state())
+                    elif path == "/lab/preview":
+                        settings = _dials.normalise(payload.get("settings") or runner.lab_settings)
+                        with runner._lock:
+                            composed = _dials.compose(settings, runner.agent.brain, runner.agent,
+                                                      runner.agent.observe() if runner.agent.brain else None)
+                        self._send(200, composed)
+                    else:
+                        question = str(payload.get("question") or "").strip()
+                        mode = "plan" if payload.get("mode") == "plan" else "answer"
+                        if not question and mode == "answer":
+                            return self._send(400, {"error": "question required"})
+                        settings = _dials.normalise(payload.get("settings") or runner.lab_settings)
+                        compare = payload.get("compare", True) is not False
+                        with runner._lock:
+                            result = runner.agent.experiment(question, settings=settings,
+                                                             compare=compare, mode=mode)
+                        self._send(200 if "error" not in result else 503, result)
                 elif path == "/upload":
                     self._handle_upload()
                 else:
