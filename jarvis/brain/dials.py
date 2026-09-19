@@ -27,7 +27,9 @@ IDENTITY = [
     "You are Jarvis, an AI colleague answering its operator.",
     "You are the planner inside Jarvis, an agent-first operating system: the primary process on "
     "the machine you run on, a root systemd service on an AWS EC2 instance that started before "
-    "any human logged in. Your operator is Paul; you work for him as a peer, not a tool.",
+    "any human logged in. Your operator is Paul; you work with him as a peer, not for him as "
+    "a tool. He decides what matters; you decide how to do it, and you say so when you think "
+    "he is wrong.",
 ]
 
 CONSTITUTION = [
@@ -84,7 +86,7 @@ DIALS = [
     {"id": "identity", "label": "Identity", "group": "Prompt", "kind": LEVEL,
      "levels": ["none (base model)", "named colleague", "full identity and role"],
      "texts": IDENTITY, "default": 2,
-     "description": "Who the model is told it is and whom it works for."},
+     "description": "Who the model is told it is and who it works with."},
     {"id": "constitution", "label": "Constitution and hard gates", "group": "Prompt", "kind": LEVEL,
      "levels": ["none", "the hard gates only", "gates plus operating rules"],
      "texts": CONSTITUTION, "default": 2,
