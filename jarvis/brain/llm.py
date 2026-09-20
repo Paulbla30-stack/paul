@@ -57,21 +57,12 @@ STREAM_ABOVE_TOKENS = 16000
 # of it is. notify_operator and estate_report each had a handler, an authority
 # classification and an IAM grant, and the planner could not pick either,
 # because the enum in the plan schema is the whole of what it can ask for.
-# Adding a handler is half of adding a capability; this is the other half.
-PLANNABLE_TASK_TYPES = [
-    "none",
-    "system_check",
-    "hardware_probe",
-    "security_scan",
-    "maintenance",
-    "observation",
-    "goal_step",
-    "cloud_probe",
-    "shell_command",
-    "inspect_path",
-    "notify_operator",
-    "estate_report",
-]
+# Adding a handler was half of adding a capability, and nothing connected the
+# halves. So the list is no longer written here: it is derived from the tool
+# register, which is the one place a capability is declared.
+from jarvis.agent import tools as _tools   # noqa: E402
+
+PLANNABLE_TASK_TYPES = _tools.plannable(_tools.ACTOR)
 
 PLAN_SCHEMA = {
     "type": "object",
@@ -721,7 +712,16 @@ class BaseBrain:
         rung = getattr(agent, "rung", None)
         if rung:
             from jarvis.agent import authority
-            context["mandate"] = {"rung": rung, "means": authority.describe(rung)}
+            restrict = getattr(agent, "tool_restrictions", None)
+            context["mandate"] = {
+                "rung": rung,
+                "means": authority.describe(rung),
+                # What it may actually choose from, at this rung, right now.
+                # Anything withheld is simply absent: the model is not shown a
+                # list of things it cannot have, because that is an invitation
+                # to ask and the answer would only ever be no.
+                "tools": _tools.describe(rung, restrict),
+            }
         proposals = list(getattr(agent, "proposals", []))[-5:]
         if proposals:
             context["proposals_awaiting_operator"] = [

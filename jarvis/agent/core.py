@@ -152,6 +152,12 @@ class AgentCore:
         # change becomes a card for the operator rather than an action.
         from jarvis.agent import authority as _authority
         self.rung = _authority.normalise_rung(config.get("rung"))
+        # Per-tool gating, above the rung. Config may only make a tool harder
+        # to reach, never easier: tightening is a running decision, loosening
+        # is a decision about what this agent is trusted with and belongs in a
+        # reviewed commit rather than a YAML file. See jarvis/agent/tools.py.
+        raw = config.get("tools")
+        self.tool_restrictions = {str(k): v for k, v in raw.items()} if isinstance(raw, dict) else {}
         self.executor.rung = self.rung
         # Changes the agent wanted to make and did not. Bounded here, durable
         # in the store, so they outlive the process.

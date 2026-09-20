@@ -244,6 +244,7 @@ class TaskExecutor:
             TaskType.CLOUD_PROBE: self._handle_cloud_probe,
             TaskType.SHELL_COMMAND: self._handle_shell_command,
             TaskType.INSPECT_PATH: self._handle_inspect_path,
+            TaskType.READ_LOGS: self._handle_read_logs,
             TaskType.NOTIFY_OPERATOR: self._handle_notify_operator,
             TaskType.ESTATE_REPORT: self._handle_estate_report,
         }
@@ -370,6 +371,80 @@ class TaskExecutor:
         report = scanner.full_scan()
         self.memory.store(category="security_scan", data=report)
         return {"success": True, "output": report}
+
+    # Units the agent may read the journal of. Its own service, its own health
+    # timer, and the tunnel it depends on to be reachable at all.
+    #
+    # An allowlist rather than a pattern, because "read any unit's log" is a
+    # different and much larger capability than "find out what you did". The
+    # agent runs as root: sshd, audit and every other service on the box are a
+    # systemctl argument away, and none of them are its business.
+    READABLE_UNITS = ("jarvis", "jarvis-health", "cloudflared")
+    MAX_LOG_LINES = 200
+    MAX_LOG_MINUTES = 180
+
+    def _handle_read_logs(self, task: Task) -> dict:
+        """Read the agent's own recent journal, bounded.
+
+        It could already reach this through shell_command and journalctl, which
+        is precisely the problem: that route is one deny-list entry away from
+        reading any unit on the machine, and it arrives as an unstructured wall
+        of text. This is the narrow version -- three units, a capped window, a
+        capped line count, no shell.
+        """
+        meta = task.metadata or {}
+        unit = str(meta.get("unit") or "jarvis").strip()
+        if unit not in self.READABLE_UNITS:
+            return {"success": False,
+                    "error": (f"{unit!r} is not a unit this agent may read. "
+                              f"Readable: {', '.join(self.READABLE_UNITS)}.")}
+        try:
+            minutes = int(meta.get("minutes") or 15)
+        except (TypeError, ValueError):
+            minutes = 15
+        minutes = max(1, min(self.MAX_LOG_MINUTES, minutes))
+        grep = str(meta.get("grep") or "").strip()
+
+        argv = ["journalctl", "-u", unit, "--since", f"-{minutes}min",
+                "--no-pager", "-o", "short-iso", "-n", str(self.MAX_LOG_LINES)]
+        try:
+            proc = subprocess.run(argv, capture_output=True, text=True, timeout=20,
+                                  env=scrub_env(os.environ))
+        except FileNotFoundError:
+            return {"success": False, "error": "journalctl is not on this machine"}
+        except subprocess.TimeoutExpired:
+            return {"success": False, "error": "journalctl timed out after 20s"}
+        if proc.returncode != 0:
+            return {"success": False,
+                    "error": (proc.stderr or "journalctl failed").strip()[:300]}
+
+        lines = [ln for ln in proc.stdout.splitlines() if ln.strip()]
+        matched = None
+        if grep:
+            matched = len(lines)
+            lines = [ln for ln in lines if grep in ln]
+        lines = lines[-self.MAX_LOG_LINES:]
+        text = "\n".join(lines)
+        limit = int((self.shell_policy or {}).get("max_output") or 4000)
+        truncated = len(text) > limit
+        if truncated:
+            text = text[-limit:]
+
+        out = {"unit": unit, "minutes": minutes, "lines": len(lines), "log": text}
+        if grep:
+            out["grep"] = grep
+            out["scanned"] = matched
+        if truncated:
+            out["truncated"] = True
+        # An empty window is a fact, not a fault, and saying so plainly stops
+        # the model reading silence as evidence that nothing happened.
+        if not lines:
+            out["note"] = (f"No lines from {unit} in the last {minutes} minutes"
+                           + (f" matching {grep!r}" if grep else "")
+                           + ". That is an empty window, not a clean bill of health.")
+        self.memory.store(category="read_logs", data={"unit": unit, "minutes": minutes,
+                                                      "lines": len(lines)})
+        return {"success": True, "output": out}
 
     def _handle_inspect_path(self, task: Task) -> dict:
         """Look at a real path: a bounded listing or a stat, never a guess.

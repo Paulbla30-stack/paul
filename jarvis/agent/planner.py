@@ -30,6 +30,7 @@ class TaskType(Enum):
     CLOUD_PROBE = "cloud_probe"
     SHELL_COMMAND = "shell_command"
     INSPECT_PATH = "inspect_path"
+    READ_LOGS = "read_logs"
     NOTIFY_OPERATOR = "notify_operator"
     ESTATE_REPORT = "estate_report"
 

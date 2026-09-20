@@ -40,23 +40,31 @@ RUNGS = (OBSERVER, PROPOSER, ACTOR)
 READ = "read"
 CHANGE = "change"
 
-# Task types that only ever look. shell_command is classified by its text;
-# everything else here reads the machine or records the agent's own state.
-READ_ONLY_TASKS = frozenset({
-    "system_check", "hardware_probe", "security_scan", "observation",
-    "cloud_probe", "goal_step", "inspect_path", "estate_report",
-})
-
-# Telling the operator something is reporting, and every rung may report --
-# an observer that may look but not say what it saw is not an observer. So
-# this is within the mandate at observer, the lowest rung there is.
+# Which tools only look, and which merely report, is declared once in
+# jarvis.agent.tools and read from there. It used to be duplicated here, and
+# the duplicate is exactly how notify_operator came to have a handler, a rule,
+# an IAM policy and tests while remaining impossible for the model to choose.
 #
-# It is not a loophole in the "never send anything externally" gate. The
-# notifier has exactly one destination, fixed at boot from a secret the model
-# cannot read, with a severity floor, an hourly cap, a gap and quiet hours
-# enforced in code below the model. The operator approved that destination and
-# those limits in advance; the agent chooses only whether this is worth saying.
-REPORTING_TASKS = frozenset({"notify_operator"})
+# The import is deferred to the call because tools imports this module for the
+# rung and effect constants. Nothing here may import it at module level.
+#
+# Telling the operator something is reporting, and every rung may report -- an
+# observer that may look but not say what it saw is not an observer. That is
+# not a loophole in the "never send anything externally" gate: the notifier has
+# one destination, fixed at boot from a secret the model cannot read, with a
+# severity floor, an hourly cap, a gap and quiet hours enforced in code below
+# the model. The operator approved the destination and the limits in advance;
+# the agent chooses only whether this is worth saying.
+
+def _looks_only(kind: str) -> bool:
+    """True when this tool only reads, per the register. Fails closed."""
+    try:
+        from jarvis.agent import tools
+        return kind in tools.read_only_names() or kind in tools.reporting_names()
+    except Exception:
+        # An unreadable register makes everything a change, which costs a
+        # proposal and never a surprise.
+        return False
 
 # Programs that only read. The list is deliberately short: anything not on
 # it is a change, so a missing entry costs a proposal, never a surprise.
@@ -200,7 +208,7 @@ def classify_task(task) -> str:
     kind = getattr(getattr(task, "task_type", None), "value", None) or ""
     if kind == "shell_command":
         return classify_command((task.metadata or {}).get("command", ""))
-    if kind in READ_ONLY_TASKS or kind in REPORTING_TASKS:
+    if _looks_only(kind):
         return READ
     return CHANGE
 
