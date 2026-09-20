@@ -383,6 +383,26 @@ class TestThePlanSchemaStaysInStep(unittest.TestCase):
     def test_shell_command_is_not_listed_as_a_path_taker(self):
         self.assertNotIn("shell_command", tools.path_takers())
 
+    def test_a_path_tool_gets_its_path_all_the_way_to_the_task(self):
+        """The schema telling the model where to put the path is half of it.
+
+        read_file was named in the schema and still dropped on the way to the
+        executor, because the decision parser listed inspect_path by hand. The
+        model put the path exactly where it was told to and got "read_file
+        needs a path" three cycles running.
+        """
+        from jarvis.brain.llm import BaseBrain
+        parse = BaseBrain._to_decision
+        for name in tools.path_takers():
+            raw = {"reasoning": "r", "task_type": name, "description": "d",
+                   "priority": 3, "command": "/var/lib/jarvis/uploads/note.txt",
+                   "goal": "", "completed_goals": [], "note": "", "proposal": ""}
+            decision = parse(None, raw)
+            self.assertIsNotNone(decision.task, f"{name} produced no task")
+            self.assertEqual(decision.task.metadata.get("path"),
+                             "/var/lib/jarvis/uploads/note.txt",
+                             f"{name} lost its path between the plan and the task")
+
     def test_a_new_path_tool_needs_no_second_edit(self):
         """The whole point: declare it once and the description follows."""
         extra = tools.Tool("read_ledger_never", "x",

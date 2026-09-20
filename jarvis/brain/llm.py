@@ -957,10 +957,18 @@ class BaseBrain:
                     return Decision(reasoning=reasoning + " (shell_command without a command; idling)",
                                     completed_goals=completed, note=note, proposal=proposal, raw=raw)
                 metadata["command"] = command
-            if kind == "inspect_path":
+            # Every tool that declares a path argument takes it through the
+            # plan's single command field. Derived from the register, because
+            # naming inspect_path here by hand was the fifth place read_file
+            # had to be listed and the second that was missed: the model put
+            # the path in command, exactly as the schema now tells it to, and
+            # the path was dropped on the way to the executor. Three cycles
+            # running it reasoned correctly about why the read had failed and
+            # tried again, which is a well-behaved agent meeting a broken one.
+            if kind in _tools.path_takers():
                 target = str(raw.get("command") or "").strip()
                 if not target:
-                    return Decision(reasoning=reasoning + " (inspect_path without a path; idling)",
+                    return Decision(reasoning=reasoning + f" ({kind} without a path; idling)",
                                     completed_goals=completed, note=note, proposal=proposal, raw=raw)
                 metadata["path"] = target
             task = Task(priority=priority, description=description[:200],
