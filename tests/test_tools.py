@@ -361,3 +361,35 @@ class TestReadLogs(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestThePlanSchemaStaysInStep(unittest.TestCase):
+    """The command field was a fourth place a capability had to be described.
+
+    read_file shipped with a handler, a register entry and a task type, and
+    the plan schema still told the model to leave the path field empty for
+    anything but shell_command and inspect_path. It planned a read with
+    nowhere to read from, twice, and worked out why in its own reasoning
+    before anyone else did.
+    """
+
+    def test_every_tool_that_takes_a_path_is_named_in_the_command_field(self):
+        from jarvis.brain.llm import PLAN_SCHEMA
+        described = PLAN_SCHEMA["properties"]["command"]["description"]
+        for name in tools.path_takers():
+            self.assertIn(name, described,
+                          f"{name} takes a path and the schema never says so")
+
+    def test_shell_command_is_not_listed_as_a_path_taker(self):
+        self.assertNotIn("shell_command", tools.path_takers())
+
+    def test_a_new_path_tool_needs_no_second_edit(self):
+        """The whole point: declare it once and the description follows."""
+        extra = tools.Tool("read_ledger_never", "x",
+                           arguments={"path": {"type": "string"}})
+        original = tools.TOOLS
+        tools.TOOLS = original + (extra,)
+        try:
+            self.assertIn("read_ledger_never", tools.command_field_description())
+        finally:
+            tools.TOOLS = original

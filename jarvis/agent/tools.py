@@ -279,6 +279,34 @@ def describe(rung: str = ACTOR, restrict: Optional[dict] = None) -> str:
     return "\n".join(lines)
 
 
+def path_takers() -> list:
+    """Tools whose one positional argument is a path.
+
+    The plan schema carries a single ``command`` field and every tool that
+    needs a path has to be named in its description. That description was
+    maintained by hand and went stale the moment read_file was added: the
+    model was told to leave the field empty for anything but shell_command
+    and inspect_path, so it planned a read with nowhere to read from and
+    could not work out why. Deriving it here is the same fix as the register
+    itself -- the list of tools that take a path is a fact about the tools.
+    """
+    return [t.name for t in TOOLS
+            if "path" in t.arguments and t.name != "shell_command"]
+
+
+def command_field_description() -> str:
+    """What the plan schema says the ``command`` field is for, derived."""
+    takers = path_takers()
+    if not takers:
+        return "POSIX sh command line for shell_command tasks; empty otherwise."
+    if len(takers) == 1:
+        which = f"{takers[0]} tasks"
+    else:
+        which = ", ".join(takers[:-1]) + f" and {takers[-1]} tasks"
+    return ("POSIX sh command line for shell_command tasks; the absolute path "
+            f"for {which}; empty otherwise.")
+
+
 def validate() -> list:
     """Problems a human should know about. Empty when the register is sound.
 

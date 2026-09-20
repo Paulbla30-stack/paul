@@ -100,8 +100,13 @@ PLAN_SCHEMA = {
         },
         "command": {
             "type": "string",
-            "description": "POSIX sh command line for shell_command tasks; the absolute "
-                           "path to look at for inspect_path tasks; empty otherwise.",
+            # Derived, because this was a fourth place a capability had to be
+            # described and it went stale the moment one was added: read_file
+            # shipped with a handler, a register entry and a task type, and
+            # the model was still told to leave this field empty for it. It
+            # then planned a read with nowhere to read from, twice, and said
+            # so in its own reasoning.
+            "description": _tools.command_field_description(),
         },
         "goal": {
             "type": "string",
