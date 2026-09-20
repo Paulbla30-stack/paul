@@ -464,3 +464,100 @@ class TestHeadlessRunner(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestRepeatPacing(unittest.TestCase):
+    """The same task succeeding again and again is a loop, not progress.
+
+    The rule planner answers a standing goal with a goal_step every time it is
+    asked, and a goal_step's whole effect is to write {"progressed": true}.
+    Before the vigil, the brain interrupted that every few minutes with a real
+    idle, which reset the pacing. Once the brain sleeps nothing does, and the
+    live box was measured spinning at one cycle a second, writing 7,120 ledger
+    entries an hour about its own heartbeat.
+    """
+
+    def runner(self, interval=30.0):
+        import jarvis.cloud.headless as H
+        r = H.HeadlessRunner.__new__(H.HeadlessRunner)
+        r.interval = interval
+        r.idle_streak = 0
+        r.failure_streak = 0
+        r.repeat_streak = 0
+        r._last_action = None
+        r.max_idle_wait = 300.0
+        r.max_failure_wait = 300.0
+        return r
+
+    def wait_for(self, r, action, success=True):
+        """The pacing branch of the run loop, in isolation."""
+        if action == "idle":
+            r.idle_streak += 1
+            r.repeat_streak = 0
+            wait = min(r.interval * r.idle_streak, r.max_idle_wait)
+        elif success:
+            r.failure_streak = 0
+            r.idle_streak = 0
+            if action == r._last_action:
+                r.repeat_streak += 1
+                wait = min(r.interval * r.repeat_streak, r.max_idle_wait)
+            else:
+                r.repeat_streak = 0
+                wait = min(r.interval, 1.0)
+        else:
+            r.failure_streak += 1
+            r.idle_streak = 0
+            r.repeat_streak = 0
+            wait = min(r.interval * r.failure_streak, r.max_failure_wait)
+        r._last_action = action
+        return wait
+
+    def test_a_repeated_task_backs_off(self):
+        r = self.runner()
+        first = self.wait_for(r, "Goal step: know the machine")
+        self.assertEqual(first, 1.0, "the first run of a task goes straight on")
+        waits = [self.wait_for(r, "Goal step: know the machine") for _ in range(5)]
+        self.assertEqual(waits, [30.0, 60.0, 90.0, 120.0, 150.0])
+
+    def test_the_backoff_is_capped(self):
+        r = self.runner()
+        for _ in range(50):
+            w = self.wait_for(r, "Goal step: know the machine")
+        self.assertEqual(w, r.max_idle_wait)
+
+    def test_real_progress_still_goes_straight_on(self):
+        """Different work in succession must not be slowed down."""
+        r = self.runner()
+        self.assertEqual(self.wait_for(r, "Run security scan"), 1.0)
+        self.assertEqual(self.wait_for(r, "Check memory"), 1.0)
+        self.assertEqual(self.wait_for(r, "Enumerate storage"), 1.0)
+
+    def test_a_new_task_clears_the_repeat_streak(self):
+        r = self.runner()
+        for _ in range(4):
+            self.wait_for(r, "Goal step: know the machine")
+        self.assertGreater(r.repeat_streak, 0)
+        self.assertEqual(self.wait_for(r, "Run security scan"), 1.0)
+        self.assertEqual(r.repeat_streak, 0)
+
+    def test_idle_clears_the_repeat_streak(self):
+        r = self.runner()
+        for _ in range(3):
+            self.wait_for(r, "Goal step: know the machine")
+        self.wait_for(r, "idle")
+        self.assertEqual(r.repeat_streak, 0)
+
+    def test_a_failure_is_still_paced_as_a_failure(self):
+        r = self.runner()
+        self.wait_for(r, "Broken task", success=False)
+        self.assertEqual(r.failure_streak, 1)
+        self.assertEqual(r.repeat_streak, 0)
+
+    def test_an_hour_of_repeats_is_not_thousands_of_cycles(self):
+        """The regression, stated as a number."""
+        r = self.runner()
+        elapsed, cycles = 0.0, 0
+        while elapsed < 3600:
+            elapsed += self.wait_for(r, "Goal step: know the machine")
+            cycles += 1
+        self.assertLess(cycles, 60, f"{cycles} cycles an hour is still a spin")

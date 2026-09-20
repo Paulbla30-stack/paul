@@ -166,6 +166,16 @@ class HeadlessRunner:
         # goal, upload or chat wakes the loop and resets the streak.
         self.idle_streak = 0
         self.max_idle_wait = max(self.interval, float(300.0 if max_idle_wait is None else max_idle_wait))
+        # The same task succeeding again and again is not progress, it is a
+        # loop, and it must be paced like idling rather than like work. The
+        # rule planner answers a standing goal with a goal_step every time it
+        # is asked, and a goal_step's whole effect is to write
+        # {"progressed": true}. Before the vigil the brain interrupted that
+        # every few minutes with a real idle, which reset the pacing; once the
+        # brain sleeps, nothing does, and the loop spins at one cycle a second
+        # writing 7,000 ledger entries an hour about its own heartbeat.
+        self.repeat_streak = 0
+        self._last_action = None
         # Memory consolidation runs on its own slow clock, not every cycle:
         # an hour of observations is the unit worth reorganising, not one.
         self.consolidate_every_s = float(consolidate_every_s or 3600.0)
@@ -796,18 +806,28 @@ class HeadlessRunner:
                 # budget retrying a bad idea every second.
                 if action == "idle":
                     self.idle_streak += 1
+                    self.repeat_streak = 0
                     wait = min(self.interval * self.idle_streak, self.max_idle_wait)
                 elif result.get("result", {}).get("success"):
                     self.failure_streak = 0
                     self.idle_streak = 0
-                    wait = min(self.interval, 1.0)
+                    if action == self._last_action:
+                        # Doing the identical thing again is a loop, not
+                        # progress; back off as if idle.
+                        self.repeat_streak += 1
+                        wait = min(self.interval * self.repeat_streak, self.max_idle_wait)
+                    else:
+                        self.repeat_streak = 0
+                        wait = min(self.interval, 1.0)
                 else:
                     self.failure_streak += 1
                     self.idle_streak = 0
+                    self.repeat_streak = 0
                     wait = min(self.interval * self.failure_streak, self.max_failure_wait)
                     if self.failure_streak >= 3:
                         self.log.warning("%d consecutive failed tasks; waiting %.0fs before "
                                          "the next cycle", self.failure_streak, wait)
+                self._last_action = action
                 self._wake.clear()
                 self._wake.wait(wait)
                 if self._stop.is_set():
