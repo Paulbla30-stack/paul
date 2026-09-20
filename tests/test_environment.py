@@ -94,6 +94,26 @@ class TestFence(unittest.TestCase):
         self.assertIsNone(env.fenced_reason("/run/jarvisx"))
         self.assertIsNone(env.fenced_reason("/etc/jarvis"))
 
+    def test_the_two_fences_agree(self):
+        """One secret, two mechanisms, and they had drifted.
+
+        The shell deny-list refuses the runner token, the UI session key, the
+        tunnel token, the notify destination and the memory database. The path
+        fence did not name any of them. Nothing could read a file's contents,
+        so the gap was latent -- and adding a reader would have made it live.
+        Two lists of the same thing is how a fence gets a hole in it, so this
+        asserts they cover the same ground.
+        """
+        from jarvis.agent.executor import DEFAULT_SHELL_DENY_PATTERNS
+        import re as _re
+        for path in env.SECRET_PATHS:
+            self.assertIsNotNone(
+                env.fenced_reason(path),
+                f"{path} is refused to the shell but readable as a path")
+            self.assertTrue(
+                any(_re.search(pat, f"cat {path}") for pat in DEFAULT_SHELL_DENY_PATTERNS),
+                f"{path} is fenced for reading but not refused to the shell")
+
     def test_credential_directories_are_fenced_anywhere(self):
         self.assertIsNotNone(env.fenced_reason("/home/anyone/.ssh/id_rsa"))
         self.assertIsNotNone(env.fenced_reason("/root/.aws/credentials"))
@@ -320,3 +340,83 @@ class TestPlanAndAnswerChecks(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestReadingAFile(unittest.TestCase):
+    """inspect_path says what is at a path. This says what is in it.
+
+    The operator could hand the agent a document and the agent could see its
+    name, size and timestamp and not one word of it. That is the half-built
+    capability most likely to be filled in with invention.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+
+    def write(self, name, data, mode="w"):
+        path = os.path.join(self.tmp, name)
+        with open(path, mode) as f:
+            f.write(data)
+        return path
+
+    def test_it_reads_a_text_file(self):
+        path = self.write("notes.txt", "line one\nline two\nline three\n")
+        got = env.read_file(path)
+        self.assertTrue(got["read"])
+        self.assertIn("line two", got["text"])
+        self.assertEqual(got["lines_in_file"], 3)
+
+    def test_an_empty_file_says_so_rather_than_returning_nothing(self):
+        got = env.read_file(self.write("empty.txt", ""))
+        self.assertTrue(got["read"])
+        self.assertTrue(got["empty"])
+        self.assertIn("nothing in it", got["note"])
+
+    def test_a_missing_file_is_an_answer_not_a_crash(self):
+        got = env.read_file(os.path.join(self.tmp, "nope.txt"))
+        self.assertFalse(got["read"])
+        self.assertIn("nothing at this path", got["reason"])
+
+    def test_a_directory_is_refused_with_advice(self):
+        got = env.read_file(self.tmp)
+        self.assertFalse(got["read"])
+        self.assertIn("directory", got["reason"])
+
+    def test_binary_is_reported_as_binary_rather_than_decoded(self):
+        """A model shown mojibake will describe it, confidently."""
+        path = self.write("blob.bin", bytes(range(256)) * 20, mode="wb")
+        got = env.read_file(path)
+        self.assertFalse(got["read"])
+        self.assertIn("binary", got["reason"])
+
+    def test_a_big_file_is_truncated_and_says_where_it_stopped(self):
+        path = self.write("big.txt", "x" * 200_000)
+        got = env.read_file(path, max_bytes=1000)
+        self.assertTrue(got["read"])
+        self.assertTrue(got["truncated"])
+        self.assertIn("has not been seen", got["note"])
+        self.assertLessEqual(len(got["text"]), 1000)
+
+    def test_the_cap_cannot_be_raised_past_the_ceiling(self):
+        path = self.write("big.txt", "y" * 200_000)
+        got = env.read_file(path, max_bytes=10_000_000)
+        self.assertLessEqual(len(got["text"]), env.MAX_READ_BYTES)
+
+    def test_it_can_start_part_way_down_and_says_what_it_skipped(self):
+        path = self.write("many.txt", "\n".join(f"line {i}" for i in range(1, 51)))
+        got = env.read_file(path, start_line=10, max_lines=5)
+        self.assertTrue(got["text"].startswith("line 10"))
+        self.assertEqual(got["lines_shown"], 5)
+        self.assertIn("of 50", got["note"])
+
+    def test_a_fenced_path_is_refused_by_reason(self):
+        got = env.read_file("/etc/shadow")
+        self.assertFalse(got["read"])
+        self.assertTrue(got["fenced"])
+        self.assertIn("credentials", got["reason"])
+
+    def test_every_secret_is_refused(self):
+        for path in env.SECRET_PATHS:
+            got = env.read_file(path)
+            self.assertFalse(got["read"], f"{path} was readable")
+            self.assertTrue(got.get("fenced"), f"{path} was not fenced")

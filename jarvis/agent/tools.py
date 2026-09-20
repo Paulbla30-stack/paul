@@ -116,6 +116,15 @@ TOOLS = (
                     "path": {"type": "string",
                              "description": "Absolute path to look at."}},
          required=("path",)),
+    Tool("read_file", "Read one text file, bounded. Use it on a file the "
+                      "operator has uploaded, or any file you are allowed to "
+                      "see, rather than describing what you think is in it.",
+         arguments={**_DESC,
+                    "path": {"type": "string",
+                             "description": "Absolute path of the file to read."},
+                    "from_line": {"type": "integer",
+                                  "description": "First line to show; 1 by default."}},
+         required=("path",)),
     Tool("read_logs", "Read this agent's own recent journal, bounded. Use it to "
                       "find out what you did and what went wrong, rather than "
                       "guessing from memory.",

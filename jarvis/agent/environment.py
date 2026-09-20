@@ -33,15 +33,53 @@ from typing import Optional
 # Paths the agent must not read, whatever it is asked. Each entry fences the
 # path itself, anything under it, and anything sharing its stem (so the
 # ledger prefix also covers ledger.jsonl).
+# This list and the shell deny-list in executor.py protect the same secrets by
+# two different mechanisms -- prefix matching over paths here, regular
+# expressions over command lines there -- and they had drifted. The deny-list
+# named the runner token, the UI session key, the tunnel token, the notify
+# destination and the memory database; this one did not. Nothing could read a
+# file's contents, so the gap was latent, and adding a reader would have made
+# it live. test_environment.py now asserts the two agree, because two lists of
+# the same thing is how a fence gets a hole in it.
 FENCED_PREFIXES = (
     ("/var/lib/jarvis/ledger",
      "the Glass Ledger is evidence about the agent, not context for it"),
     ("/etc/jarvis/ledger", "the ledger signing key"),
     ("/run/jarvis", "the agent's own runtime directory (runner token, status API)"),
     ("/etc/jarvis/anthropic.key", "an API credential"),
+    # The operator's own credentials. The runner token and the key that signs
+    # UI sessions are as good as a login; the tunnel token is the front door.
+    ("/etc/jarvis/token", "the runner token is as good as a login"),
+    ("/etc/jarvis/session.key", "the key that signs UI sessions"),
+    ("/etc/jarvis/cloudflared.env", "the tunnel token is the front door"),
+    ("/etc/jarvis/tls", "the UI's private key"),
+    # Where the agent may send. notify.py promises the model cannot read this,
+    # set it, or send anywhere else; that promise needs this entry to be true.
+    ("/etc/jarvis/notify.dest", "the one destination the agent may reach"),
+    # The agent's own durable memory. Written through the agent so that every
+    # entry carries its provenance; read as a file, that provenance is gone.
+    ("/var/lib/jarvis/memory.db", "the agent's memory is written through it, not read around it"),
     ("/etc/shadow", "account credentials"),
     ("/etc/gshadow", "account credentials"),
     ("/etc/sudoers", "privilege configuration"),
+)
+
+# Everything the shell deny-list refuses on grounds of secrecy. Kept here so a
+# test can assert the two fences agree; see test_environment.py.
+SECRET_PATHS = (
+    "/etc/jarvis/token",
+    "/etc/jarvis/session.key",
+    "/etc/jarvis/cloudflared.env",
+    "/etc/jarvis/notify.dest",
+    "/etc/jarvis/anthropic.key",
+    "/etc/jarvis/tls/key.pem",
+    "/var/lib/jarvis/memory.db",
+    "/var/lib/jarvis/ledger.jsonl",
+    "/etc/jarvis/ledger/ed25519.key",
+    "/run/jarvis/token",
+    "/etc/shadow",
+    "/root/.ssh/id_rsa",
+    "/root/.aws/credentials",
 )
 
 # Directory names that are fenced wherever they appear.
@@ -135,6 +173,79 @@ def stat_path(path: str) -> dict:
         out["empty"] = st.st_size == 0
         return out
     out["kind"] = "special"
+    return out
+
+
+# Reading contents is a different act from reading metadata, so it gets its
+# own bounds. A model handed a 40MB log will either be truncated somewhere
+# arbitrary or cost a fortune; both are worse than being told the file is too
+# big and which part it is getting.
+MAX_READ_BYTES = 64_000
+MAX_READ_LINES = 600
+# Bytes that do not belong in text. A model shown decoded binary will describe
+# it confidently, which is the failure this whole codebase keeps meeting.
+_TEXTISH = bytes(range(0x20, 0x7F)) + b"\n\r\t\f\b"
+
+
+def read_file(path: str, max_bytes: int = MAX_READ_BYTES,
+              start_line: int = 1, max_lines: int = MAX_READ_LINES) -> dict:
+    """The contents of one file, bounded, or why not.
+
+    Behind the same fence as everything else, which now actually covers the
+    secrets it always claimed to. Binary is reported as binary rather than
+    decoded: a model shown mojibake will describe it, and a confident
+    description of noise is worse than a refusal.
+    """
+    info = stat_path(path)
+    if info.get("kind") == "fenced":
+        return {"path": info["path"], "read": False, "reason": info["reason"],
+                "fenced": True}
+    if info.get("exists") is not True:
+        return {"path": info["path"], "read": False,
+                "reason": f"nothing at this path ({info.get('kind')})"}
+    if info.get("kind") == "dir":
+        return {"path": info["path"], "read": False,
+                "reason": "this is a directory; list it instead"}
+    if info.get("kind") != "file":
+        return {"path": info["path"], "read": False,
+                "reason": f"not a regular file ({info.get('kind')})"}
+    size = int(info.get("size") or 0)
+    if size == 0:
+        return {"path": info["path"], "read": True, "empty": True, "size": 0,
+                "text": "", "note": "the file exists and has nothing in it"}
+    cap = max(1, min(int(max_bytes or MAX_READ_BYTES), MAX_READ_BYTES))
+    try:
+        with open(info["path"], "rb") as f:
+            raw = f.read(cap + 1)
+    except PermissionError:
+        return {"path": info["path"], "read": False, "reason": "permission denied"}
+    except OSError as exc:
+        return {"path": info["path"], "read": False, "reason": str(exc)}
+    truncated = len(raw) > cap
+    raw = raw[:cap]
+    printable = sum(1 for b in raw[:4096] if b in _TEXTISH)
+    if raw[:4096] and printable / len(raw[:4096]) < 0.85:
+        return {"path": info["path"], "read": False, "size": size,
+                "reason": "this looks like a binary file, not text"}
+    text = raw.decode("utf-8", errors="replace")
+    lines = text.splitlines()
+    start = max(1, int(start_line or 1))
+    window = max(1, min(int(max_lines or MAX_READ_LINES), MAX_READ_LINES))
+    shown = lines[start - 1:start - 1 + window]
+    out = {
+        "path": info["path"], "read": True, "size": size,
+        "modified": info.get("modified"),
+        "lines_in_file": len(lines) + (1 if truncated else 0),
+        "from_line": start, "lines_shown": len(shown),
+        "text": "\n".join(shown),
+    }
+    if truncated:
+        out["truncated"] = True
+        out["note"] = (f"only the first {cap} bytes of {size} were read; "
+                       "what is below them has not been seen")
+    elif start - 1 + len(shown) < len(lines):
+        out["note"] = (f"lines {start}-{start - 1 + len(shown)} of {len(lines)}; "
+                       "the rest has not been seen")
     return out
 
 

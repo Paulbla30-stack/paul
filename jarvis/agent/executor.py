@@ -79,6 +79,11 @@ DEFAULT_SHELL_DENY_PATTERNS = [
     # tunnel itself -- whoever holds it can re-point the hostname at their
     # own machine and collect the logins meant for this one
     r"/etc/jarvis/(?:token|session\.key|cloudflared\.env|notify\.dest)\b",
+    # and the UI's own TLS private key, which was not here. Whoever holds it
+    # can impersonate the interface the operator logs in to. Found by the test
+    # that asserts this list and environment.SECRET_PATHS cover the same
+    # ground: the path fence named it and the shell did not.
+    r"/etc/jarvis/tls\b",
     _CMD + r"cloudflared\b",
     r"\baws\s+ssm\s+get-parameter",
     r"~?/\.(?:ssh|aws|config/anthropic)\b",
@@ -244,6 +249,7 @@ class TaskExecutor:
             TaskType.CLOUD_PROBE: self._handle_cloud_probe,
             TaskType.SHELL_COMMAND: self._handle_shell_command,
             TaskType.INSPECT_PATH: self._handle_inspect_path,
+            TaskType.READ_FILE: self._handle_read_file,
             TaskType.READ_LOGS: self._handle_read_logs,
             TaskType.NOTIFY_OPERATOR: self._handle_notify_operator,
             TaskType.ESTATE_REPORT: self._handle_estate_report,
@@ -481,6 +487,48 @@ class TaskExecutor:
         self.memory.store(category="inspect_path", data=result)
         # A path that is not there is a useful answer, not a failure: it is
         # the answer that stops the planner inventing one.
+        return {"success": True, "output": result}
+
+    def _handle_read_file(self, task: Task) -> dict:
+        """Read a text file the agent is allowed to see, bounded.
+
+        inspect_path answers what is at a path; this answers what is in it.
+        The operator can hand the agent a document and, until now, the agent
+        could see its name, size and timestamp and not one word of it -- which
+        is the same shape of half-built capability the tool register exists to
+        stop, and the one most likely to be filled in with invention.
+
+        Behind the same fence, which was widened first: it protected the
+        ledger and the API key but not the runner token, the tunnel token, the
+        UI signing key, the notify destination or the memory database. Reading
+        metadata through that gap disclosed nothing; reading contents would
+        have disclosed all of it.
+        """
+        from jarvis.agent import environment
+
+        target = str(task.metadata.get("path")
+                     or task.metadata.get("command") or "").strip()
+        if not target:
+            return {"success": False, "error": "read_file needs a path"}
+        if not target.startswith("/"):
+            return {"success": False,
+                    "error": f"read_file needs an absolute path, got {target!r}"}
+        try:
+            start = int(task.metadata.get("from_line", 1))
+        except (TypeError, ValueError):
+            start = 1
+        result = environment.read_file(target, start_line=start)
+        if result.get("fenced"):
+            self.log.warning("read_file refused %s: %s", target, result.get("reason"))
+            return {"success": False, "error": f"refused: {result['reason']}",
+                    "output": {"path": target, "refused": result["reason"]}}
+        # What is recorded is that it was read and how much of it, never the
+        # contents: memory is for what the agent concluded, and a file it can
+        # re-read is not worth copying into a store it cannot manage.
+        self.memory.store(category="read_file",
+                          data={k: v for k, v in result.items() if k != "text"})
+        # A file that cannot be read is an answer too, and a better one than a
+        # description of what it probably contains.
         return {"success": True, "output": result}
 
     def _handle_estate_report(self, task: Task) -> dict:
