@@ -41,6 +41,13 @@ jarvis/
 - **AWS AMI**: Agent-first EC2 image; goals arrive via user data or tags,
   status via `jarvis --status` or a loopback HTTP endpoint
 - **Glass Ledger**: a signed, hash-chained, append-only journal of every decision, action and outcome that the agent cannot rewrite, verified off-box with a pinned public key ([The Glass Ledger v2](https://doi.org/10.5281/zenodo.21515861)); see `aws/README.md`
+- **The Vigil**: the agent sleeps. An imported model bills per minute a copy is
+  warm, not per call, so the cost of thinking is the length of the silences
+  between thoughts. While asleep the loop keeps running on the rule planner,
+  which costs nothing and still observes, records and acts; the model is woken
+  by the operator, by a material change in observations, or on a heartbeat,
+  and does its thinking in one burst before going quiet again. Sleep removes
+  the model, not the agent. See `jarvis/agent/vigil.py`
 
 ## Building the ISO
 

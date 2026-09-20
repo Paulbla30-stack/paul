@@ -90,6 +90,33 @@ note("Planner", "%s via %s (%s)" % (
 calls, cap = brain.get("calls_last_hour"), brain.get("max_calls_per_hour")
 if isinstance(calls, int) and isinstance(cap, int) and cap:
     note("Call budget", "%d of %d this hour (%.0f%%)" % (calls, cap, 100.0 * calls / cap))
+
+# An imported model bills per minute a copy is warm, not per call, so warm
+# time is the number that predicts the invoice. A high call count clustered
+# into one burst is cheap; a low one spread evenly is what cost 200 USD a day.
+vigil = d.get("vigil") or brain.get("vigil") or {}
+if vigil.get("enabled"):
+    warm_s = vigil.get("warm_seconds") or 0
+    frac = vigil.get("warm_fraction")
+    state = vigil.get("state", "?")
+    detail = "%s (%s)" % (state, vigil.get("wake_reason") or "no reason recorded")
+    if state == "asleep":
+        until = vigil.get("asleep_until_next_heartbeat_s")
+        if isinstance(until, int):
+            detail += ", next heartbeat in %dm" % (until // 60)
+    note("Planner rest", detail)
+    note("Model warm time", "%dm total%s" % (
+        warm_s // 60,
+        (" (%.1f%% of uptime)" % (100.0 * frac)) if isinstance(frac, float) else ""))
+    vstats = vigil.get("stats") or {}
+    note("Sleep cycles", "%s sleeps, %s wakes (%s operator, %s salience, %s heartbeat)" % (
+        vstats.get("sleeps"), vstats.get("wakes"), vstats.get("wakes_operator"),
+        vstats.get("wakes_salience"), vstats.get("wakes_heartbeat")))
+    if isinstance(frac, float) and frac >= 0.5:
+        print("  ALERT: the model has been warm %.0f%% of uptime; sleeping is not "
+              "taking effect" % (100.0 * frac))
+else:
+    note("Planner rest", "SLEEP DISABLED - the model stays warm between calls")
 note("Planner errors", "%s errors, %s refusals, %s rate-limited" % (
     stats.get("errors"), stats.get("refusals"), stats.get("rate_limited")))
 note("Ledger", "%s, head seq %s" % (

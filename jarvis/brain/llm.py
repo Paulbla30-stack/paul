@@ -377,6 +377,10 @@ class BaseBrain:
         self._disabled_reason = ""
         self.key_source = ""
         self._system_cache: dict = {}
+        # Sleeping is opt-in and attached from outside, so a brain constructed
+        # bare (tests, the lab, a one-shot consult) behaves exactly as before.
+        from jarvis.agent.vigil import NullVigil
+        self._vigil = NullVigil()
 
         self.client = client if client is not None else self._make_client()
 
@@ -415,8 +419,17 @@ class BaseBrain:
             return False
         return self._calls_in_window() < self.max_calls_per_hour
 
+    def attach_vigil(self, vigil):
+        """Hand the brain the sleep/wake gate. Optional; default is always awake."""
+        self._vigil = vigil
+
     def should_plan(self, cycle: int) -> bool:
-        return self.available() and cycle % self.plan_every_n_cycles == 0
+        # The vigil is asked last because asking it is what marks a suppressed
+        # call in its stats, and a call blocked by the budget or a backoff was
+        # never the vigil's to suppress.
+        if not (self.available() and cycle % self.plan_every_n_cycles == 0):
+            return False
+        return self._vigil.may_call()
 
     def unavailable_reason(self) -> str:
         if self.client is None or self._disabled_reason:
@@ -439,6 +452,7 @@ class BaseBrain:
             "backoff_seconds": max(0, round(self._backoff_until - time.time())),
             "calls_last_hour": self._calls_in_window(),
             "max_calls_per_hour": self.max_calls_per_hour,
+            "vigil": self._vigil.status(),
             "last_reasoning": self.last_reasoning,
             "last_error": self.last_error or None,
             "stats": dict(self.stats),
@@ -461,6 +475,10 @@ class BaseBrain:
                                  self.max_calls_per_hour)
             return False
         self._calls.append(time.time())
+        # One chokepoint for every kind of call -- planning, an operator's
+        # think, a consult, a lab run -- because the meter does not care which
+        # of them warmed the copy.
+        self._vigil.note_call()
         return True
 
     def _backoff(self, seconds: float, reason: str):
@@ -639,6 +657,15 @@ class BaseBrain:
                 lines = []
             if lines:
                 context["about_yourself"] = lines
+        # That it sleeps, how long it slept and what woke it. Without this a
+        # model that wakes into a forty-minute gap will either invent what
+        # happened in it or read the jump as evidence something is broken.
+        try:
+            rest = self._vigil.describe()
+        except Exception:
+            rest = {}
+        if rest:
+            context["rest"] = rest
         rung = getattr(agent, "rung", None)
         if rung:
             from jarvis.agent import authority

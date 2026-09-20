@@ -125,6 +125,20 @@ class AgentCore:
         from jarvis.agent.consolidate import Consolidator
         self.consolidator = Consolidator(self.store, self.log,
                                          config.get("consolidate") or {}, self.ledger)
+        # When the agent thinks, and when it lets itself go quiet. An imported
+        # model bills per minute that a copy is warm, not per call, so the cost
+        # of thinking is the length of the silences between thoughts. The loop
+        # keeps running on the rule planner while the model rests; see vigil.py.
+        from jarvis.agent.vigil import build as _build_vigil
+        self.vigil = _build_vigil(config.get("sleep") or {}, self.log)
+        # Only attach a real one. Handing the brain a NullVigil here would
+        # silently undo a vigil attached to it from outside, and "sleeping
+        # quietly switched itself off" is the one failure this must not have.
+        if self.brain is not None and getattr(self.vigil, "enabled", False):
+            try:
+                self.brain.attach_vigil(self.vigil)
+            except AttributeError:      # a stub brain in a test
+                pass
         # Behavioural self-knowledge: aggregates over the ledger, which the
         # agent may not read. Set by main.py; None means it learns nothing
         # about its own conduct, which is the state this was built to end.
@@ -609,6 +623,11 @@ class AgentCore:
         # 1. Observe
         observations = self.observe()
         cycle_result["observations"] = observations
+        # The cheap planner is still looking while the model rests; this is
+        # what lets a sleeping agent stay responsive to the machine without
+        # paying to keep a 32B model warm to notice a disk filling up.
+        self.vigil.observe(observations)
+        self._record_vigil()
 
         # 2. Plan
         task = self.planner.get_next_task()
@@ -616,20 +635,59 @@ class AgentCore:
             task = self.plan(observations)
         if task is None:
             cycle_result["action"] = "idle"
+            self.vigil.note_idle()
+            cycle_result["vigil"] = self.vigil.state
+            self._record_vigil()
             return cycle_result
 
         # 3. Act
+        self.vigil.note_work()
         result = self.act(task)
         cycle_result["action"] = task.description
         cycle_result["result"] = result
 
         # 4. Reflect
         self.reflect(task, result)
+        cycle_result["vigil"] = self.vigil.state
+        self._record_vigil()
 
         return cycle_result
 
+    def note_operator(self, what: str):
+        """The operator did something. Wake the model now, whatever the meter says.
+
+        This is the one trigger that is not about cost. A person waiting for an
+        answer is more expensive than a warm model copy, and an agent that
+        makes its operator wait to save a few pence has the trade backwards.
+        """
+        try:
+            self.vigil.note_activity(what)
+            self._record_vigil()
+        except Exception as e:
+            self.log.debug("vigil wake failed for %s: %s", what, e)
+
+    def _record_vigil(self):
+        """Put any sleep/wake crossing on the ledger.
+
+        The record should show why the agent was not thinking as clearly as it
+        shows what it thought. A gap with no entry either side is indistinguish-
+        able from a crash, and a reader deserves better than having to guess.
+        """
+        while True:
+            transition = self.vigil.take_transition()
+            if transition is None:
+                return
+            try:
+                body = dict(transition)
+                body["cycle"] = self.cycle_count
+                self.ledger.record("vigil", body)
+            except Exception as e:      # resting is never worth losing a cycle over
+                self.log.warning("could not record vigil transition: %s", e)
+                return
+
     def add_goal(self, description: str, priority: int = 5):
         """Add a high-level goal for the agent to work toward."""
+        self.note_operator("new goal")
         self.planner.add_goal(description, priority)
         self.memory.store(
             category="goal",
@@ -652,6 +710,7 @@ class AgentCore:
 
     def think(self) -> dict:
         """Force one LLM planning step and run the chosen task immediately."""
+        self.note_operator("think")
         if self.brain is None:
             return {"error": "no LLM brain configured (llm.enabled)"}
         if not self.brain.available():
@@ -765,6 +824,7 @@ class AgentCore:
         text = (description or "").strip()
         if not text or not self.planner.complete_goal(text):
             return False
+        self.note_operator("goal withdrawn")
         self.log.info("Goal withdrawn by operator: %s", text[:200])
         self.remember(f"Operator withdrew the goal: {text[:200]}",
                       kind="goal", source="operator")
@@ -791,6 +851,7 @@ class AgentCore:
         to want it, which is what it needs to learn from; carrying it out is a
         separate act, and one that a click in a web UI should not trigger.
         """
+        self.note_operator("proposal decided")
         items = list(self.proposals)
         if not items or not (0 <= int(index) < len(items)):
             return None
@@ -854,6 +915,9 @@ class AgentCore:
             "memory_store": self.store.stats(),
             "authority": {"rung": self.rung, "proposals": len(self.proposals)},
             "notify": self.notifier.status(),
+            # Warm minutes, not call count: the meter on an imported model
+            # runs on the former, so that is what belongs in front of a reader.
+            "vigil": self.vigil.status(),
         }
 
     def shutdown(self):

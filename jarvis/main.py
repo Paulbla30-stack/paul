@@ -403,6 +403,9 @@ class JarvisSystem:
         # memory:, and handed to the agent with the rest of its settings.
         agent_cfg = dict(self.config["agent"])
         agent_cfg["consolidate"] = (self.config.get("memory") or {}).get("consolidate") or {}
+        # Sleeping is configured beside the planner whose cost it governs,
+        # under llm:, and handed to the agent with the rest of its settings.
+        agent_cfg["sleep"] = (llm_cfg or {}).get("sleep") or {}
         self.agent = AgentCore(
             config=agent_cfg,
             hardware=hardware,

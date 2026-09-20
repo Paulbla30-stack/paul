@@ -216,6 +216,34 @@ llm:
                                 # User data and the jarvis:llm-key-* tags override both.
   max_calls_per_hour: 60     # hard budget; rule planner takes over beyond it
   plan_every_n_cycles: 1
+  # When the agent thinks, and when it lets itself go quiet.
+  #
+  # An imported model on Bedrock does not bill per call. It bills per Custom
+  # Model Unit per MINUTE that a copy is warm, and a copy stays warm for about
+  # five minutes after the last call. The loop's old idle backoff capped at
+  # 300s, which is exactly the warm window: one call every five minutes, around
+  # the clock, is the one cadence that never lets the copy go cold. Twelve
+  # calls an hour looked restrained and cost about 200 USD a day to sit still.
+  #
+  # So the saving is not fewer calls, it is longer silences -- and, because a
+  # warm copy makes the next call nearly free, the thinking is clustered into
+  # a burst and then stopped, rather than dribbled out one thought at a time.
+  #
+  # While asleep the loop keeps running on the rule planner, which costs
+  # nothing and still observes, records and acts on what it knows. Sleep
+  # removes the model, not the agent.
+  sleep:
+    enabled: true
+    warm_window_s: 300       # how long the provider keeps a copy warm; theirs, not ours
+    idle_after_s: 180        # quiet this long with nothing to do -> sleep
+    heartbeat_s: 3600        # wake at least this often, so standing duties still happen
+    quiet_heartbeat_s: 10800 # ...and only this often overnight; never faster than the above
+    burst_calls: 6           # model calls allowed per waking
+    burst_window_s: 180      # ...and the burst may not outlast this
+    min_sleep_s: null        # null = the warm window; a shorter sleep saves nothing
+    band: 10                 # observations move this much before they count as changed
+    quiet_hours: [22, 7]
+    timezone: Europe/London
   history_window: 10
   environment_paths: null    # paths checked and reported to the model every cycle;
                              # null uses the standard set (the Jarvis config, state,

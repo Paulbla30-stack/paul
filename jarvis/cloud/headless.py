@@ -466,6 +466,7 @@ class HeadlessRunner:
                     if not body:
                         return self._send(400, {"error": "question required in body"})
                     with runner._lock:
+                        runner.agent.note_operator("question")
                         answer = runner.agent.ask(body)
                     self._send(200, {"question": body, "answer": answer})
                 elif path == "/chat":
@@ -478,6 +479,7 @@ class HeadlessRunner:
                         return self._send(400, {"error": "messages list required"})
                     settings = runner.lab_settings if runner.lab_apply_to_chat else None
                     with runner._lock:
+                        runner.agent.note_operator("chat")
                         answer = runner.agent.chat(turns, settings=settings)
                     runner.wake()
                     self._send(200, {"answer": answer, "dials": settings is not None})
