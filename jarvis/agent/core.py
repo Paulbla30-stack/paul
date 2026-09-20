@@ -185,6 +185,13 @@ class AgentCore:
         # register is built to that argument. See questions.py.
         from jarvis.agent import questions as _questions
         self.questions = _questions.QuestionRegister(self)
+        # What it knows about the person it works for. Given, never gathered:
+        # an agent writing its own inferences about someone destroys the one
+        # thing that makes such a record worth keeping. See operator.py.
+        from jarvis.agent import operator as _operator
+        self.operator = _operator.OperatorProfile(
+            self, name=str(config.get("operator_name") or "your operator"))
+        self.operator.load()
         # Changes the agent wanted to make and did not. Bounded here, durable
         # in the store, so they outlive the process.
         self.proposals = deque(maxlen=50)

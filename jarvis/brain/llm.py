@@ -744,6 +744,14 @@ class BaseBrain:
             }
         except Exception:
             pass
+        # Who it works for. First in importance and easy to miss among the
+        # disk figures, so it goes in whole rather than as a line.
+        try:
+            who = agent.operator.context()
+        except Exception:
+            who = None
+        if who:
+            context["your_operator"] = who
         knower = getattr(agent, "self_knowledge", None)
         if knower is not None:
             try:
