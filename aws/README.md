@@ -315,12 +315,12 @@ a token, because nothing off the box can reach it.
 
 ## The current image
 
-`ami-0c36fec8f3ba4c7c4` (`jarvis-agent-al2023-x86_64-20260920-175732`, us-west-2,
-built from the tree at `e04eb8b`, 8GiB encrypted gp3). It carries everything the
+`ami-034a2d29889fe06f0` (`jarvis-agent-al2023-x86_64-20260920-204154`, us-west-2,
+built from the tree at `1bdaa56`, 8GiB encrypted gp3). It carries everything the
 previous image did -- the permission spine, filesystem grounding, durable memory
 with consolidation, ledger-derived self-knowledge, the operator channel, estate
 reporting, the standing system goals, the responsive UI and `cloudflared` -- plus
-the work of 20 September:
+the vigil and the work of 20 September:
 
 - **the vigil** (`jarvis/agent/vigil.py`): the agent sleeps, and is woken by the
   operator, by a material change in its observations, or on a heartbeat;
@@ -330,17 +330,34 @@ the work of 20 September:
   user-data example, in place of an imported-model ARN;
 - **repeat pacing**, so a task that merely repeats backs off like an idle one;
 - **proportional banding** of large numbers, so a disk moving by a fraction of a
-  percent is not mistaken for a disk filling up.
+  percent is not mistaken for a disk filling up;
+- **the tool register** (`jarvis/agent/tools.py`): every capability declared in
+  one place, with the rung that opens it, so a tool cannot ship half-wired;
+- **the fault register** (`jarvis/agent/faults.py`): where this agent's errors
+  cluster, as counted facts rather than rules;
+- **the lab session** (`jarvis/agent/lab.py`): the behaviour lab cannot open
+  without the agent being told it is open;
+- **the verdict register** (`jarvis/agent/verdicts.py`): whether what it said was
+  true, ruled on by the machine, by a second reader, or by the operator, and
+  never merged into one figure;
+- **an empty system prompt sends no system block**, without which the lab's base
+  variant failed as a transport error on any catalog model.
 
-Run it with `terraform apply -var ami_id=ami-0c36fec8f3ba4c7c4`; `ami_id` has no
+Run it with `terraform apply -var ami_id=ami-034a2d29889fe06f0`; `ami_id` has no
 default on purpose.
 
-The previous image was `ami-04efe6ce12b65e6a3`, built from `f86c0cd`, and was
-verified on a throwaway instance that was terminated afterwards. This one has
-been verified only by the self-test inside the Packer build, because the same
-code is already running on `i-016f9f37fe6ca2ba8`, where it has been observed
-sleeping, waking on a question, reading the real disk figure and holding the
-ledger to about 85 entries an hour.
+The previous image is `ami-0c36fec8f3ba4c7c4`, built from `e04eb8b`, kept as the
+rollback. This one has been verified only by the self-test inside the Packer
+build, because the same code is already running on `i-016f9f37fe6ca2ba8`, where
+it has been observed sleeping, waking on a question, reading the real disk
+figure, refusing a lab run until the window was opened, and ruling on its own
+claims against the box.
+
+`ami-0155046bcb14b83f0` was a stepping stone built an hour earlier from
+`650b225` and superseded before it was ever launched; it and its snapshot
+`snap-027bdef7da786411b` are still registered and should be removed.
+`ami-08c4f9cf196d23579` (18 September, `snap-094619bbb752913fd`) is the oldest
+and is now two images behind.
 
 **Rebuilding the image is not the same as replacing the running instance.**
 Changing `ami_id` makes Terraform destroy and recreate `aws_instance.jarvis`,
