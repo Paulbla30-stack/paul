@@ -145,6 +145,11 @@ class AgentCore:
         self.self_knowledge = None
         self.notes = deque(maxlen=config.get("notes_limit", 20))
         self._restore_notes()
+        # Goals the operator gave through the API, which used to vanish on a
+        # restart. Restored before main.py adds the configured ones; the
+        # planner is idempotent on description, so the two passes cannot
+        # produce duplicates.
+        self._restore_goals()
         # Files handed to the agent through the UI / API; the brain sees them.
         self.uploads = deque(maxlen=50)
         # The permission spine: what this agent is allowed to *be*, above the
@@ -364,6 +369,53 @@ class AgentCore:
             return environment.verify(text)["missing"]
         except Exception:                          # never lose a cycle over it
             return []
+
+    def _restore_goals(self):
+        """Refill operator goals from durable memory after a restart.
+
+        Only ones an operator gave: a standing goal comes from config and is
+        re-added there, so restoring it here as well would make it operator-
+        given, which it was not, and provenance is the point.
+        """
+        try:
+            rows = self.store.recent(50, kind="goal")
+        except Exception as exc:
+            self.log.debug("Could not restore goals: %s", exc)
+            return
+        restored = 0
+        for row in reversed(rows):
+            if str(row.get("state") or "live") != "live":
+                continue                       # completed or withdrawn
+            meta = row.get("meta") or {}
+            if meta.get("standing"):
+                continue
+            text = str(row.get("text") or "").strip()
+            if not text:
+                continue
+            try:
+                priority = int(meta.get("priority", 5))
+            except (TypeError, ValueError):
+                priority = 5
+            self.planner.add_goal(text, max(0, min(priority, 10)))
+            restored += 1
+        if restored:
+            self.log.info("Restored %d operator goal(s) from durable memory", restored)
+
+    def _forget_goal(self, description: str, why: str):
+        """A goal that is done or withdrawn must not come back on the next boot.
+
+        Superseded rather than deleted, for the same reason nothing else here
+        is deleted: the record of having been asked survives the asking.
+        """
+        try:
+            for row in self.store.recent(50, kind="goal"):
+                if self.planner._norm(row.get("text") or "") != self.planner._norm(description):
+                    continue
+                self.store.set_state(row["id"], "superseded")
+                self.log.debug("Goal %s: %s", why, str(description)[:80])
+                return
+        except Exception as exc:
+            self.log.debug("Could not retire goal: %s", exc)
 
     def _restore_proposals(self):
         """Refill pending proposals from durable memory after a restart."""
@@ -728,13 +780,42 @@ class AgentCore:
                 return
 
     def add_goal(self, description: str, priority: int = 5):
-        """Add a high-level goal for the agent to work toward."""
+        """Add a high-level goal, and make it survive a restart.
+
+        It did not. Notes were restored and proposals were restored; goals
+        were not, and came only from config at boot. A goal given through the
+        API went into the volatile working memory and onto the ledger the
+        agent may not read, so a restart erased the operator's instruction
+        with no error and no trace the agent could see -- which is worse than
+        losing it loudly, because nothing ever asked where it went.
+
+        Pinned, because a goal that the row cap can prune is a goal that
+        quietly stops existing, which is the same failure with a slower fuse.
+        """
         self.note_operator("new goal")
         self.planner.add_goal(description, priority)
         self.memory.store(
             category="goal",
             data={"description": description, "priority": priority},
         )
+        try:
+            kept = self.store.remember(
+                description, kind="goal", source="operator",
+                cycle=self.cycle_count, pinned=True,
+                meta={"priority": int(priority), "standing": False})
+        except Exception as exc:
+            kept = None
+            self.log.warning("Goal could not be stored: %s", exc)
+        if kept is None:
+            # A NullStore takes the goal and returns None without complaint,
+            # which is right for a note and wrong for an instruction. An
+            # operator giving a goal to a box with no durable memory should
+            # be told it will not outlive the process rather than find out
+            # by it being gone.
+            self.log.warning(
+                "Goal will not survive a restart: no durable memory on this "
+                "box (%s). It is live now and will be lost when this process "
+                "ends.", (self.store.stats() or {}).get("reason") or "store unavailable")
         self.ledger.record("action", {"cycle": self.cycle_count, "actor": "operator",
                                       "action": "add_goal", "description": str(description)[:500],
                                       "priority": priority})
@@ -743,6 +824,7 @@ class AgentCore:
         """Mark a goal as satisfied (operator or brain)."""
         done = self.planner.complete_goal(description)
         if done:
+            self._forget_goal(description, "completed")
             self.memory.store(category="goal_completed",
                               data={"description": description, "cycle": self.cycle_count})
             self.ledger.record("action", {"cycle": self.cycle_count, "actor": "operator",
@@ -971,9 +1053,16 @@ class AgentCore:
         if not text or not self.planner.complete_goal(text):
             return False
         self.note_operator("goal withdrawn")
+        self._forget_goal(text, "withdrawn")
         self.log.info("Goal withdrawn by operator: %s", text[:200])
+        # A note *about* a goal, not a goal. It carried kind="goal", which was
+        # harmless while nothing read goals back and became a real bug the
+        # moment they were restored: the withdrawal note came back as a goal
+        # called "Operator withdrew the goal: ...", so taking an instruction
+        # back created a new one. kind="operator" also puts it in front of the
+        # model, which is where a withdrawal belongs.
         self.remember(f"Operator withdrew the goal: {text[:200]}",
-                      kind="goal", source="operator")
+                      kind="operator", source="operator")
         self.ledger.record("action", {"cycle": self.cycle_count, "actor": "operator",
                                       "action": "withdraw_goal", "description": text[:300]})
         return True

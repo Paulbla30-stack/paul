@@ -28,6 +28,7 @@ Three properties matter:
 """
 
 import hashlib
+import json
 import logging
 import os
 import sqlite3
@@ -77,6 +78,14 @@ MIGRATIONS = (
     # recent sighting, so on its own it cannot tell a fact re-established over
     # a week from a status line repeated six times in five minutes.
     ("first_ts", "ALTER TABLE memories ADD COLUMN first_ts REAL"),
+    #   meta   a small JSON object for what a kind needs and the schema does
+    #          not carry. A goal has a priority and whether it is standing;
+    #          without somewhere to put them, a goal given at runtime could
+    #          only be stored as prose and came back from a restart with its
+    #          priority guessed. Kept small and optional on purpose: this is
+    #          not a second schema, it is the corner a kind keeps its own
+    #          detail in.
+    ("meta", "ALTER TABLE memories ADD COLUMN meta TEXT"),
 )
 
 STATES = ("live", "dormant", "superseded")
@@ -107,7 +116,8 @@ class NullStore:
     available = False
     path = None
 
-    def remember(self, text, kind="note", source="brain", cycle=None, pinned=False):
+    def remember(self, text, kind="note", source="brain", cycle=None,
+                 pinned=False, meta=None):
         return None
 
     def recent(self, limit: int = 20, kind: Optional[str] = None) -> list:
@@ -220,31 +230,43 @@ class MemoryStore:
     # ---- writing --------------------------------------------------------
 
     def remember(self, text: str, kind: str = "note", source: str = "brain",
-                 cycle: Optional[int] = None, pinned: bool = False) -> Optional[dict]:
+                 cycle: Optional[int] = None, pinned: bool = False,
+                 meta: Optional[dict] = None) -> Optional[dict]:
         """Store one memory. Remembering the same text again refreshes it."""
         text = (text or "").strip()[:TEXT_LIMIT]
         if not text or self._db is None:
             return None
         kind = kind if kind in KINDS else "note"
         source = source if source in SOURCES else "brain"
+        blob = None
+        if meta:
+            try:
+                blob = json.dumps(meta)[:2000]
+            except (TypeError, ValueError):
+                blob = None
         digest, now = _digest(text), time.time()
         try:
             with self._lock:
-                row = self._db.execute("SELECT id, seen FROM memories WHERE digest = ?",
-                                       (digest,)).fetchone()
+                row = self._db.execute(
+                    "SELECT id, seen FROM memories WHERE digest = ?",
+                    (digest,)).fetchone()
                 if row is not None:
-                    # Seen before: one row, refreshed, not a duplicate.
+                    # Seen before: one row, refreshed, not a duplicate. A
+                    # re-stated goal may carry a new priority, so meta is
+                    # updated where one was supplied and left alone otherwise.
                     self._db.execute(
                         "UPDATE memories SET ts = ?, seen = seen + 1, cycle = ?,"
-                        " pinned = MAX(pinned, ?) WHERE id = ?",
-                        (now, cycle, int(bool(pinned)), row["id"]))
+                        " pinned = MAX(pinned, ?), state = 'live',"
+                        " meta = COALESCE(?, meta) WHERE id = ?",
+                        (now, cycle, int(bool(pinned)), blob, row["id"]))
                     self._db.commit()
                     return {"id": row["id"], "text": text, "kind": kind,
                             "repeat": True, "seen": row["seen"] + 1}
                 cur = self._db.execute(
                     "INSERT INTO memories (ts, first_ts, kind, source, cycle, text,"
-                    " digest, pinned) VALUES (?,?,?,?,?,?,?,?)",
-                    (now, now, kind, source, cycle, text, digest, int(bool(pinned))))
+                    " digest, pinned, meta) VALUES (?,?,?,?,?,?,?,?,?)",
+                    (now, now, kind, source, cycle, text, digest,
+                     int(bool(pinned)), blob))
                 self._db.commit()
                 new_id = cur.lastrowid
         except Exception as exc:
@@ -409,10 +431,15 @@ class MemoryStore:
                "pinned": bool(row["pinned"]), "seen": row["seen"]}
         for extra, default in (("weight", 1.0), ("used", 0), ("used_at", None),
                                ("state", "live"), ("derived", 0), ("sources", None),
-                               ("first_ts", None)):
+                               ("first_ts", None), ("meta", None)):
             if extra in keys:
                 out[extra] = row[extra]
         out["derived"] = bool(out.get("derived"))
+        if out.get("meta"):
+            try:
+                out["meta"] = json.loads(out["meta"])
+            except (TypeError, ValueError):
+                out["meta"] = None
         if out.get("sources"):
             out["sources"] = [int(x) for x in str(out["sources"]).split(",") if x.strip()]
         return out

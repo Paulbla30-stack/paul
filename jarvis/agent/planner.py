@@ -93,6 +93,19 @@ class TaskPlanner:
         withdrawing it is a change to what the agent is for, not a change of
         mind about a task, so it is marked here and treated as permanent.
         """
+        # Idempotent on the description. Adding the same goal twice should
+        # sharpen its priority, not produce two of it -- and once goals are
+        # restored from durable memory at boot, the config pass that follows
+        # would otherwise duplicate every standing goal on every restart.
+        wanted = self._norm(description)
+        for existing in self.goals:
+            if self._norm(existing["description"]) != wanted:
+                continue
+            existing["priority"] = min(existing.get("priority", priority), priority)
+            existing["standing"] = bool(existing.get("standing")) or bool(standing)
+            if not standing:
+                existing["completed"] = False
+            return
         self.goals.append({
             "description": description,
             "priority": priority,
