@@ -27,6 +27,8 @@ A second listener (``ui`` settings) can serve the same handler on a
 public address with TLS, so the UI works from a phone without a tunnel.
 
     GET  /lab      -> behaviour-lab dials, settings, locked layers, session
+    POST /notify/test {note?} -> send one real message to prove the operator
+         channel actually delivers, rather than only being configured
     POST /verdict {claim, ruling: held|failed|unchecked, source: operator|review,
                    by?, reason?, supersedes?} -> record a ruling from outside
     POST /lab/session {open: true|false, purpose?} -> opens or closes the lab
@@ -501,6 +503,29 @@ class HeadlessRunner:
                         answer = runner.agent.chat(turns, settings=settings)
                     runner.wake()
                     self._send(200, {"answer": answer, "dials": settings is not None})
+                elif path == "/notify/test":
+                    # Ring the bell. A channel reports itself ready on the
+                    # strength of its settings and has no idea whether
+                    # anything has ever arrived; this is the only way to find
+                    # out that is not a 3am alert.
+                    try:
+                        payload = json.loads(body or "{}") if body else {}
+                    except ValueError:
+                        payload = {}
+                    note = str((payload or {}).get("note") or "") if isinstance(payload, dict) else ""
+                    with runner._lock:
+                        result = runner.agent.notifier.prove(note)
+                        try:
+                            runner.agent.ledger.record("notification", {
+                                "cycle": runner.agent.cycle_count, "actor": "operator",
+                                "test": True, "sent": bool(result.get("sent")),
+                                "channel": result.get("channel"),
+                                "reason": result.get("reason")})
+                        except Exception:
+                            pass
+                    runner._write_status_file()
+                    self._send(200 if result.get("sent") else 503,
+                               {"result": result, "notify": runner.agent.notifier.status()})
                 elif path == "/verdict":
                     # A ruling from outside the agent. The machine rules by
                     # checking and needs no endpoint; this is for a person or

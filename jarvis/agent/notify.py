@@ -26,8 +26,21 @@ person's pocket at 3am -- is what makes it worth constraining:
 The failure mode this is built against is not the agent going quiet. It is the
 agent becoming something Paul mutes -- at which point the channel is worse than
 useless, because it looks like it works.
+
+**Configured is not proven.** A channel with a destination and a backend
+reports itself ready, and it has no idea whether anything has ever come out of
+the other end. This one ran for days that way: SES verified, settings right,
+status green, and not one message ever sent. The first real use would have
+been a 3am alert, which is the worst possible moment to discover a typo in a
+destination or a missing IAM action. So the notifier keeps a durable record of
+whether it has ever actually delivered, ``prove()`` rings the bell on purpose,
+and a channel that has never rung says so wherever it is reported. A test
+bypasses the pacing rules -- the floor, the cap, the gap, quiet hours -- and is
+marked as a test, because a test held by policy proves nothing and a test
+mistaken for the agent speaking is worse than no test at all.
 """
 
+import json
 import logging
 import os
 import re
@@ -49,6 +62,10 @@ DEFAULT_TZ = "Europe/London"
 SMS_LIMIT = 320                  # two segments; longer gets truncated, not split
 
 DEFAULT_DESTINATION_FILE = "/etc/jarvis/notify.dest"
+# Where "this channel has delivered at least once" survives a restart. In the
+# agent's own state directory rather than /etc, because it is something that
+# happened rather than something configured.
+DEFAULT_STATE_FILE = "/var/lib/jarvis/notify.state"
 
 
 def _severity_rank(name: str) -> int:
@@ -117,12 +134,58 @@ class Notifier:
         self.stats = {"sent": 0, "held": 0, "failed": 0}
         self.last_error: Optional[str] = None
         self.last_sent_at: Optional[float] = None
+        # Whether this channel has ever delivered anything, across restarts.
+        # In-process counters reset every deploy, and "has it ever worked" is
+        # exactly the question a restart must not be able to erase.
+        self.state_file = cfg.get("state_file") or DEFAULT_STATE_FILE
+        self.first_sent_at: Optional[float] = None
+        self.delivered: int = 0
+        self._load_state()
 
     # ---- what the health check and the status endpoint can say ----------
 
     @property
     def configured(self) -> bool:
         return bool(self.enabled and self.destination and self.channel != "none")
+
+    @property
+    def proven(self) -> bool:
+        """Has anything ever actually come out of the far end of this channel?
+
+        Deliberately not the same question as ``configured``. Settings being
+        right is a claim about intent; this is a claim about a message that
+        arrived, and only one of the two is worth anything at 3am.
+        """
+        return self.delivered > 0
+
+    def _load_state(self):
+        """Read the durable record. A missing or broken file means unproven."""
+        try:
+            with open(self.state_file) as f:
+                data = json.load(f)
+            self.first_sent_at = data.get("first_sent_at") or None
+            self.delivered = max(0, int(data.get("delivered") or 0))
+            if self.last_sent_at is None and data.get("last_sent_at"):
+                self.last_sent_at = float(data["last_sent_at"])
+        except FileNotFoundError:
+            pass
+        except Exception as exc:
+            self.log.debug("Could not read notify state: %s", exc)
+
+    def _save_state(self):
+        """Best effort. Losing this costs a status field, never a message."""
+        try:
+            directory = os.path.dirname(self.state_file)
+            if directory:
+                os.makedirs(directory, exist_ok=True)
+            tmp = self.state_file + ".tmp"
+            with open(tmp, "w") as f:
+                json.dump({"first_sent_at": self.first_sent_at,
+                           "last_sent_at": self.last_sent_at,
+                           "delivered": self.delivered}, f)
+            os.replace(tmp, self.state_file)
+        except Exception as exc:
+            self.log.debug("Could not write notify state: %s", exc)
 
     def destination_hint(self) -> Optional[str]:
         """Enough to recognise it, not enough to be a contact detail leak."""
@@ -138,6 +201,12 @@ class Notifier:
 
     def status(self) -> dict:
         return {"enabled": self.enabled, "configured": self.configured,
+                # Configured says the settings are there. Proven says a message
+                # has actually arrived. A green channel that has never rung is
+                # the thing this pair exists to stop looking green.
+                "proven": self.proven,
+                "delivered_ever": self.delivered,
+                "first_sent_at": self.first_sent_at,
                 "channel": self.channel, "destination": self.destination_hint(),
                 "min_severity": self.min_severity,
                 "max_per_hour": self.max_per_hour,
@@ -243,9 +312,66 @@ class Notifier:
         self.last_sent_at = now
         self.last_error = None
         self.stats["sent"] += 1
+        self.delivered += 1
+        if self.first_sent_at is None:
+            self.first_sent_at = now
+        self._save_state()
         self.log.info("Notification sent (%s): %s", severity, subject)
         return {"sent": True, "held": False, "reason": None, "severity": severity,
                 "subject": subject, "chars": len(text)}
+
+    def prove(self, note: str = "") -> dict:
+        """Ring the bell on purpose, at the operator's request.
+
+        Bypasses the pacing rules and the severity floor, and not the
+        destination or the backend: the question is whether the transport
+        works, and a test swallowed by quiet hours answers nothing. It does
+        not bypass ``enabled`` -- a switched-off channel should stay off even
+        for a test, or the test is measuring something that is not the channel.
+
+        The message says it is a test in its own text. A proof the operator
+        can mistake for the agent having something to say is worse than no
+        proof, because the next real message gets read as another test.
+        """
+        if not self.enabled:
+            return {"sent": False, "held": True, "reason": "notifications disabled",
+                    "test": True}
+        if not self.destination:
+            return {"sent": False, "held": True, "reason": "no destination configured",
+                    "test": True}
+        if self.channel == "none":
+            return {"sent": False, "held": True, "reason": "no channel configured",
+                    "test": True}
+        subject = "channel test"
+        body = (note or "").strip() or (
+            "This is a test of the operator channel, sent because someone asked "
+            "for it. It is not the agent reporting anything.")
+        text = self.compose(subject, body)
+        try:
+            backend = self._backend or self._build_backend()
+            backend(self.destination, text)
+        except Exception as exc:
+            self.stats["failed"] += 1
+            self.last_error = f"{type(exc).__name__}: {exc}"
+            self.log.warning("Channel test failed: %s", self.last_error)
+            return {"sent": False, "held": False, "reason": self.last_error,
+                    "test": True, "channel": self.channel,
+                    "destination": self.destination_hint()}
+        now = self.clock()
+        self.last_sent_at = now
+        self.last_error = None
+        self.delivered += 1
+        if self.first_sent_at is None:
+            self.first_sent_at = now
+        self._save_state()
+        self.log.info("Channel test sent on %s to %s", self.channel,
+                      self.destination_hint())
+        # Deliberately not counted in stats["sent"] or the hourly window: a
+        # test is not the agent speaking, and it should not spend the budget
+        # that the agent's next real message needs.
+        return {"sent": True, "held": False, "reason": None, "test": True,
+                "channel": self.channel, "destination": self.destination_hint(),
+                "chars": len(text), "proven": self.proven}
 
     # ---- backends -------------------------------------------------------
 

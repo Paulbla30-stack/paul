@@ -206,6 +206,17 @@ else:
     print('  %-20s %s to %s (%d sent, %d held, %d failed)' % (
         'Operator channel', n.get('channel'), n.get('destination'),
         stats.get('sent', 0), stats.get('held', 0), stats.get('failed', 0)))
+    # Configured is a claim about settings. Proven is a claim about a message
+    # that arrived. This channel sat green for days having never delivered
+    # anything, and the first real use would have been a 3am alert.
+    if 'proven' in n and not n.get('proven'):
+        print('  NOTE: this channel has never delivered a message. It is '
+              'configured, not proven.')
+        print('        Prove it with: curl -s -X POST -H "Authorization: Bearer '
+              '$(cat /run/jarvis/token)" http://127.0.0.1:8471/notify/test')
+    elif n.get('delivered_ever'):
+        print('  %-20s %d message(s) delivered since first use' % (
+            '', n['delivered_ever']))
     if n.get('last_error'):
         print('  ALERT: last message failed: %s' % str(n['last_error'])[:120])
 PYEOF
