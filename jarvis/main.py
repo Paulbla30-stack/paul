@@ -440,12 +440,19 @@ class JarvisSystem:
                 self.agent.planner.add_goal(goal["description"],
                                             int(goal.get("priority", 5)),
                                             standing=True)
+        # Config goals go through the planner rather than add_goal, which
+        # would make them durable. Config is read fresh on every boot, so
+        # persisting them is not only redundant, it makes the file stop being
+        # authoritative: delete a goal from cloud.yaml and it would come back
+        # from the database anyway, which is surprising in exactly the way
+        # configuration must not be. Durability is for instructions given at
+        # runtime, which have nowhere else to live.
         for goal in self.config.get("goals") or []:
             if isinstance(goal, str):
-                self.agent.add_goal(goal)
+                self.agent.planner.add_goal(goal, 5)
             elif isinstance(goal, dict) and goal.get("description"):
-                self.agent.add_goal(goal["description"],
-                                    int(goal.get("priority", 5)))
+                self.agent.planner.add_goal(goal["description"],
+                                            int(goal.get("priority", 5)))
         cloud = self.config.get("cloud", {})
         if cloud.get("instance"):
             self.agent.memory.store(category="cloud_instance",

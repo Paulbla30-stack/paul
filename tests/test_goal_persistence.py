@@ -158,6 +158,27 @@ class TestRestoringCannotDuplicate(Base):
         self.assertEqual(self.restart(a).planner.goals[0]["priority"], 1)
 
 
+class TestConfigStaysAuthoritative(Base):
+    """A goal deleted from the config file must not come back from the store.
+
+    Config is read fresh every boot, so persisting what it says would make
+    the file stop being the source of truth: remove a goal from cloud.yaml
+    and it would return from the database anyway. Durability is for
+    instructions given at runtime, which have nowhere else to live.
+    """
+
+    def test_a_config_goal_is_not_made_durable(self):
+        a = self.agent()
+        a.planner.add_goal("Report security posture once per hour", 5)
+        self.assertEqual(a.store.recent(5, kind="goal"), [])
+        self.assertEqual(self.given(self.restart(a)), [])
+
+    def test_an_api_goal_still_is(self):
+        a = self.agent()
+        a.add_goal("Chase the British Gas refund", 1)
+        self.assertTrue(a.store.recent(5, kind="goal"))
+
+
 class TestWithoutDurableMemory(unittest.TestCase):
     """A NullStore takes an instruction and returns None without complaint."""
 
