@@ -266,6 +266,26 @@ class TestTheAgentSide(unittest.TestCase):
         self.assertEqual(entry["asks"], "was it wanted")
         self.assertIn("not wanted", list(agent.notes)[-1])
 
+    def test_a_second_readers_ruling_does_too(self):
+        agent = self.make_agent()
+        agent.record_verdict("that answer was sound", verdicts.HELD, verdicts.REVIEW,
+                             by="claude")
+        self.assertIn("claude ruled", list(agent.notes)[-1])
+
+    def test_a_ruling_keeps_its_provenance_in_the_store(self):
+        """An unknown kind falls back to a plain note from the brain, and a
+        ruling that loses its attribution is a rumour."""
+        import tempfile
+        from jarvis.agent import store as _store
+        self.assertIn("verdict", _store.KINDS)
+        self.assertIn("review", _store.SOURCES)
+        with tempfile.TemporaryDirectory() as tmp:
+            db = _store.MemoryStore(path=f"{tmp}/m.db", logger=LOG)
+            row = db.remember("claude ruled that x: held", kind="verdict", source="review")
+            self.assertEqual(row["kind"], "verdict")
+            self.assertEqual(db.recent(1)[0]["source"], "review")
+            db.close()
+
     def test_the_confabulation_is_caught_on_the_way_out_of_chat(self):
         """End to end: the answer itself carries the check, and it is recorded."""
         import json as _json

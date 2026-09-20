@@ -81,8 +81,13 @@ MIGRATIONS = (
 
 STATES = ("live", "dormant", "superseded")
 
-KINDS = ("note", "fact", "upload", "goal", "operator", "proposal")
-SOURCES = ("brain", "operator", "system")
+# "verdict" is a ruling on something the agent said or wanted; "review" is a
+# second reader who is neither the operator nor this machine. Both are here
+# because an unknown kind falls back to a plain note from the brain, and a
+# verdict that loses its provenance is the one thing verdicts.py says must
+# never happen: a ruling with no attribution is a rumour.
+KINDS = ("note", "fact", "upload", "goal", "operator", "proposal", "verdict")
+SOURCES = ("brain", "operator", "system", "review", "machine")
 
 DEFAULT_PATH = "/var/lib/jarvis/memory.db"
 DEFAULT_MAX_ROWS = 2000

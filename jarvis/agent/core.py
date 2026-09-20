@@ -212,13 +212,16 @@ class AgentCore:
         if not text:
             return None
         # The notes deque is the hot cache handed to the model every cycle.
+        # A verdict belongs in it for the same reason an operator's does: it
+        # is a ruling addressed to the agent, and it should not wait for the
+        # next self-knowledge refresh to be heard.
         # Operator-sourced memory belongs in it as much as the agent's own
         # observations do -- more, really: a verdict on a proposal is the one
         # class of input that is instruction rather than observation, and it
         # should not have to wait for the next self-knowledge refresh to be
         # heard. It still goes to the store under its own kind, because where
         # a memory came from is the thing provenance is for.
-        if kind in ("note", "operator"):
+        if kind in ("note", "operator", "verdict"):
             self.notes.append(text)
         try:
             return self.store.remember(text, kind=kind, source=source,
@@ -833,7 +836,7 @@ class AgentCore:
                       else "a second reader"))
         self.remember(f"{who} ruled that {claim}: {ruling}"
                       + (f" -- {reason}" if reason else ""),
-                      kind="operator" if source == _verdicts.OPERATOR else "review",
+                      kind="verdict",
                       source="operator" if source == _verdicts.OPERATOR else "review")
         self.note_operator("verdict")
         return body
