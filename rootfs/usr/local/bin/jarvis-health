@@ -115,6 +115,11 @@ if vigil.get("enabled"):
     if isinstance(frac, float) and frac >= 0.5:
         print("  ALERT: the model has been warm %.0f%% of uptime; sleeping is not "
               "taking effect" % (100.0 * frac))
+    elif frac is None:
+        # Too soon to read: every restart opens with a burst of boot planning.
+        wait = vigil.get("warm_fraction_after_s")
+        note("Model warm share", "not yet meaningful%s" % (
+            ", readable in %dm" % (wait // 60) if isinstance(wait, int) else ""))
 else:
     note("Planner rest", "SLEEP DISABLED - the model stays warm between calls")
 note("Planner errors", "%s errors, %s refusals, %s rate-limited" % (

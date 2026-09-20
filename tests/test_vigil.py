@@ -659,3 +659,49 @@ class TestTheBrainGate(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestTheWarmFractionIsNotReadTooEarly(unittest.TestCase):
+    """An alert that cries wolf on every restart teaches the operator to ignore it.
+
+    Deployed and immediately wrong: the health check said "the model has been
+    warm 98% of uptime; sleeping is not taking effect" about a process that had
+    been up six minutes and had already slept once. Every restart opens with a
+    burst of boot planning, so early on the model is legitimately warm most of
+    the time and the ratio reads like a fault.
+    """
+
+    def test_the_fraction_is_withheld_until_the_window_is_long_enough(self):
+        clock = FakeClock()
+        v, clock = make(clock=clock)
+        v.may_call(); v.note_call()
+        clock.advance(360)                  # six minutes, as on the live box
+        st = v.status()
+        self.assertIsNone(st["warm_fraction"])
+        self.assertGreater(st["warm_fraction_after_s"], 0)
+        self.assertGreater(st["warm_seconds"], 0, "warm seconds are still reported")
+
+    def test_the_fraction_appears_once_it_means_something(self):
+        clock = FakeClock()
+        v, clock = make(clock=clock)
+        v.may_call(); v.note_call()
+        clock.advance(3601)
+        st = v.status()
+        self.assertIsInstance(st["warm_fraction"], float)
+        self.assertNotIn("warm_fraction_after_s", st)
+        self.assertLess(st["warm_fraction"], 0.1, "one call in an hour is not 98%")
+
+    def test_the_window_follows_the_heartbeat(self):
+        v, _ = make(heartbeat_s=7200)
+        self.assertEqual(v._fraction_after(), 7200.0)
+        v2, _ = make(heartbeat_s=60)
+        self.assertEqual(v2._fraction_after(), 3600.0, "never shorter than an hour")
+
+    def test_uptime_is_always_reported(self):
+        clock = FakeClock()
+        v, clock = make(clock=clock)
+        clock.advance(120)
+        self.assertEqual(v.status()["uptime_s"], 120)
+
+    def test_null_vigil_reports_no_fraction(self):
+        self.assertIsNone(NullVigil().status()["warm_fraction"])

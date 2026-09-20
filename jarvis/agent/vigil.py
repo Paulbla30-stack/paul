@@ -377,7 +377,7 @@ class Vigil:
         now = self._clock()
         uptime = max(1e-9, now - self._started)
         warm = self.warm_seconds()
-        return {
+        out = {
             "enabled": self.enabled,
             "state": self.state,
             "wake_reason": self.wake_reason,
@@ -386,10 +386,31 @@ class Vigil:
             "burst_calls": self.burst_calls,
             "asleep_until_next_heartbeat_s": self._until_heartbeat(now),
             "warm_seconds": warm,
-            "warm_fraction": round(min(1.0, warm / uptime), 4),
+            "uptime_s": round(uptime),
             "quiet_hours_now": _quiet_now(self.quiet_hours, self.timezone, now),
             "stats": dict(self.stats),
         }
+        # A fraction needs a window long enough to mean something. Every
+        # restart begins with a burst of boot planning, so for the first few
+        # minutes the model is legitimately warm most of the time and the
+        # ratio reads like a fault. Reporting it anyway produced an alert
+        # saying sleeping was not working on a process that had just slept.
+        # An alert that cries wolf on every restart teaches the operator to
+        # ignore it, which is worse than not having it.
+        if uptime >= self._fraction_after():
+            out["warm_fraction"] = round(min(1.0, warm / uptime), 4)
+        else:
+            out["warm_fraction"] = None
+            out["warm_fraction_after_s"] = round(self._fraction_after() - uptime)
+        return out
+
+    def _fraction_after(self) -> float:
+        """How long before the warm fraction is worth reading.
+
+        One heartbeat, because that is the longest the agent can legitimately
+        stay warm-free before it must wake anyway, and never less than an hour.
+        """
+        return max(3600.0, self.heartbeat_s)
 
     def describe(self) -> dict:
         """What the model is told about its own sleeping, as fact.
@@ -516,7 +537,8 @@ class NullVigil:
     def tick(self): return None
     def take_transition(self): return None
     def warm_seconds(self) -> float: return 0.0
-    def status(self) -> dict: return {"enabled": False, "state": AWAKE}
+    def status(self) -> dict:
+        return {"enabled": False, "state": AWAKE, "warm_fraction": None}
     def describe(self) -> dict: return {}
 
 
