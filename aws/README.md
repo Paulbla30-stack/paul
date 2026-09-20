@@ -315,17 +315,32 @@ a token, because nothing off the box can reach it.
 
 ## The current image
 
-`ami-04efe6ce12b65e6a3` (`jarvis-agent-al2023-x86_64-20260919-222617`, us-west-2,
-built from the tree at `f86c0cd`). It carries everything: the permission spine,
-filesystem grounding, durable memory with consolidation, ledger-derived
-self-knowledge, the operator channel, estate reporting, the standing system
-goals, the responsive UI, and `cloudflared` 2026.9.1
-(sha256 `03f1f25d1cc93b9ad6c60569d44060bc4f17ed97075760ed8cfca4b12dcd68cc`).
+`ami-0c36fec8f3ba4c7c4` (`jarvis-agent-al2023-x86_64-20260920-175732`, us-west-2,
+built from the tree at `e04eb8b`, 8GiB encrypted gp3). It carries everything the
+previous image did -- the permission spine, filesystem grounding, durable memory
+with consolidation, ledger-derived self-knowledge, the operator channel, estate
+reporting, the standing system goals, the responsive UI and `cloudflared` -- plus
+the work of 20 September:
 
-Verified by launching it on a throwaway instance with no inbound rules: the
-agent came up on its own, ran 25 cycles, opened its ledger, seeded its five
-standing goals at the proposer rung, and reported its own health. The instance
-was terminated afterwards.
+- **the vigil** (`jarvis/agent/vigil.py`): the agent sleeps, and is woken by the
+  operator, by a material change in its observations, or on a heartbeat;
+- **filesystem usage in the planner's context**, which it had never been able to
+  see despite holding a standing goal about it;
+- **the catalog planner** `qwen.qwen3-235b-a22b-2507-v1:0` in the Bedrock
+  user-data example, in place of an imported-model ARN;
+- **repeat pacing**, so a task that merely repeats backs off like an idle one;
+- **proportional banding** of large numbers, so a disk moving by a fraction of a
+  percent is not mistaken for a disk filling up.
+
+Run it with `terraform apply -var ami_id=ami-0c36fec8f3ba4c7c4`; `ami_id` has no
+default on purpose.
+
+The previous image was `ami-04efe6ce12b65e6a3`, built from `f86c0cd`, and was
+verified on a throwaway instance that was terminated afterwards. This one has
+been verified only by the self-test inside the Packer build, because the same
+code is already running on `i-016f9f37fe6ca2ba8`, where it has been observed
+sleeping, waking on a question, reading the real disk figure and holding the
+ledger to about 85 entries an hour.
 
 **Rebuilding the image is not the same as replacing the running instance.**
 Changing `ami_id` makes Terraform destroy and recreate `aws_instance.jarvis`,
