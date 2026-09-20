@@ -782,6 +782,62 @@ class AgentCore:
             answer = f"{answer}\n\n[path check] {note}"
         return answer, result
 
+    def _rule_on(self, answer: str, observations: Optional[dict]) -> list:
+        """Check what an answer claimed, and put each ruling on the record.
+
+        The agent never sees these entries, only aggregates over them later,
+        which is the same asymmetry the rest of the record is built on: a
+        subject who can read the individual rulings is a subject who can
+        manage the judge rather than learn from him.
+        """
+        try:
+            from jarvis.agent import verdicts as _verdicts
+            rulings = _verdicts.check(answer, self, observations)
+        except Exception as e:
+            self.log.debug("claim check failed: %s", e)
+            return []
+        for v in rulings:
+            try:
+                self.ledger.record("verdict", dict(v.to_body(), cycle=self.cycle_count))
+            except Exception:
+                continue
+        return rulings
+
+    def record_verdict(self, claim: str, ruling: str, source: str, by: str = "",
+                       reason: str = "", supersedes: Optional[str] = None) -> Optional[dict]:
+        """A ruling from a person or a second reader, rather than from the box.
+
+        Supersedes is how a reviewer changes their mind: the earlier ruling
+        is not removed, a newer one points at it, and the agent is told that
+        a ruling was revised as well as what it now says. A judge who cannot
+        be seen to change their mind is worse than one who is sometimes
+        wrong, because the first kind ossifies where the second gets
+        corrected.
+        """
+        from jarvis.agent import verdicts as _verdicts
+        claim = str(claim or "").strip()
+        if not claim:
+            return None
+        if ruling not in _verdicts.RULINGS or source not in _verdicts.SOURCES:
+            return None
+        if source == _verdicts.MACHINE:
+            return None            # the machine rules by checking, not by being told
+        v = _verdicts.Verdict(claim, ruling, source, by=by, reason=reason,
+                              supersedes=supersedes)
+        body = dict(v.to_body(), cycle=self.cycle_count)
+        self.ledger.record("verdict", body)
+        # A ruling from outside is instruction, not evidence, so it goes into
+        # the memory the model actually reads rather than only onto the
+        # record it may not.
+        who = (by or ("your operator" if source == _verdicts.OPERATOR
+                      else "a second reader"))
+        self.remember(f"{who} ruled that {claim}: {ruling}"
+                      + (f" -- {reason}" if reason else ""),
+                      kind="operator" if source == _verdicts.OPERATOR else "review",
+                      source="operator" if source == _verdicts.OPERATOR else "review")
+        self.note_operator("verdict")
+        return body
+
     def chat(self, turns, settings: Optional[dict] = None) -> str:
         """Continue an operator conversation with the agent's context.
 
@@ -794,8 +850,19 @@ class AgentCore:
         if gate:
             return f"Not answering: {gate}"
         extra = {"settings": settings} if settings is not None else {}
-        answer = self.brain.chat(self, turns, self.observe(), **extra)
+        observations = self.observe()
+        answer = self.brain.chat(self, turns, observations, **extra)
         answer, paths = self._check_answer_paths(answer) if answer else (answer, None)
+        # And what it claimed, against what is actually so. The path check
+        # above asks whether a path exists; this asks whether the assertion
+        # made about it was true, whether a tool it says it ran actually ran,
+        # and whether a figure it stated matches the reading it was given.
+        rulings = self._rule_on(answer, observations) if answer else []
+        if rulings:
+            from jarvis.agent import verdicts as _verdicts
+            note = _verdicts.note(rulings)
+            if note:
+                answer = f"{answer}\n\n[claim check] {note}"
         last_user = ""
         for t in reversed(list(turns or [])):
             if isinstance(t, dict) and t.get("role") == "user":
@@ -809,6 +876,9 @@ class AgentCore:
                 "model": getattr(self.brain, "model", None)}
         if paths and paths.get("checked"):
             body["paths"] = {"checked": paths["checked"], "missing": paths["missing"][:20]}
+        if rulings:
+            body["claims"] = {"checked": len(rulings),
+                              "failed": sum(1 for v in rulings if v.ruling == "failed")}
         if settings is not None:
             from jarvis.brain import dials
             body["dials"] = dials.fingerprint(settings)

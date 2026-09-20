@@ -151,7 +151,19 @@ class SelfKnowledge:
             # were. A failure rate is a number to feel bad about; a fault
             # profile is something to reason with. See faults.py.
             "faults": self._faults(faults_seen, decisions),
+            # Whether what it said was so, ruled on by something that is not
+            # it. Three sources, never merged into one figure. See verdicts.py.
+            "verdicts": self._verdicts(faults_seen),
         }
+
+    def _verdicts(self, seen) -> dict:
+        """Verdict aggregates for this window, by source. Never raises."""
+        try:
+            from jarvis.agent import verdicts
+            return verdicts.scan(seen, now=self.clock())
+        except Exception as exc:
+            self.log.debug("verdict scan unavailable: %s", exc)
+            return {}
 
     def _faults(self, seen, decisions) -> list:
         """Fault reports for this window. Never raises: a broken detector
@@ -212,6 +224,16 @@ class SelfKnowledge:
         try:
             from jarvis.agent import faults as _faults
             for line in _faults.lines(data.get("faults") or [])[:TOP_N]:
+                out.append(line)
+        except Exception:
+            pass
+
+        # What was ruled on and by whom. One line per source, never a
+        # combined figure: "eleven of fourteen" means three different things
+        # depending on which of the three was asking. See verdicts.py.
+        try:
+            from jarvis.agent import verdicts as _verdicts
+            for line in _verdicts.lines(dict(data.get("verdicts") or {})):
                 out.append(line)
         except Exception:
             pass

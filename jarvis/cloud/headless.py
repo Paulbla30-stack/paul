@@ -27,6 +27,8 @@ A second listener (``ui`` settings) can serve the same handler on a
 public address with TLS, so the UI works from a phone without a tunnel.
 
     GET  /lab      -> behaviour-lab dials, settings, locked layers, session
+    POST /verdict {claim, ruling: held|failed|unchecked, source: operator|review,
+                   by?, reason?, supersedes?} -> record a ruling from outside
     POST /lab/session {open: true|false, purpose?} -> opens or closes the lab
          window. Opening tells the agent first and only opens if that worked;
          the other lab endpoints refuse while the window is shut.
@@ -499,6 +501,34 @@ class HeadlessRunner:
                         answer = runner.agent.chat(turns, settings=settings)
                     runner.wake()
                     self._send(200, {"answer": answer, "dials": settings is not None})
+                elif path == "/verdict":
+                    # A ruling from outside the agent. The machine rules by
+                    # checking and needs no endpoint; this is for a person or
+                    # a second reader, and it is recorded with who they were.
+                    try:
+                        payload = json.loads(body or "{}")
+                    except ValueError:
+                        return self._send(400, {"error": "body must be JSON"})
+                    if not isinstance(payload, dict):
+                        return self._send(400, {"error": "JSON object required"})
+                    from jarvis.agent import verdicts as _verdicts
+                    with runner._lock:
+                        entry = runner.agent.record_verdict(
+                            claim=payload.get("claim") or "",
+                            ruling=str(payload.get("ruling") or ""),
+                            source=str(payload.get("source") or _verdicts.OPERATOR),
+                            by=str(payload.get("by") or ""),
+                            reason=str(payload.get("reason") or ""),
+                            supersedes=payload.get("supersedes") or None)
+                    if entry is None:
+                        return self._send(400, {
+                            "error": "claim, a ruling and a source are required",
+                            "rulings": list(_verdicts.RULINGS),
+                            "sources": [s for s in _verdicts.SOURCES
+                                        if s != _verdicts.MACHINE],
+                            "note": "the machine rules by checking, not by being told"})
+                    runner._write_status_file()
+                    self._send(200, {"recorded": entry})
                 elif path == "/lab/session":
                     # One switch. It opens the lab and it tells the agent, and
                     # it cannot do one without the other: the announcement

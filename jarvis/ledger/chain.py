@@ -50,7 +50,7 @@ GENESIS_PREV = "0" * 64
 #   notification   a message that left the machine for the operator
 #   consolidation  the agent reorganising its own memory
 KINDS = ("genesis", "thought", "decision", "gate", "action", "outcome", "alert",
-         "notification", "consolidation", "vigil")
+         "notification", "consolidation", "vigil", "verdict")
 MAX_BODY_BYTES = 65536
 
 
