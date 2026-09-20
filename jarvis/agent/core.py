@@ -248,6 +248,18 @@ class AgentCore:
                 observations["storage"] = self.hardware["storage"].get_devices()
             except Exception as e:
                 observations["storage_error"] = str(e)
+            # Block devices say how big the disks are. They say nothing about
+            # how full the filesystems are, and "keep the root filesystem under
+            # 80% used" is a standing goal, so for a long time the agent held a
+            # goal about a number it could not see. It compensated by planning
+            # a disk check over and over, which is what the repeat counter in
+            # its own self-knowledge was recording.
+            usage = getattr(self.hardware["storage"], "get_disk_usage", None)
+            if callable(usage):
+                try:
+                    observations["disk_usage"] = usage()
+                except Exception as e:
+                    observations["disk_usage_error"] = str(e)
 
         return observations
 

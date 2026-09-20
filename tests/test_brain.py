@@ -154,6 +154,119 @@ class TestSchemaAndHelpers(unittest.TestCase):
         self.assertLess(len(out["input_events"][0]), 300)
         self.assertEqual(out["display_error"], "no fb")
 
+    # ---- disk usage ---------------------------------------------------
+    #
+    # The planner carries a standing goal to keep the root filesystem under
+    # 80% used, and for a long time it could not see the number. observe()
+    # asked the storage layer for block devices, which report how big a disk
+    # is and never how full it is, and the compaction below had no usage key
+    # to pass through even if it had. Asked to plan against a disk at 91%,
+    # five different models all confidently reported 19%, reading a stale
+    # note because it was the only figure in front of them. These tests are
+    # about the number arriving.
+
+    DF = [
+        {"device": "tmpfs", "mountpoint": "/dev/shm", "size": 8 << 30,
+         "used": 0, "available": 8 << 30, "use_percent": "0%"},
+        {"device": "/dev/nvme0n1p1", "mountpoint": "/", "size": 8 << 30,
+         "used": int(7.3 * (1 << 30)), "available": int(0.7 * (1 << 30)),
+         "use_percent": "91%"},
+        {"device": "/dev/nvme0n1p2", "mountpoint": "/var", "size": 4 << 30,
+         "used": 1 << 30, "available": 3 << 30, "use_percent": "25%"},
+    ]
+
+    def test_disk_usage_reaches_the_model(self):
+        out = compact_observations({"disk_usage": list(self.DF)})
+        mounts = [r["mountpoint"] for r in out["disk_usage"]]
+        self.assertIn("/", mounts)
+        root = out["disk_usage"][0]
+        self.assertEqual(root["mountpoint"], "/")
+        self.assertEqual(root["use_percent"], "91%")
+
+    def test_root_is_listed_first(self):
+        """A model that reads the first row and stops should read the right one."""
+        shuffled = [self.DF[2], self.DF[0], self.DF[1]]
+        out = compact_observations({"disk_usage": shuffled})
+        self.assertEqual(out["disk_usage"][0]["mountpoint"], "/")
+
+    def test_pseudo_filesystems_are_dropped(self):
+        out = compact_observations({"disk_usage": list(self.DF)})
+        mounts = [r["mountpoint"] for r in out["disk_usage"]]
+        self.assertNotIn("/dev/shm", mounts)
+
+    def test_bytes_become_gigabytes(self):
+        out = compact_observations({"disk_usage": list(self.DF)})
+        root = out["disk_usage"][0]
+        self.assertEqual(root["size_gb"], 8.0)
+        self.assertEqual(root["available_gb"], 0.7)
+
+    def test_disk_usage_is_bounded(self):
+        many = [{"device": f"/dev/sd{chr(97 + i)}", "mountpoint": f"/mnt/{i}",
+                 "size": 1 << 30, "used": 0, "available": 1 << 30, "use_percent": "0%"}
+                for i in range(30)]
+        out = compact_observations({"disk_usage": many})
+        self.assertLessEqual(len(out["disk_usage"]), 8)
+
+    def test_no_disk_usage_key_when_there_is_nothing_to_say(self):
+        self.assertNotIn("disk_usage", compact_observations({"cycle": 1}))
+        self.assertNotIn("disk_usage", compact_observations({"disk_usage": []}))
+        self.assertNotIn("disk_usage", compact_observations({"disk_usage": "not a list"}))
+
+    def test_a_failure_to_read_usage_is_reported_not_swallowed(self):
+        """An absence the model cannot see is one it invents something to fill."""
+        out = compact_observations({"disk_usage_error": "df not found"})
+        self.assertEqual(out["disk_usage_error"], "df not found")
+
+    def test_malformed_rows_do_not_break_the_cycle(self):
+        out = compact_observations({"disk_usage": [
+            None, "junk", {}, {"mountpoint": "/", "use_percent": "50%", "size": "n/a"}]})
+        self.assertEqual(len(out["disk_usage"]), 1)
+        self.assertNotIn("size_gb", out["disk_usage"][0])
+
+    def test_observe_asks_for_disk_usage(self):
+        """The bug was here: observe() asked only for block devices."""
+        class FakeStorage:
+            def get_devices(self):
+                return [{"name": "nvme0n1", "size_gb": 8}]
+
+            def get_disk_usage(self):
+                return [{"device": "/dev/nvme0n1p1", "mountpoint": "/", "size": 8 << 30,
+                         "used": 7 << 30, "available": 1 << 30, "use_percent": "91%"}]
+
+        agent = AgentCore({"name": "t", "profile": "cloud"},
+                          {"display": None, "input": None, "memory": None,
+                           "storage": FakeStorage()}, LOG)
+        obs = agent.observe()
+        self.assertIn("disk_usage", obs)
+        self.assertEqual(obs["disk_usage"][0]["use_percent"], "91%")
+
+    def test_a_storage_layer_without_usage_still_works(self):
+        """Older hardware stubs have no get_disk_usage; that is not a crash."""
+        class OldStorage:
+            def get_devices(self):
+                return [{"name": "nvme0n1", "size_gb": 8}]
+
+        agent = AgentCore({"name": "t", "profile": "cloud"},
+                          {"display": None, "input": None, "memory": None,
+                           "storage": OldStorage()}, LOG)
+        obs = agent.observe()
+        self.assertNotIn("disk_usage", obs)
+        self.assertNotIn("disk_usage_error", obs)
+
+    def test_a_raising_storage_layer_is_recorded_as_an_error(self):
+        class BrokenStorage:
+            def get_devices(self):
+                return []
+
+            def get_disk_usage(self):
+                raise OSError("df timed out")
+
+        agent = AgentCore({"name": "t", "profile": "cloud"},
+                          {"display": None, "input": None, "memory": None,
+                           "storage": BrokenStorage()}, LOG)
+        obs = agent.observe()
+        self.assertIn("df timed out", obs["disk_usage_error"])
+
     def test_model_gating_of_thinking_and_effort(self):
         opus = ClaudeBrain({"api_key": "x", "base_url": "http://127.0.0.1:9"}, LOG)
         self.assertEqual(opus.thinking, "adaptive")

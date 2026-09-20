@@ -300,13 +300,65 @@ def compact_observations(observations: dict) -> dict:
                                    "removable", "model") if k in d}
             for d in storage[:16] if isinstance(d, dict)
         ]
+    out["disk_usage"] = _disk_usage(observations.get("disk_usage"))
+    if not out["disk_usage"]:
+        del out["disk_usage"]
     for key in ("display", "input_events"):
         if key in observations:
             out[key] = _truncate(observations[key], 200)
-    for key in ("display_error", "input_error", "memory_error", "storage_error"):
+    for key in ("display_error", "input_error", "memory_error", "storage_error",
+                "disk_usage_error"):
         if key in observations:
             out[key] = str(observations[key])[:200]
     return out
+
+
+# Filesystems that exist in RAM or in the kernel rather than on a disk. Their
+# usage is never what a "keep the disk under 80%" goal is about, and eight of
+# them crowding out the one real mount is how a true number becomes unreadable.
+PSEUDO_FS = {"tmpfs", "devtmpfs", "devpts", "sysfs", "proc", "overlay", "squashfs",
+             "none", "udev", "shm", "efivarfs", "cgroup", "cgroup2", "ramfs",
+             "fusectl", "debugfs", "tracefs", "mqueue", "hugetlbfs", "configfs",
+             "securityfs", "pstore", "bpf", "autofs", "binfmt_misc", "nsfs"}
+PSEUDO_MOUNTS = ("/proc", "/sys", "/dev", "/run", "/snap", "/var/lib/docker")
+
+
+def _gb(value) -> Optional[float]:
+    try:
+        return round(float(value) / (1024 ** 3), 1)
+    except (TypeError, ValueError):
+        return None
+
+
+def _disk_usage(usage) -> list:
+    """How full the real filesystems are, root first, bounded.
+
+    ``StorageManager.get_disk_usage`` returns every line ``df`` prints, in
+    bytes. The model wants the few mounts a person would look at, in units a
+    person would use, with the one the standing goal is about at the top.
+    """
+    if not isinstance(usage, list):
+        return []
+    rows = []
+    for d in usage:
+        if not isinstance(d, dict):
+            continue
+        mount = str(d.get("mountpoint") or "")
+        source = str(d.get("device") or "")
+        if source in PSEUDO_FS or not mount:
+            continue
+        if mount != "/" and mount.startswith(PSEUDO_MOUNTS):
+            continue
+        row = {"mountpoint": mount, "use_percent": d.get("use_percent")}
+        for key, out_key in (("size", "size_gb"), ("available", "available_gb")):
+            gb = _gb(d.get(key))
+            if gb is not None:
+                row[out_key] = gb
+        rows.append(row)
+    # Root first: it is what the standing goal names, and a model that reads
+    # the first row and stops should read the right one.
+    rows.sort(key=lambda r: (r["mountpoint"] != "/", r["mountpoint"]))
+    return rows[:8]
 
 
 def _uptime_seconds() -> Optional[float]:
