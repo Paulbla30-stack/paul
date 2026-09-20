@@ -1,8 +1,6 @@
 #cloud-config
 # Jarvis user data: plan with an open-weight model on Amazon Bedrock.
 # No API key: the instance role calls Bedrock (terraform -var llm_provider=bedrock).
-# Swap `model` for your own imported model's ARN once Custom Model Import is done:
-#   arn:aws:bedrock:us-west-2:ACCOUNT:imported-model/ID
 
 jarvis:
   agent:
@@ -21,10 +19,42 @@ jarvis:
   llm:
     enabled: true
     provider: bedrock
-    model: arn:aws:bedrock:us-west-2:485964361844:imported-model/jfu3j2ssmqvx   # Qwen3-32B, Custom Model Import
-    # model: arn:aws:bedrock:us-west-2:485964361844:imported-model/xxnmq5w0nsck # Qwen2.5-7B-Instruct (smaller, weaker planner)
-    # model: openai.gpt-oss-120b-1:0                                            # catalog fallback
-    max_calls_per_hour: 120   # planner + chat calls per hour; imported models bill per model-minute, not per call
+
+    # The Bedrock CATALOG copy of Qwen3-32B, billed per token.
+    #
+    # This is the same model that was previously run here through Custom Model
+    # Import, and the change is a billing change, not a capability one. Import
+    # bills per Custom Model Unit per MINUTE that a copy is warm; 32B of
+    # weights is four units, so an idle agent that touched the model every few
+    # minutes paid for every minute of the day. Measured on this workload:
+    #
+    #   imported, warm around the clock     ~7,174 USD/month
+    #   imported, with the vigil asleep       ~707 USD/month
+    #   catalog, per token, same cadence        ~4 USD/month
+    #
+    # Measured against the imported copy on five real planning scenarios, the
+    # catalog copy chose the same task in four, gave the same reasoning, and
+    # answered in 1.3 s against 2.9 s.
+    #
+    # What is given up is worth stating: an imported model is a private copy
+    # that cannot change under you, and a catalog model is AWS's to version and
+    # to deprecate. That is a real difference for a system meant to be
+    # reproducible later. It is not worth 700 USD a month at a hundred plans a
+    # day, and if it ever is, the import below is how to go back.
+    model: qwen.qwen3-32b-v1:0
+    family: Qwen3-32B        # told to the model as fact; see llm.family in config-aws.yaml
+
+    # Alternatives, in the order they were considered:
+    #   arn:aws:bedrock:us-west-2:485964361844:imported-model/jfu3j2ssmqvx  # the private Qwen3-32B copy; see the costs above
+    #   arn:aws:bedrock:us-west-2:485964361844:imported-model/xxnmq5w0nsck  # Qwen2.5-7B, one unit, but two generations older
+    #   qwen.qwen3-next-80b-a3b                                            # catalog MoE, 80B total / 3B active
+    #   openai.gpt-oss-120b-1:0                                            # catalog fallback
+
+    # Per-token billing means this budget now caps spend directly rather than
+    # capping how often a warm copy is touched. At the measured 2,642 input and
+    # 128 output tokens per plan, 120 calls is about 1.7 US cents an hour.
+    max_calls_per_hour: 120
+
     bedrock:
       thinking: off          # Qwen3: answer directly; plans are always asked without <think>
     shell:

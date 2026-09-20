@@ -187,9 +187,23 @@ ledger:
 llm:
   enabled: true
   provider: anthropic        # anthropic (Claude API, needs the key below) | bedrock
-  model: claude-opus-5       # bedrock: e.g. meta.llama3-3-70b-instruct-v1:0, an
-                             # inference profile, or your imported model's ARN
+  model: claude-opus-5       # bedrock: a catalog id such as qwen.qwen3-32b-v1:0,
+                             # an inference profile, or your imported model's ARN
                              # arn:aws:bedrock:REGION:ACCOUNT:imported-model/ID
+  #
+  # Before choosing an imported-model ARN, know how it bills. Custom Model
+  # Import does not charge per token. It charges per Custom Model Unit per
+  # MINUTE that a copy of the model is warm, and a copy stays warm for about
+  # five minutes after the last call. Weights of 32B are four units. An agent
+  # that touches the model every few minutes therefore pays for every minute
+  # of every day, whether or not it had anything to think about, and on this
+  # workload that was the difference between about 4 USD a month and about
+  # 7,174. The `sleep:` block below is what keeps the copy cold between
+  # bursts; the catalog copy of the same model avoids the question entirely.
+  #
+  # An imported model is still the right answer when you need a private copy
+  # that cannot be versioned or deprecated under you. That is a real property
+  # and it has a real price; pick it deliberately rather than by default.
   region: null               # bedrock: null = the instance's region
   # Told to the model as fact, in the context block "self". An imported
   # model's ARN ends in a random handle, and telling the planner it is
