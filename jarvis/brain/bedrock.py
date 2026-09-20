@@ -210,12 +210,26 @@ class BedrockBrain(BaseBrain):
     # ---- transport ----------------------------------------------------------
 
     def _converse(self, system: str, messages: list) -> dict:
-        return self.client.converse(
-            modelId=self.model,
-            system=[{"text": system}],
-            messages=[{"role": m["role"], "content": [{"text": m["content"]}]} for m in messages],
-            inferenceConfig={"maxTokens": self.max_tokens, "temperature": self.temperature},
-        )
+        kwargs = {
+            "modelId": self.model,
+            "messages": [{"role": m["role"], "content": [{"text": m["content"]}]}
+                         for m in messages],
+            "inferenceConfig": {"maxTokens": self.max_tokens,
+                                "temperature": self.temperature},
+        }
+        # No system prompt means no system block, not an empty one. Converse
+        # validates system[0].text at a minimum length of one *in botocore*,
+        # before the request leaves the box, so an empty string comes back as
+        # a ParamValidationError -- which reads as "Bedrock unreachable" and
+        # then backs the brain off for thirty seconds. That is exactly what
+        # the lab's base variant asks for: every dial at level 0 is the bare
+        # model, no system prompt, no context. So the one comparison the lab
+        # exists to make has been failing since this box moved from an
+        # imported model (InvokeModel, which renders the prompt as text and
+        # does not care) to a catalog one.
+        if (system or "").strip():
+            kwargs["system"] = [{"text": system}]
+        return self.client.converse(**kwargs)
 
     @staticmethod
     def _text_of(response: dict) -> str:

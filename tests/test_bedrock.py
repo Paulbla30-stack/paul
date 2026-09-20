@@ -198,6 +198,49 @@ class TestBedrockBrain(unittest.TestCase):
         self.assertIn("boto3", brain.status()["disabled_reason"])
 
 
+class TestTheSystemBlock(unittest.TestCase):
+    """The bare model has no system prompt, and Converse will not take an empty one.
+
+    botocore validates system[0].text at a minimum length of one before the
+    request leaves the box, so sending "" raises ParamValidationError, which
+    the error handler reads as "Bedrock unreachable" and backs the brain off
+    for thirty seconds. The lab's base variant is every dial at level 0 --
+    no system prompt, no context -- so the one comparison the lab exists to
+    make broke when this estate moved from an imported model to a catalog
+    one. It failed as a transport error, which is why it looked like the
+    network rather than like a bug.
+    """
+
+    def test_an_empty_system_prompt_sends_no_system_block(self):
+        brain, fake = make_brain([converse_response("bare")])
+        brain._chat("", [{"role": "user", "content": "who are you?"}], structured=False)
+        self.assertNotIn("system", fake.calls[0])
+
+    def test_a_whitespace_only_system_prompt_counts_as_none(self):
+        brain, fake = make_brain([converse_response("bare")])
+        brain._chat("   \n  ", [{"role": "user", "content": "hi"}], structured=False)
+        self.assertNotIn("system", fake.calls[0])
+
+    def test_a_real_system_prompt_is_still_sent(self):
+        brain, fake = make_brain([converse_response("hello")])
+        brain._chat("You are Jarvis.", [{"role": "user", "content": "hi"}], structured=False)
+        self.assertEqual(fake.calls[0]["system"], [{"text": "You are Jarvis."}])
+
+    def test_botocore_itself_rejects_the_empty_block(self):
+        """Not a guess about the API: the client refuses it without a call."""
+        try:
+            import boto3
+            from botocore.exceptions import ParamValidationError
+        except ImportError:                                  # pragma: no cover
+            self.skipTest("boto3 not installed")
+        client = boto3.client("bedrock-runtime", region_name="us-west-2",
+                              aws_access_key_id="x", aws_secret_access_key="y")
+        with self.assertRaises(ParamValidationError):
+            client.converse(modelId="m", system=[{"text": ""}],
+                            messages=[{"role": "user", "content": [{"text": "hi"}]}],
+                            inferenceConfig={"maxTokens": 10, "temperature": 0.2})
+
+
 class TestImportedModelInvoke(unittest.TestCase):
     ARN = "arn:aws:bedrock:us-west-2:1:imported-model/abc123"
 
