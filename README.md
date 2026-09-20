@@ -251,6 +251,50 @@ conventions; name one only if it appears in `environment`, in
 `uploaded_files`, or in a task result; and saying a path has not been
 checked is a correct answer.
 
+## Verdicts: knowing whether it was right
+
+Self-knowledge tells the agent the *shape* of its record -- how many
+decisions, how often a check finds nothing, how many proposals were taken --
+and the fault register tells it where its errors cluster. Neither can see
+substance. Asked in conversation to read its journal, this agent once
+answered "I used read_logs to check the agent's journal and found no
+entries, as the log file exists but is empty": it had run nothing, named a
+file it had not opened, and concluded from an emptiness it invented, while
+the journal had 53 lines. Every shape detector reads that record as clean.
+
+An agent cannot mark its own paper, because the belief that produced the
+answer is the belief that would grade it. So the ruling comes from outside,
+and there are three outsides answering three different questions.
+
+**The machine** answers *was it true*. Most of what the agent asserts is
+checkable on the box it runs on, exactly, with no judgement involved. Three
+checkers, all exact: a tool it says it ran, against the task history; an
+assertion about a path, against the path; a stated percentage for the root
+filesystem, against the reading it was given. Anything not rulable exactly
+comes back `unchecked` rather than guessed, because a wrong verdict is worse
+than none -- it teaches the agent to distrust a true one. A failed claim is
+appended to the answer as a `[claim check]` line for the operator.
+
+**A reviewer** answers *was it sound*, for reasoning that is not
+mechanically checkable. The operator is one such reader and another model is
+one; both are recorded by name, so a reviewer who turns out to be
+systematically wrong is findable.
+
+**The operator** answers *was it wanted*. That is not a competence ranking
+and does not weaken as the agent improves: it is his machine and his money,
+and a proposal is a request to act on them.
+
+Three rules hold it together. **Provenance never collapses** -- three lines,
+never a combined score, or a free machine check outvotes a considered human
+no. **Unchecked is never passed**, or the surest route to a clean record is
+to say only unfalsifiable things. And **a verdict can be revised on the
+record** without the earlier one being removed, because a judge who cannot
+be seen to change their mind ossifies where one who is sometimes wrong gets
+corrected. Machine verdicts are recorded automatically; a person or a second
+reader enters one at `POST /verdict {claim, ruling, source, by, reason,
+supersedes}`. The machine has no such endpoint: it rules by checking, and a
+way to tell it a verdict would be a way to forge one.
+
 ## Memory
 
 Two stores, kept apart on purpose.
