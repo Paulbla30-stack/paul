@@ -721,6 +721,10 @@ class BaseBrain:
                 # list of things it cannot have, because that is an invitation
                 # to ask and the answer would only ever be no.
                 "tools": _tools.describe(rung, restrict),
+                # Whether anything is gated, never what. Asked what it needed,
+                # the agent said it had to be able to tell a capability gated
+                # by design from one broken by accident, and it was right.
+                "capability": _tools.gating_note(rung, restrict),
             }
         proposals = list(getattr(agent, "proposals", []))[-5:]
         if proposals:

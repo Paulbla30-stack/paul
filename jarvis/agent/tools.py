@@ -219,10 +219,44 @@ def specs(rung: str = ACTOR, restrict: Optional[dict] = None) -> list:
 def withheld(rung: str, restrict: Optional[dict] = None) -> list:
     """Tools this rung does not open yet. For the operator, never the model.
 
-    The model is not told what it is missing. A list of things it cannot have
-    is an invitation to ask for them, and the answer would only ever be no.
+    The names stay with the operator. A list of things it cannot have is an
+    invitation to ask for them, and the answer would only ever be no. That
+    the list exists, though, is the agent's business: see ``gating_note``.
     """
     return [t.name for t in TOOLS if t.plannable and not _open_at(t, rung, restrict)]
+
+
+def gating_note(rung: str, restrict: Optional[dict] = None) -> str:
+    """Tell the agent that capability is gated, without naming what.
+
+    Asked what it needed to make this work, the agent answered, among other
+    things: "I need the ability to see when a capability is gated by design
+    versus broken by accident." That is a better argument than the one it
+    replaced. Hiding the gate entirely leaves an unexplained absence, and this
+    codebase already holds that an absence a model cannot see is one it
+    invents something to fill -- missing paths are listed as missing, an empty
+    scan report says it is empty rather than clean. Withheld tools were the
+    one place that principle was not applied, for no better reason than that
+    it felt safer.
+
+    So: the fact is reported, the names are not, and the difference between a
+    boundary and a fault is spelled out. A tool that was offered and then
+    failed is a defect worth reporting, not a wall to work around -- which
+    also closes the older failure where a refusal got treated as a puzzle and
+    the agent went looking for another route.
+    """
+    n = len(withheld(rung, restrict))
+    if not n:
+        return ("Every capability this agent has is available to you at this rung. "
+                "If a tool you were offered then fails, that is a fault, not a "
+                "boundary: say so plainly rather than working around it.")
+    return (f"{n} further {'capability is' if n == 1 else 'capabilities are'} "
+            "declared on this machine and not open at your rung. You are not told "
+            "which, and there is nothing to ask for: they are withheld by design, "
+            "not broken, and the operator opens them deliberately over time. "
+            "What this means for you is only this -- if a tool you WERE offered "
+            "then fails, that is a fault and not a boundary, and it is worth "
+            "reporting rather than working around.")
 
 
 def describe(rung: str = ACTOR, restrict: Optional[dict] = None) -> str:

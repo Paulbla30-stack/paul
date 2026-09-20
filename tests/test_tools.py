@@ -147,6 +147,62 @@ class TestPacing(unittest.TestCase):
         self.assertEqual(tools.withheld(tools.PROPOSER), [])
 
 
+class TestGatedVersusBroken(unittest.TestCase):
+    """The agent's own ask, and it was right.
+
+    Put the design to it and it answered, among other things: "I need the
+    ability to see when a capability is gated by design versus broken by
+    accident." Hiding the gate entirely leaves an unexplained absence, and
+    this codebase already holds that an absence a model cannot see is one it
+    invents something to fill. Withheld tools were the one place that
+    principle was not applied.
+    """
+
+    def test_it_is_told_that_capability_is_gated(self):
+        note = tools.gating_note(tools.PROPOSER, restrict={"read_logs": "actor"})
+        self.assertIn("1 further capability is", note)
+        self.assertIn("by design", note)
+
+    def test_it_is_never_told_which(self):
+        note = tools.gating_note(tools.PROPOSER,
+                                 restrict={"read_logs": "actor", "estate_report": "actor"})
+        self.assertNotIn("read_logs", note)
+        self.assertNotIn("estate_report", note)
+        self.assertIn("2 further capabilities are", note)
+
+    def test_a_fault_is_distinguished_from_a_boundary(self):
+        """The distinction is the whole point: one is a wall, the other is a bug."""
+        for note in (tools.gating_note(tools.PROPOSER),
+                     tools.gating_note(tools.PROPOSER, restrict={"read_logs": "actor"})):
+            self.assertIn("fault", note)
+            self.assertIn("boundary", note)
+
+    def test_with_nothing_gated_it_is_told_so_plainly(self):
+        note = tools.gating_note(tools.PROPOSER)
+        self.assertIn("Every capability", note)
+        self.assertNotIn("withheld", note)
+
+    def test_the_note_reaches_the_model(self):
+        from jarvis.agent.core import AgentCore
+        from jarvis.brain.llm import BaseBrain
+
+        class Offline(BaseBrain):
+            provider = "test"
+            def _make_client(self): return object()
+            def _complete(self, *a, **k): raise AssertionError("no call expected")
+            def _handle_error(self, exc): return None
+
+        brain = Offline({"max_calls_per_hour": 10}, LOG)
+        agent = AgentCore({"name": "t", "profile": "cloud", "rung": "proposer",
+                           "tools": {"read_logs": "actor"}},
+                          {"display": None, "input": None, "memory": None,
+                           "storage": None}, LOG, brain=brain)
+        agent.planner._boot_tasks_generated = True
+        mandate = brain.build_context(agent, {})["mandate"]
+        self.assertIn("1 further capability is", mandate["capability"])
+        self.assertNotIn("read_logs", mandate["tools"])
+
+
 class TestToolSpecs(unittest.TestCase):
     def test_specs_are_well_formed_for_converse(self):
         for spec in tools.specs(tools.ACTOR):
