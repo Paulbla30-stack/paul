@@ -27,6 +27,9 @@ A second listener (``ui`` settings) can serve the same handler on a
 public address with TLS, so the UI works from a phone without a tunnel.
 
     GET  /lab      -> behaviour-lab dials, settings, locked layers, session
+    GET  /questions -> what the agent has asked and what it was told
+    POST /questions/ask {text, blocked_on, audience}, /questions/answer
+         {id, text, by} -> the agent's side of the conversation
     POST /notify/test {note?} -> send one real message to prove the operator
          channel actually delivers, rather than only being configured
     POST /verdict {claim, ruling: held|failed|unchecked, source: operator|review,
@@ -374,6 +377,8 @@ class HeadlessRunner:
                                          "last_thought": runner.agent.last_thought or None})
                     elif path == "/goals":
                         self._send(200, runner.agent.planner.goals)
+                    elif path == "/questions":
+                        self._send(200, runner.agent.questions.state())
                     elif path == "/lab":
                         self._send(200, runner.lab_state())
                     elif path == "/ledger":
@@ -503,6 +508,31 @@ class HeadlessRunner:
                         answer = runner.agent.chat(turns, settings=settings)
                     runner.wake()
                     self._send(200, {"answer": answer, "dials": settings is not None})
+                elif path in ("/questions/ask", "/questions/answer"):
+                    try:
+                        payload = json.loads(body or "{}")
+                    except ValueError:
+                        return self._send(400, {"error": "body must be JSON"})
+                    if not isinstance(payload, dict):
+                        return self._send(400, {"error": "JSON object required"})
+                    with runner._lock:
+                        if path == "/questions/ask":
+                            # Raising one on the agent's behalf, for testing
+                            # the gates and for an operator who wants to see
+                            # what a refusal reads like.
+                            out = runner.agent.ask_operator(
+                                str(payload.get("text") or ""),
+                                str(payload.get("blocked_on") or ""),
+                                str(payload.get("audience") or "reviewer"))
+                            return self._send(200 if out.get("asked") else 409, out)
+                        answered = runner.agent.questions.answer(
+                            str(payload.get("id") or ""),
+                            str(payload.get("text") or ""),
+                            str(payload.get("by") or ""))
+                    if answered is None:
+                        return self._send(404, {"error": "no such open question"})
+                    runner._write_status_file()
+                    self._send(200, {"answered": answered.to_dict()})
                 elif path == "/notify/test":
                     # Ring the bell. A channel reports itself ready on the
                     # strength of its settings and has no idea whether

@@ -302,6 +302,41 @@ does not describe pictures -- a photograph of something that is not a document
 comes back with no text and says its contents are still unknown, not empty.
 Describing a scene is a vision model, which is a separate decision.
 
+## Questions: its side of the conversation
+
+Consultation ran one way. A reviewer could connect and ask the agent
+anything; the agent could start nothing. Asked about it, it produced a real
+occasion from its own record within seconds -- a proposal declined with "a
+reboot needs to be my call; raise it again when you can do it without one",
+and no way to ask the obvious follow-up about whether verifying the setting
+without a reboot would change the answer. It logged the ambiguity silently.
+
+Consulted about whether to build this, it made the strongest argument
+against it, and `questions.py` is built to that argument: *"Two LMs debating
+policy in a vacuum is exactly how we lost £200 on circular reasoning about an
+unseeable goal... it becomes a tax on indecision. Otherwise it's not
+consultation. It's noise with provenance."*
+
+So the constraint is structural. **A question must name what it is blocked
+on**, and if the block can be cleared by looking, the question is refused
+with the name of the tool that would answer it -- its own rule: *"If I
+haven't checked /sys/kernel/security yet, I shouldn't ask 'is lockdown
+enabled?' -- I should inspect_path first."* A change written as a question is
+refused and pointed at the proposal path. The same subject more than twice a
+day is refused, by word overlap rather than exact match, because a rephrase
+is what an exact match lets through. Something already ruled on is refused.
+The queue has a ceiling, and questions expire -- when the thing they were
+blocked on resolves, or after a bounded window, rather than after one cycle,
+which is thirty seconds and would kill every question before a reviewer
+connected.
+
+**Capability is never granted here.** A question about what the agent may do
+is re-addressed to the operator whatever it was aimed at, because no answer
+from a second reader opens anything. Answers come back as operator- or
+review-sourced memory, so a question it cannot see the reply to is not a
+question it asks twice. `GET /questions`, `POST /questions/ask`,
+`POST /questions/answer`.
+
 ## Verdicts: knowing whether it was right
 
 Self-knowledge tells the agent the *shape* of its record -- how many

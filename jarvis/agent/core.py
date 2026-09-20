@@ -173,6 +173,13 @@ class AgentCore:
         # reason to conclude something is wrong with it.
         from jarvis.agent import lab as _lab
         self.lab = _lab.LabSession(self)
+        # Its side of the conversation. Consultation ran one way until now:
+        # a reviewer could ask it anything and it could start nothing. Asked
+        # what would make this a bad idea, it gave the best argument against
+        # it -- "it's not consultation, it's noise with provenance" -- and the
+        # register is built to that argument. See questions.py.
+        from jarvis.agent import questions as _questions
+        self.questions = _questions.QuestionRegister(self)
         # Changes the agent wanted to make and did not. Bounded here, durable
         # in the store, so they outlive the process.
         self.proposals = deque(maxlen=50)
@@ -812,6 +819,30 @@ class AgentCore:
             except Exception:
                 continue
         return rulings
+
+    def ask_operator(self, text: str, blocked_on: str = "",
+                     audience: str = "reviewer") -> dict:
+        """Raise a question the agent cannot answer by looking.
+
+        Returns either the question or the refusal, because a refusal it
+        cannot read is one it will simply ask again.
+        """
+        from jarvis.agent import questions as _questions
+        try:
+            q = self.questions.ask(text, blocked_on, audience)
+        except _questions.Refused as why:
+            self.log.info("Question refused: %s", why)
+            return {"asked": False, "refused": str(why)}
+        self.log.info("Question raised for %s: %s", q.audience, q.text[:120])
+        # The operator hears about it; a reviewer is not on the end of a
+        # pager and reads the queue when it connects.
+        if q.audience == _questions.OPERATOR:
+            try:
+                self.notifier.send("a question", q.text[:200], severity="notice",
+                                   key=f"question:{q.subject()}")
+            except Exception:
+                pass
+        return {"asked": True, "question": q.to_dict()}
 
     def record_verdict(self, claim: str, ruling: str, source: str, by: str = "",
                        reason: str = "", supersedes: Optional[str] = None) -> Optional[dict]:

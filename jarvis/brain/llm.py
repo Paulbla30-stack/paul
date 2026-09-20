@@ -746,6 +746,20 @@ class BaseBrain:
             window = None
         if window:
             context["lab_session"] = window
+        # What it asked and has not been answered, and what came back. An
+        # answer is the part worth carrying: a question it cannot see the
+        # reply to is a question it will ask again. See questions.py.
+        try:
+            register = agent.questions
+            waiting, replies = register.waiting(), register.answers(3)
+        except Exception:
+            waiting, replies = [], []
+        if waiting or replies:
+            context["your_questions"] = {}
+            if waiting:
+                context["your_questions"]["waiting"] = waiting[:5]
+            if replies:
+                context["your_questions"]["answered"] = replies
         rung = getattr(agent, "rung", None)
         if rung:
             from jarvis.agent import authority

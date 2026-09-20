@@ -315,8 +315,8 @@ a token, because nothing off the box can reach it.
 
 ## The current image
 
-`ami-034a2d29889fe06f0` (`jarvis-agent-al2023-x86_64-20260920-204154`, us-west-2,
-built from the tree at `1bdaa56`, 8GiB encrypted gp3). It carries everything the
+`ami-0c2a1f9b6a14f404d` (us-west-2, built from the tree at `99dd5fd`, 8GiB
+encrypted gp3). It carries everything the
 previous image did -- the permission spine, filesystem grounding, durable memory
 with consolidation, ledger-derived self-knowledge, the operator channel, estate
 reporting, the standing system goals, the responsive UI and `cloudflared` -- plus
@@ -341,23 +341,32 @@ the vigil and the work of 20 September:
   true, ruled on by the machine, by a second reader, or by the operator, and
   never merged into one figure;
 - **an empty system prompt sends no system block**, without which the lab's base
-  variant failed as a transport error on any catalog model.
+  variant failed as a transport error on any catalog model;
+- **`read_file`** (`jarvis/agent/environment.py`, `documents.py`): plain text,
+  PDF, Word, Excel and PowerPoint, plus scans and photographs of documents
+  through AWS Textract, with everything it could not read named rather than
+  returned as empty. **pypdf is in this image**; the one before it reported
+  every PDF unreadable;
+- **a widened path fence**, which had not covered the runner token, the UI
+  session key, the tunnel token, the notify destination or the memory
+  database, and a test that keeps it in step with the shell deny-list -- which
+  immediately found `/etc/jarvis/tls` readable by `shell_command`;
+- **`proven` on the operator channel**, so a channel that has never delivered
+  anything stops reporting itself ready.
 
-Run it with `terraform apply -var ami_id=ami-034a2d29889fe06f0`; `ami_id` has no
+Run it with `terraform apply -var ami_id=ami-0c2a1f9b6a14f404d`; `ami_id` has no
 default on purpose.
 
-The previous image is `ami-0c36fec8f3ba4c7c4`, built from `e04eb8b`, kept as the
+The previous image is `ami-034a2d29889fe06f0`, built from `1bdaa56`, kept as the
 rollback. This one has been verified only by the self-test inside the Packer
 build, because the same code is already running on `i-016f9f37fe6ca2ba8`, where
 it has been observed sleeping, waking on a question, reading the real disk
 figure, refusing a lab run until the window was opened, and ruling on its own
 claims against the box.
 
-`ami-0155046bcb14b83f0` was a stepping stone built an hour earlier from
-`650b225` and superseded before it was ever launched; it and its snapshot
-`snap-027bdef7da786411b` are still registered and should be removed.
-`ami-08c4f9cf196d23579` (18 September, `snap-094619bbb752913fd`) is the oldest
-and is now two images behind.
+Two images and two snapshots, which is the whole estate: the current one and
+one rollback. Anything older is deregistered with its snapshot when a new
+image lands.
 
 **Rebuilding the image is not the same as replacing the running instance.**
 Changing `ami_id` makes Terraform destroy and recreate `aws_instance.jarvis`,
