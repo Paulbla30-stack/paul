@@ -58,9 +58,8 @@ class TestTheDurationsAreMeasuredNotEstimated(unittest.TestCase):
         rows, ts = [], NOW - 500
         for kind, took in (("system_check", 0.011), ("security_scan", 0.38),
                            ("estate_report", 2.4)) * 4:
-            rows.append({"task": {"type": kind}, "timestamp": ts})
-            ts += took
-        rows.append({"task": {"type": "tail"}, "timestamp": ts})
+            rows.append({"task": {"type": kind}, "timestamp": ts, "took_s": took})
+            ts += 45          # the cycle interval, which is not the duration
         return rows
 
     def test_it_reports_what_actually_happened(self):
@@ -69,15 +68,22 @@ class TestTheDurationsAreMeasuredNotEstimated(unittest.TestCase):
         self.assertEqual(got["security_scan"]["typical"], "380ms")
         self.assertEqual(got["estate_report"]["band"], t.MACHINE)
 
-    def test_a_gap_with_sleep_in_it_is_not_a_task_duration(self):
-        rows = [{"task": {"type": "system_check"}, "timestamp": NOW - 4000},
-                {"task": {"type": "system_check"}, "timestamp": NOW - 10},
-                {"task": {"type": "tail"}, "timestamp": NOW}]
-        self.assertNotIn("system_check", t.durations(rows, NOW))
+    def test_the_gap_between_entries_is_not_the_duration(self):
+        """It was being used as one. On an idle loop the gap is the cycle
+        interval, so a goal_step writing one boolean read as 45 seconds --
+        five orders of magnitude out, offered with the authority of a
+        measurement."""
+        got = t.durations(self.history(), NOW)
+        self.assertEqual(got["system_check"]["typical"], "11ms")
+        self.assertNotIn("45", got["system_check"]["typical"])
+
+    def test_an_entry_with_no_recorded_time_is_skipped_not_estimated(self):
+        rows = [{"task": {"type": "x"}, "timestamp": NOW - 1},
+                {"task": {"type": "x"}, "timestamp": NOW}]
+        self.assertEqual(t.durations(rows, NOW), {})
 
     def test_one_observation_is_not_a_measurement(self):
-        rows = [{"task": {"type": "x"}, "timestamp": NOW - 1},
-                {"task": {"type": "tail"}, "timestamp": NOW}]
+        rows = [{"task": {"type": "x"}, "timestamp": NOW, "took_s": 0.1}]
         self.assertEqual(t.durations(rows, NOW), {})
 
     def test_the_scale_note_carries_the_measured_numbers(self):

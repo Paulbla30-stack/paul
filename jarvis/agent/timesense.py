@@ -171,24 +171,28 @@ def durations(task_history, now: Optional[float] = None, window: int = 200) -> d
     scan takes on this machine is a fact with two hundred observations behind
     it, and a fact beats a prior drawn from text about people doing projects.
 
-    Needs an end time to measure against, so it uses the gap between
-    consecutive entries as the upper bound on a task's own duration, and says
-    so: this is "how long a cycle containing one of these took", which is the
-    honest reading of what the record holds.
+    Reads the time the executor actually clocked for each task. It used to
+    infer one from the gap between consecutive entries, which is the cycle
+    interval whenever the loop is idling -- so a goal_step that writes a
+    single boolean came back as taking 45 seconds. A measurement five orders
+    of magnitude out is worse than no measurement, because it is offered with
+    the authority of a measurement. Entries with no recorded time are skipped
+    rather than estimated.
     """
     now = time.time() if now is None else now
     rows = [e for e in list(task_history or [])[-window:] if isinstance(e, dict)]
-    rows.sort(key=lambda e: float(e.get("timestamp") or 0))
     seen: dict = {}
-    for i, entry in enumerate(rows[:-1]):
+    for entry in rows:
         task = entry.get("task") or {}
         kind = str(task.get("type") or "")
-        start = float(entry.get("timestamp") or 0)
-        end = float(rows[i + 1].get("timestamp") or 0)
-        if not kind or end <= start:
+        took = entry.get("took_s")
+        if not kind or took is None:
             continue
-        elapsed = end - start
-        if elapsed > 600:            # a gap with sleep in it, not a task
+        try:
+            elapsed = float(took)
+        except (TypeError, ValueError):
+            continue
+        if elapsed < 0 or elapsed > 3600:
             continue
         seen.setdefault(kind, []).append(elapsed)
     out = {}

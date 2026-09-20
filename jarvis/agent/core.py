@@ -627,6 +627,7 @@ class AgentCore:
                 action[key] = str(task.metadata[key])[:1000]
         recorded = self.ledger.record("action", action)
         gate = None if recorded else self.ledger.gate()
+        outcome = None
         if gate:
             self.log.error("Refusing to run %s: %s", task.description, gate)
             result = {"success": False, "error": gate, "refused": True}
@@ -670,10 +671,18 @@ class AgentCore:
                 })
 
         self.current_task = None
+        # How long the task itself took. It was already being measured for
+        # the ledger and never reached the history, so timesense.durations()
+        # had to infer it from the gap between consecutive entries -- which
+        # on an idle loop is the cycle interval, not the work. A goal_step
+        # that writes one boolean was being reported as taking 45 seconds:
+        # five orders of magnitude out, in the module whose whole purpose is
+        # to stop the agent guessing durations from the wrong distribution.
         self.task_history.append({
             "task": task.to_dict(),
             "result": result,
             "timestamp": time.time(),
+            "took_s": (outcome or {}).get("duration_s"),
         })
 
         return result
