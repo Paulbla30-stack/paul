@@ -83,6 +83,9 @@ class SelfKnowledge:
         """One pass, producing only counts and rates."""
         decisions = outcomes = failures = 0
         proposals = 0
+        # The entry stream is consumed once; the fault detectors need the same
+        # pass, so they ride along rather than re-reading the file.
+        faults_seen: list = []
         gates: Counter = Counter()
         notifications = {"sent": 0, "held": 0}
         by_task: dict = {}
@@ -93,6 +96,7 @@ class SelfKnowledge:
         for kind, ts, body in self._entries():
             first_ts = ts if first_ts is None else min(first_ts, ts)
             last_ts = ts if last_ts is None else max(last_ts, ts)
+            faults_seen.append((kind, ts, body))
             if kind == "decision":
                 decisions += 1
             elif kind == "outcome":
@@ -143,7 +147,21 @@ class SelfKnowledge:
             "consolidations": consolidations,
             "operator_verdicts": sorted(verdicts, key=lambda v: -v["ts"])[:20],
             "tasks": by_task,
+            # Where the errors actually are, as opposed to how many there
+            # were. A failure rate is a number to feel bad about; a fault
+            # profile is something to reason with. See faults.py.
+            "faults": self._faults(faults_seen, decisions),
         }
+
+    def _faults(self, seen, decisions) -> list:
+        """Fault reports for this window. Never raises: a broken detector
+        costs one signal, not the agent's ability to think."""
+        try:
+            from jarvis.agent import faults
+            return faults.scan(seen, now=self.clock(), decisions=decisions)
+        except Exception as exc:
+            self.log.debug("fault scan unavailable: %s", exc)
+            return []
 
     def summary(self, refresh: bool = False) -> dict:
         now = self.clock()
@@ -185,6 +203,18 @@ class SelfKnowledge:
             failed = data["failures"]
             out.append(f"{failed} of them failed "
                        f"({data['failure_rate'] * 100:.0f}%).")
+
+        # Where the errors are, not just how many. Placed before the
+        # per-task statistics because a named failure mode is more use than a
+        # rate: "you substituted a remembered figure for an unobserved one,
+        # twice today" is something to act on, "11% of tasks failed" is not.
+        # Phrased as observations with counts; never as advice. See faults.py.
+        try:
+            from jarvis.agent import faults as _faults
+            for line in _faults.lines(data.get("faults") or [])[:TOP_N]:
+                out.append(line)
+        except Exception:
+            pass
 
         # Checks that keep coming back empty.
         barren = sorted(
