@@ -98,6 +98,26 @@ def _quiet_now(quiet_hours, tz_name: str, now: float) -> bool:
     return hour >= start or hour < end
 
 
+def _band(value: float, band: float) -> int:
+    """Bucket a number so that only a material change crosses a boundary.
+
+    A fixed width is right for a percentage and useless for a byte count:
+    bucketing memory in tens of bytes means every reading is a new bucket, and
+    the agent wakes a 235B model to be told its RAM moved by 10 KB. Observed
+    doing exactly that within an hour of the first deployment -- waking every
+    five minutes on ``memory.used_kb`` and on a disk's ``used`` byte count.
+
+    So small numbers, which are percentages in practice, keep the fixed width,
+    and anything larger is bucketed proportionally: a change matters when it is
+    a tenth of the value, not when it is ten of whatever unit someone chose.
+    """
+    if abs(value) <= 100.0:
+        return int(value // band)
+    import math
+    step = math.log1p(band / 100.0)
+    return int(math.copysign(math.log(abs(value)) / step, value))
+
+
 def digest(observations: Optional[dict], band: float = DEFAULT_BAND) -> dict:
     """Reduce observations to the few facts worth waking a model for.
 
@@ -114,7 +134,7 @@ def digest(observations: Optional[dict], band: float = DEFAULT_BAND) -> dict:
         if isinstance(value, bool):
             out[key] = value
         elif isinstance(value, (int, float)):
-            out[key] = int(float(value) // band)
+            out[key] = _band(float(value), band)
 
     for key, value in observations.items():
         if key.endswith("_error"):

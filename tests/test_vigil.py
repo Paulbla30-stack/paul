@@ -705,3 +705,42 @@ class TestTheWarmFractionIsNotReadTooEarly(unittest.TestCase):
 
     def test_null_vigil_reports_no_fraction(self):
         self.assertIsNone(NullVigil().status()["warm_fraction"])
+
+
+class TestBandingIsProportionalForBigNumbers(unittest.TestCase):
+    """A fixed band is right for a percentage and useless for a byte count.
+
+    Caught on the live box within an hour of deployment. The ledger showed it
+    waking every five minutes on "salience: memory.used_kb changed" and
+    "salience: disk_usage./dev/nvme0n1p1.used changed" -- RAM moving by a few
+    kilobytes, bucketed in tens of bytes, read as a material change.
+    """
+
+    def test_a_few_kilobytes_of_ram_is_not_a_change(self):
+        a = digest({"memory": {"used_kb": 265_000}})
+        b = digest({"memory": {"used_kb": 268_000}})
+        self.assertEqual(salient_change(a, b), "", "1% of RAM must not wake it")
+
+    def test_a_byte_count_moving_a_little_is_not_a_change(self):
+        a = digest({"storage": [{"name": "nvme0n1p1", "used": 2_000_000_000}]})
+        b = digest({"storage": [{"name": "nvme0n1p1", "used": 2_010_000_000}]})
+        self.assertEqual(salient_change(a, b), "")
+
+    def test_a_byte_count_moving_a_lot_IS_a_change(self):
+        a = digest({"storage": [{"name": "nvme0n1p1", "used": 2_000_000_000}]})
+        b = digest({"storage": [{"name": "nvme0n1p1", "used": 7_000_000_000}]})
+        self.assertNotEqual(salient_change(a, b), "", "a disk filling must wake it")
+
+    def test_percentages_keep_the_fixed_band(self):
+        self.assertEqual(digest({"memory": {"percent": 71.2}}),
+                         digest({"memory": {"percent": 71.4}}))
+        self.assertNotEqual(digest({"memory": {"percent": 71.0}}),
+                            digest({"memory": {"percent": 88.0}}))
+
+    def test_zero_and_negatives_do_not_explode(self):
+        for v in (0, -1, -5000, 0.0):
+            digest({"memory": {"used": v}})     # must not raise
+
+    def test_the_boundary_is_not_a_cliff(self):
+        for v in (99.0, 100.0, 101.0, 1000.0):
+            self.assertIsInstance(digest({"memory": {"used": v}})["memory.used"], int)
