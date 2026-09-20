@@ -315,7 +315,7 @@ a token, because nothing off the box can reach it.
 
 ## The current image
 
-`ami-0c2a1f9b6a14f404d` (us-west-2, built from the tree at `99dd5fd`, 8GiB
+`ami-0115b66dd98a02cd5` (us-west-2, built from the tree at `29e34a2`, 8GiB
 encrypted gp3). It carries everything the
 previous image did -- the permission spine, filesystem grounding, durable memory
 with consolidation, ledger-derived self-knowledge, the operator channel, estate
@@ -352,9 +352,28 @@ the vigil and the work of 20 September:
   database, and a test that keeps it in step with the shell deny-list -- which
   immediately found `/etc/jarvis/tls` readable by `shell_command`;
 - **`proven` on the operator channel**, so a channel that has never delivered
-  anything stops reporting itself ready.
+  anything stops reporting itself ready;
+- **a question register** (`jarvis/agent/questions.py`): the agent can raise
+  one, and cannot use it to think out loud, rephrase a refusal or ask for
+  capability;
+- **a sense of time** (`jarvis/agent/timesense.py`): the operator's clock
+  beside the machine's, durations measured from its own record rather than
+  estimated from a human prior, and dates in a document read as distances
+  from today;
+- **durable goals**, so an instruction given through the API survives a
+  restart instead of vanishing silently;
+- **an operator profile** (`jarvis/agent/operator.py`): what it knows about
+  the person it works for, given rather than gathered, and structurally
+  unable to hold a contact detail.
 
-Run it with `terraform apply -var ami_id=ami-0c2a1f9b6a14f404d`; `ami_id` has no
+**The image carries the code for all of that and none of the contents.** The
+operator profile, the goals, the questions and everything the agent has
+learned live in `/var/lib/jarvis/memory.db` on the instance, not in the AMI --
+which is right, because personal data does not belong in a machine image, and
+worth saying because a fresh instance launched from here starts not knowing
+anyone.
+
+Run it with `terraform apply -var ami_id=ami-0115b66dd98a02cd5`; `ami_id` has no
 default on purpose.
 
 The previous image is `ami-034a2d29889fe06f0`, built from `1bdaa56`, kept as the
