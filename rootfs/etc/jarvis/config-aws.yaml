@@ -77,6 +77,16 @@ cloud:
     stale_days: 30           # how old before something counts as left behind
     max_items: 20
 
+  # The agent's memory, copied off this box. Without it the operator profile,
+  # the goals he gave at runtime and everything the agent has worked out live
+  # on one EBS volume and nowhere else -- while the ledger has had an Object
+  # Lock witness bucket all along. Set by Terraform; no bucket means off, and
+  # the health check says so rather than leaving it to be discovered.
+  memory_backup:
+    bucket: ""              # jarvis-memory-<account>-<name>
+    prefix: memory
+    every_s: 3600           # memory changes slowly; the ledger is the fast one
+
   # Recognising characters in a scan or a photograph of a document. Word,
   # Excel, PowerPoint and text PDFs are read on the box for nothing and never
   # reach this. A scan has no text layer at all, and without this it is

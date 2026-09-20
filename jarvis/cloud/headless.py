@@ -928,6 +928,21 @@ class HeadlessRunner:
                           report["scanned"])
         self.last_consolidation = report
 
+    def _backup_tick(self):
+        """Copy the memory off the box, on its own slow clock.
+
+        Set by main.py; absent or disabled means no bucket is configured and
+        the memory lives on exactly one volume, which is the state this
+        exists to end.
+        """
+        backup = getattr(self.agent, "memory_backup", None)
+        if backup is None or not backup.enabled or not backup.due():
+            return
+        try:
+            backup.run()
+        except Exception as e:                       # never stops the loop
+            self.log.warning("memory backup failed: %s", e)
+
     def wake(self):
         """Cut short an idle wait: something new arrived for the planner."""
         self.idle_streak = 0
@@ -960,6 +975,7 @@ class HeadlessRunner:
                 except Exception as e:  # the witness copy never stops the loop
                     self.log.warning("ledger anchor tick failed: %s", e)
                 self._consolidation_tick()
+                self._backup_tick()
                 if self.max_cycles and cycles >= self.max_cycles:
                     break
                 # Idle cycles wait the full interval; successful work goes

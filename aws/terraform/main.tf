@@ -256,6 +256,97 @@ resource "aws_iam_role_policy" "textract" {
   })
 }
 
+# The memory's off-box copy. Deliberately shaped UNLIKE the ledger bucket
+# below, because the two hold different things and the difference matters.
+#
+# The ledger is evidence about the agent, and evidence must be impossible to
+# alter: Object Lock in COMPLIANCE mode, write-only from the instance, never
+# read back. The memory is the operator's own data -- his profile, his goals,
+# what the agent has worked out for him -- and a person must be able to erase
+# their own data. So: no Object Lock, versioned so a bad upload cannot destroy
+# a good copy, lifecycle-expired so old versions do not accumulate for ever,
+# and readable back by the instance, because unlike the ledger, restoring this
+# is the entire point of having it.
+resource "aws_s3_bucket" "memory" {
+  count         = var.memory_backup ? 1 : 0
+  bucket        = "jarvis-memory-${data.aws_caller_identity.current.account_id}-${var.name}"
+  force_destroy = false
+  tags          = local.tags
+}
+
+resource "aws_s3_bucket_public_access_block" "memory" {
+  count                   = var.memory_backup ? 1 : 0
+  bucket                  = aws_s3_bucket.memory[0].id
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
+resource "aws_s3_bucket_server_side_encryption_configuration" "memory" {
+  count  = var.memory_backup ? 1 : 0
+  bucket = aws_s3_bucket.memory[0].id
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm = "AES256"
+    }
+  }
+}
+
+# Versioning is what makes one stable key safe: every upload is a new version,
+# the newest is always at the same key, and a truncated or corrupted copy can
+# be rolled back to the one before it rather than having overwritten it.
+resource "aws_s3_bucket_versioning" "memory" {
+  count  = var.memory_backup ? 1 : 0
+  bucket = aws_s3_bucket.memory[0].id
+  versioning_configuration {
+    status = "Enabled"
+  }
+}
+
+resource "aws_s3_bucket_lifecycle_configuration" "memory" {
+  count      = var.memory_backup ? 1 : 0
+  bucket     = aws_s3_bucket.memory[0].id
+  depends_on = [aws_s3_bucket_versioning.memory]
+  rule {
+    id     = "expire-old-versions"
+    status = "Enabled"
+    filter {}
+    noncurrent_version_expiration {
+      noncurrent_days = var.memory_backup_keep_days
+    }
+    abort_incomplete_multipart_upload {
+      days_after_initiation = 7
+    }
+  }
+}
+
+# Read as well as write, which is the one place this differs from the ledger
+# policy on purpose: a backup the box cannot fetch is a backup nobody has
+# ever restored, and a backup nobody has ever restored is a hope.
+resource "aws_iam_role_policy" "memory_backup" {
+  count = var.memory_backup ? 1 : 0
+  name  = "jarvis-memory-backup"
+  role  = aws_iam_role.jarvis.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect   = "Allow"
+      Action   = ["s3:PutObject", "s3:GetObject", "s3:ListBucket"]
+      Resource = [aws_s3_bucket.memory[0].arn,
+      "${aws_s3_bucket.memory[0].arn}/*"]
+      }, {
+      # It may not delete its own backups. Erasing this is the operator's
+      # decision about his own data, and nothing on the box should be able to
+      # make it for him -- including a confused agent with a shell.
+      Effect   = "Deny"
+      Action   = ["s3:DeleteObject", "s3:DeleteObjectVersion",
+      "s3:PutBucketVersioning", "s3:PutLifecycleConfiguration"]
+      Resource = ["${aws_s3_bucket.memory[0].arn}/*", aws_s3_bucket.memory[0].arn]
+    }]
+  })
+}
+
 # The Glass Ledger witness: an Object Lock bucket the instance can write to
 # but never delete from or read back. The audit (aws/scripts/ledger_audit.py)
 # runs elsewhere against this copy with a pinned public key.

@@ -179,3 +179,22 @@ variable "document_ocr" {
   type        = bool
   default     = true
 }
+
+variable "memory_backup" {
+  description = <<-EOT
+    Copy the agent's durable memory to S3 on a slow clock. It holds the
+    operator profile, the goals given at runtime and everything the agent has
+    worked out, on one EBS volume and nowhere else without this. Unlike the
+    ledger's witness bucket this one is versioned rather than Object Locked,
+    and readable back by the instance, because a person must be able to erase
+    their own data and because restoring is the point.
+  EOT
+  type        = bool
+  default     = true
+}
+
+variable "memory_backup_keep_days" {
+  description = "How long superseded copies of the memory are kept before the lifecycle rule expires them."
+  type        = number
+  default     = 90
+}

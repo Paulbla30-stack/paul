@@ -220,6 +220,35 @@ else:
     if n.get('last_error'):
         print('  ALERT: last message failed: %s' % str(n['last_error'])[:120])
 PYEOF
+    # Whether what the agent remembers exists anywhere but this volume. The
+    # ledger has had a witness bucket all along; the memory had nothing, and
+    # it now holds a profile of a person.
+    ${JARVIS_PYTHON:-python3} - "$STATUS_FILE" <<'PYEOF' 2>/dev/null || true
+import json, sys
+try:
+    with open(sys.argv[1]) as f:
+        b = (json.load(f) or {}).get('memory_backup') or {}
+except Exception:
+    sys.exit(0)
+if not b:
+    sys.exit(0)
+if not b.get('enabled'):
+    print('  %-20s %s' % ('Memory backup', 'off: ' + str(b.get('reason') or 'not configured')))
+    print('  NOTE: the agent memory lives on this volume and nowhere else.')
+elif not b.get('proven'):
+    print('  %-20s %s' % ('Memory backup', 'configured, never copied anything'))
+    print('  ALERT: the memory has never been copied off this box')
+else:
+    ago = b.get('last_copy_s_ago')
+    when = ('%dm ago' % (ago // 60)) if ago is not None and ago < 7200 else (
+        ('%dh ago' % (ago // 3600)) if ago is not None else 'unknown')
+    print('  %-20s %s, %s rows, last %s' % (
+        'Memory backup', b.get('bucket'), b.get('last_rows'), when))
+    if ago is not None and ago > 3 * float(b.get('every_s') or 3600):
+        print('  ALERT: the memory backup is overdue (last %s)' % when)
+    if b.get('last_error'):
+        print('  ALERT: last memory backup failed: %s' % str(b['last_error'])[:110])
+PYEOF
     if ss -H -tln 2>/dev/null | grep -qE '0\.0\.0\.0:8443|\*:8443'; then
         note "UI listener" "bound on all interfaces:8443"
         echo "  NOTE: whether that is reachable depends on the security group,"

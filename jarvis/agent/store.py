@@ -157,6 +157,9 @@ class NullStore:
     def stats(self) -> dict:
         return {"enabled": False, "available": False}
 
+    def snapshot_to(self, path):
+        return False
+
     def close(self):
         pass
 
@@ -217,6 +220,41 @@ class MemoryStore:
                 db.execute(statement)
         db.execute("CREATE INDEX IF NOT EXISTS memories_state ON memories(state)")
         db.execute("CREATE INDEX IF NOT EXISTS memories_weight ON memories(weight)")
+
+    def snapshot_to(self, path: str) -> bool:
+        """Write a consistent copy of the database to ``path``.
+
+        Through SQLite's own backup API rather than by copying the file.
+        A live SQLite database has a write-ahead log beside it, and copying
+        the .db on its own gives you a file that opens fine and is missing
+        whatever was in the WAL -- a backup that looks healthy and has
+        quietly lost the last hour. The API takes the same lock the writer
+        does and produces a file that is a database rather than a moment.
+        """
+        if self._db is None:
+            return False
+        try:
+            directory = os.path.dirname(path)
+            if directory:
+                os.makedirs(directory, exist_ok=True)
+            if os.path.exists(path):
+                os.unlink(path)
+            with self._lock:
+                out = sqlite3.connect(path)
+                try:
+                    self._db.backup(out)
+                finally:
+                    out.close()
+            os.chmod(path, 0o600)
+            return True
+        except Exception as exc:
+            self.log.warning("Could not snapshot the memory store: %s", exc)
+            try:
+                if os.path.exists(path):
+                    os.unlink(path)
+            except OSError:
+                pass
+            return False
 
     def close(self):
         with self._lock:

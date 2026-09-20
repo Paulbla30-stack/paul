@@ -192,6 +192,9 @@ class AgentCore:
         self.operator = _operator.OperatorProfile(
             self, name=str(config.get("operator_name") or "your operator"))
         self.operator.load()
+        # Set by main.py when a bucket is configured. None means the memory
+        # lives on exactly one volume.
+        self.memory_backup = None
         # Changes the agent wanted to make and did not. Bounded here, durable
         # in the store, so they outlive the process.
         self.proposals = deque(maxlen=50)
@@ -1166,6 +1169,10 @@ class AgentCore:
             # written under dials is not the agent's ordinary behaviour, and
             # a graph with no marker on that window is a misleading graph.
             "lab_open": self.lab.is_open(),
+            # Whether what the agent remembers exists anywhere but here.
+            "memory_backup": (self.memory_backup.status()
+                              if getattr(self, "memory_backup", None) else
+                              {"enabled": False, "reason": "not configured"}),
         }
 
     def shutdown(self):

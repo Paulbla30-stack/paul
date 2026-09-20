@@ -380,6 +380,22 @@ class JarvisSystem:
                           "speak when someone opens the UI")
         return notifier
 
+    def build_memory_backup(self, store):
+        """The memory's off-box copy. The ledger has had one all along."""
+        from jarvis.agent.backup import build_backup
+        cloud = self.config.get("cloud") or {}
+        backup = build_backup(self.config, store, self.log,
+                              region=(cloud.get("instance") or {}).get("region"),
+                              instance_id=(cloud.get("instance") or {}).get("instance_id"))
+        if backup.enabled:
+            self.log.info("Memory backup ready: s3://%s/%s every %ds%s",
+                          backup.bucket, backup.prefix, int(backup.every),
+                          "" if backup.proven else " (never copied yet)")
+        else:
+            self.log.info("No memory backup configured; the agent's memory "
+                          "lives on one volume and nowhere else")
+        return backup
+
     def build_estate(self):
         """Read-only view of spend and accumulation; None when switched off."""
         from jarvis.agent.estate import build_estate
@@ -419,6 +435,11 @@ class JarvisSystem:
         )
         from jarvis.agent.selfknowledge import build_self_knowledge
         self.agent.self_knowledge = build_self_knowledge(self.config, self.log)
+        # The off-box copy of what the agent remembers. The ledger has had a
+        # witness bucket, a pinned key and an auditor all along; the memory
+        # had one file on one volume, which stopped being defensible when it
+        # started holding a profile of a person.
+        self.agent.memory_backup = self.build_memory_backup(self.store)
         if self.ledger is not None:
             brain = self.agent.brain
             self.ledger.record("action", {
