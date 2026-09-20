@@ -236,6 +236,10 @@ class TaskExecutor:
         self.notifier = notifier
         # Read-only view of spend and what the account is accumulating.
         self.estate = estate
+        # Whether a scan or a photograph may have its characters recognised.
+        # Off unless the operator says otherwise: it sends a page image out to
+        # a service and bills per page. Set by the agent from config.
+        self.document_ocr: dict = {}
 
         # Map task types to handlers
         self._handlers = {
@@ -517,7 +521,13 @@ class TaskExecutor:
             start = int(task.metadata.get("from_line", 1))
         except (TypeError, ValueError):
             start = 1
-        result = environment.read_file(target, start_line=start)
+        # OCR is off unless the operator turned it on: it sends a page image
+        # out to a service and is billed per page, which is a decision about
+        # his money and his documents rather than a default.
+        cfg = getattr(self, "document_ocr", None) or {}
+        result = environment.read_file(
+            target, start_line=start,
+            ocr=bool(cfg.get("enabled")), region=cfg.get("region"))
         if result.get("fenced"):
             self.log.warning("read_file refused %s: %s", target, result.get("reason"))
             return {"success": False, "error": f"refused: {result['reason']}",

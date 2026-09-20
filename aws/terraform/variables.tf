@@ -166,3 +166,16 @@ variable "estate_reporting" {
   type        = bool
   default     = true
 }
+
+variable "document_ocr" {
+  description = <<-EOT
+    Let the agent read scanned PDFs and photographs of documents with AWS
+    Textract. Text PDFs and Office files are read on the box for nothing and
+    need this for nothing; a scan has no text layer and cannot be read at all
+    without it. Billed per page detected, and the page image leaves the box for
+    Textract in this account and region. Off means a scan is reported as
+    unread rather than silently blank.
+  EOT
+  type        = bool
+  default     = true
+}

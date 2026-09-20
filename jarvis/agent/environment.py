@@ -188,8 +188,14 @@ _TEXTISH = bytes(range(0x20, 0x7F)) + b"\n\r\t\f\b"
 
 
 def read_file(path: str, max_bytes: int = MAX_READ_BYTES,
-              start_line: int = 1, max_lines: int = MAX_READ_LINES) -> dict:
+              start_line: int = 1, max_lines: int = MAX_READ_LINES,
+              ocr: bool = False, region: Optional[str] = None) -> dict:
     """The contents of one file, bounded, or why not.
+
+    ``ocr`` allows recognising characters in page images, and is off unless
+    the operator turned it on: it sends the page out to a service and is
+    billed per page. It is only ever reached where extraction found nothing
+    to extract.
 
     Behind the same fence as everything else, which now actually covers the
     secrets it always claimed to. Binary is reported as binary rather than
@@ -231,15 +237,20 @@ def read_file(path: str, max_bytes: int = MAX_READ_BYTES,
     from jarvis.agent import documents
     kind = documents.sniff(info["path"], raw[:64])
     if kind != documents.TEXT:
-        extracted = documents.extract(info["path"], raw[:4096], kind)
+        extracted = documents.extract(info["path"], raw[:4096], kind,
+                                      ocr_enabled=ocr, region=region)
         if extracted is not None:
             out = {"path": info["path"], "read": bool(extracted.get("text")),
                    "size": size, "modified": info.get("modified"),
                    "format": extracted.get("format"),
                    "complete": bool(extracted.get("complete")),
                    "text": extracted.get("text", "")}
+            # "ocr" and "by" must survive: text recognised from a page image
+            # is a guess at the shapes of characters, and a text layer is the
+            # author's own words. A reader who cannot tell them apart weighs
+            # them the same, which is the whole reason this field exists.
             for extra in ("pages", "pages_read", "pages_without_text",
-                          "sheets", "slides", "image"):
+                          "sheets", "slides", "image", "ocr", "by"):
                 if extra in extracted:
                     out[extra] = extracted[extra]
             if extracted.get("note"):

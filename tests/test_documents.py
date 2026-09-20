@@ -284,3 +284,147 @@ class TestItNeverRaises(Base):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestRecognisingCharactersInPageImages(unittest.TestCase):
+    """OCR reaches only what extraction could not, and says it is OCR.
+
+    Two things must stay true. It never runs on a document that already read,
+    because the text layer is the author's own words and OCR is a guess at
+    their shapes -- slower, worse and billed. And a recognised result says it
+    was recognised, so a reader can weigh it differently from a text layer.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.calls = []
+
+    def at(self, name):
+        return os.path.join(self.tmp, name)
+
+    def fake_ocr(self, text="Amount due 92.50", unclear=0, ok=True):
+        def run(path, region=None):
+            self.calls.append(path)
+            return {"ok": ok, "text": text if ok else "", "lines": 1 if ok else 0,
+                    "unclear": unclear, "complete": ok and not unclear,
+                    "note": "" if ok else "the recogniser found no readable text",
+                    "by": "recognised from the page image, not read from a text layer"}
+        return run
+
+    @unittest.skipUnless(HAVE_PYPDF, "pypdf not installed")
+    def test_a_text_pdf_never_reaches_the_recogniser(self):
+        original = doc.ocr
+        doc.ocr = self.fake_ocr()
+        try:
+            got = doc.read_pdf(pdf_at(self.at("text.pdf")), ocr_enabled=True)
+        finally:
+            doc.ocr = original
+        self.assertEqual(self.calls, [], "OCR ran on a PDF that already read")
+        self.assertIn("4412", got["text"])
+        self.assertNotIn("ocr", got)
+
+    @unittest.skipUnless(HAVE_PYPDF, "pypdf not installed")
+    def test_a_scan_is_recognised_and_says_it_was(self):
+        original = doc.ocr
+        doc.ocr = self.fake_ocr()
+        try:
+            got = doc.read_pdf(pdf_at(self.at("scan.pdf"), with_text=False),
+                               ocr_enabled=True)
+        finally:
+            doc.ocr = original
+        self.assertEqual(len(self.calls), 1)
+        self.assertIn("92.50", got["text"])
+        self.assertTrue(got["ocr"])
+        self.assertIn("recognised from the page image", got["by"])
+        self.assertIn("no page in this PDF has a text layer", got["note"])
+
+    @unittest.skipUnless(HAVE_PYPDF, "pypdf not installed")
+    def test_a_scan_with_ocr_off_still_says_it_is_not_blank(self):
+        got = doc.read_pdf(pdf_at(self.at("scan.pdf"), with_text=False),
+                           ocr_enabled=False)
+        self.assertIn("not blank", got["note"])
+        self.assertFalse(got.get("ocr"))
+
+    def test_an_image_with_text_in_it_is_read(self):
+        original = doc.ocr
+        doc.ocr = self.fake_ocr("BRITISH GAS\nAmount due 92.50")
+        try:
+            path = png_at(self.at("bill.png"))
+            with open(path, "rb") as f:
+                head = f.read(64)
+            got = doc.read_image(path, head, ocr_enabled=True)
+        finally:
+            doc.ocr = original
+        self.assertIn("92.50", got["text"])
+        self.assertTrue(got["ocr"])
+
+    def test_a_picture_of_no_words_says_unknown_rather_than_empty(self):
+        """A photograph of a cat is not a blank document."""
+        original = doc.ocr
+        doc.ocr = self.fake_ocr(ok=False)
+        try:
+            path = png_at(self.at("cat.png"))
+            with open(path, "rb") as f:
+                head = f.read(64)
+            got = doc.read_image(path, head, ocr_enabled=True)
+        finally:
+            doc.ocr = original
+        self.assertEqual(got["text"], "")
+        self.assertFalse(got["complete"])
+        self.assertIn("no readable text", got["note"])
+
+    def test_a_refused_recogniser_is_reported_as_a_fact_about_the_machine(self):
+        class Denied(Exception):
+            pass
+        Denied.__name__ = "AccessDeniedException"
+
+        import builtins
+        original = builtins.__import__
+
+        def fake(name, *a, **k):
+            if name == "boto3":
+                class C:
+                    def detect_document_text(self, **kw):
+                        raise Denied("not authorized")
+
+                class B:
+                    @staticmethod
+                    def client(*a, **k):
+                        return C()
+                return B
+            return original(name, *a, **k)
+        builtins.__import__ = fake
+        try:
+            got = doc.ocr(png_at(self.at("x.png")))
+        finally:
+            builtins.__import__ = original
+        self.assertFalse(got["ok"])
+        self.assertIn("not permitted", got["note"])
+
+    def test_a_file_too_big_to_send_is_not_silently_skipped(self):
+        path = self.at("huge.png")
+        with open(path, "wb") as f:
+            f.write(b"\x89PNG\r\n\x1a\n" + b"\x00" * (doc.OCR_MAX_BYTES + 10))
+        got = doc.ocr(path)
+        self.assertFalse(got["ok"])
+        self.assertIn("has not been read", got["note"])
+
+    def test_read_file_says_when_text_was_recognised_rather_than_read(self):
+        """It was not saying so. Recognised text and a text layer are not the
+        same claim, and a reader who cannot tell them apart weighs them the
+        same."""
+        original = doc.ocr
+        doc.ocr = self.fake_ocr("Amount due 92.50")
+        try:
+            got = env.read_file(png_at(self.at("bill.png")), ocr=True)
+        finally:
+            doc.ocr = original
+        self.assertTrue(got["read"])
+        self.assertTrue(got["ocr"], "the result does not say it was recognised")
+        self.assertIn("recognised from the page image", got["by"])
+
+    def test_ocr_is_off_unless_asked_for(self):
+        """It bills per page and sends the page off the box."""
+        got = env.read_file(png_at(self.at("p.png")))
+        self.assertFalse(got["read"])
+        self.assertIn("neither is", got["note"])

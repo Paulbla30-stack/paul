@@ -135,7 +135,8 @@ def _clip(text: str) -> tuple:
             f"the document continues past them and has not been read")
 
 
-def read_pdf(path: str) -> dict:
+def read_pdf(path: str, ocr_enabled: bool = False,
+             region: Optional[str] = None) -> dict:
     """Text per page, and which pages had none.
 
     A page with no text layer is a scan. Returning "" for it and stopping
@@ -186,10 +187,27 @@ def read_pdf(path: str) -> dict:
         else:
             notes.append(f"page(s) {shown}{more} have no text layer (likely scanned); "
                          "their contents have not been read")
-    return {"format": PDF, "text": text, "pages": total,
-            "pages_read": len(chunks), "pages_without_text": len(blank),
-            "complete": fit and not blank and total <= MAX_PDF_PAGES,
-            "note": "; ".join(notes)}
+    result = {"format": PDF, "text": text, "pages": total,
+              "pages_read": len(chunks), "pages_without_text": len(blank),
+              "complete": fit and not blank and total <= MAX_PDF_PAGES,
+              "note": "; ".join(notes)}
+    # A page with no text layer is the one case worth recognising characters
+    # for. Never a page that already read: OCR of a text PDF is slower, worse
+    # and billed, and the text layer is the author's own words rather than a
+    # guess at their shapes.
+    if blank and ocr_enabled and not chunks:
+        got = ocr(path, region)
+        if got.get("text"):
+            result["text"] = got["text"]
+            result["ocr"] = True
+            result["by"] = got.get("by")
+            result["complete"] = bool(got.get("complete"))
+            result["note"] = ("no page in this PDF has a text layer, so the "
+                              "characters were recognised from the page images "
+                              "instead" + (f"; {got['note']}" if got.get("note") else ""))
+        elif got.get("note"):
+            result["note"] += f"; {got['note']}"
+    return result
 
 
 def _xml_text(blob: bytes, tag: str, break_tag: Optional[str] = None) -> str:
@@ -338,7 +356,98 @@ def _sheet_rows(blob: bytes, shared: list) -> list:
     return rows
 
 
-def read_image(path: str, head: bytes) -> dict:
+# --- optical character recognition ------------------------------------------
+#
+# Only ever reached when extraction found nothing to extract: a PDF whose pages
+# have no text layer, or an image. Never on a document that already read
+# cleanly, because OCR of a text PDF is slower, worse and billed.
+
+OCR_MAX_BYTES = 5_000_000        # Textract's synchronous limit is 5MB
+OCR_MIN_CONFIDENCE = 60.0        # below this a line is noise dressed as text
+
+
+def ocr_available() -> bool:
+    try:
+        import boto3  # noqa: F401
+    except ImportError:
+        return False
+    return True
+
+
+def ocr(path: str, region: Optional[str] = None) -> dict:
+    """Read the characters in a page image. Bounded, and honest about quality.
+
+    Textract rather than tesseract: Amazon Linux 2023 does not package
+    tesseract at all, so the local route means a third-party repository or a
+    pip OCR stack with ONNX models on a small instance. This needs nothing
+    installed, reads scans and photographs alike, and bills per page rather
+    than per warm minute -- which, after this estate lost four figures to a
+    per-minute meter, is a property chosen on purpose.
+
+    What it does **not** do is describe a picture. It finds characters. A
+    photograph of a cat comes back with no text, and that is the truthful
+    answer rather than a failure: describing scenes is a vision model, which
+    is a separate decision with a separate bill.
+    """
+    try:
+        size = os.path.getsize(path)
+    except OSError as exc:
+        return {"ok": False, "text": "", "note": f"could not open the file: {exc}"}
+    if size > OCR_MAX_BYTES:
+        return {"ok": False, "text": "",
+                "note": (f"this file is {size:,} bytes and the recogniser takes "
+                         f"at most {OCR_MAX_BYTES:,}; it has not been read")}
+    try:
+        import boto3
+    except ImportError:
+        return {"ok": False, "text": "",
+                "note": "no recogniser is available on this machine"}
+    try:
+        with open(path, "rb") as f:
+            blob = f.read()
+        client = boto3.client("textract", region_name=region) if region \
+            else boto3.client("textract")
+        response = client.detect_document_text(Document={"Bytes": blob})
+    except Exception as exc:
+        name = type(exc).__name__
+        if "AccessDenied" in name or "AccessDenied" in str(exc):
+            return {"ok": False, "text": "",
+                    "note": ("this machine is not permitted to use the text "
+                             "recogniser, so the page images have not been read")}
+        if "UnsupportedDocument" in str(exc):
+            return {"ok": False, "text": "",
+                    "note": "the recogniser did not accept this file's format"}
+        return {"ok": False, "text": "",
+                "note": f"the text recogniser failed: {name}"}
+
+    lines, weak = [], 0
+    for block in response.get("Blocks", []):
+        if block.get("BlockType") != "LINE":
+            continue
+        confidence = float(block.get("Confidence") or 0.0)
+        text = (block.get("Text") or "").strip()
+        if not text:
+            continue
+        if confidence < OCR_MIN_CONFIDENCE:
+            weak += 1
+            continue
+        lines.append(text)
+    body, fit, clip_note = _clip("\n".join(lines))
+    notes = [clip_note] if clip_note else []
+    if weak:
+        notes.append(f"{weak} line(s) were too unclear to read and have been left out")
+    if not lines:
+        notes.append("the recogniser found no readable text in this file; it may "
+                     "be a picture of something other than a document, or too "
+                     "unclear to read. Its contents are still unknown, not empty")
+    return {"ok": bool(lines), "text": body, "lines": len(lines),
+            "unclear": weak, "complete": fit and not weak and bool(lines),
+            "note": "; ".join(notes), "by": "recognised from the page image, "
+                                            "not read from a text layer"}
+
+
+def read_image(path: str, head: bytes, ocr_enabled: bool = False,
+               region: Optional[str] = None) -> dict:
     """Identified and declined, with the reason.
 
     Pulling text out of a photograph is OCR or a vision model. Both are real
@@ -348,16 +457,24 @@ def read_image(path: str, head: bytes) -> dict:
     size = image_size(head)
     kind = next((name for magic, name in _IMAGE_MAGIC if head.startswith(magic)), "image")
     where = f"{size[0]}x{size[1]} " if size else ""
-    return {"format": IMAGE, "text": "", "complete": False,
-            "image": {"kind": kind, "width": size[0] if size else None,
-                      "height": size[1] if size else None},
+    shape = {"kind": kind, "width": size[0] if size else None,
+             "height": size[1] if size else None}
+    if ocr_enabled:
+        got = ocr(path, region)
+        note = f"this is a {where}{kind} image; " + (got.get("note") or "")
+        return {"format": IMAGE, "text": got.get("text", ""),
+                "complete": bool(got.get("complete")), "image": shape,
+                "ocr": True, "by": got.get("by"),
+                "note": note.strip().rstrip(";")}
+    return {"format": IMAGE, "text": "", "complete": False, "image": shape,
             "note": (f"this is a {where}{kind} image. Nothing on this machine can "
                      "read what it shows: that needs optical character "
                      "recognition or a model that sees, and neither is "
                      "configured. Its contents are unknown, not empty.")}
 
 
-def extract(path: str, head: bytes, kind: Optional[str] = None) -> Optional[dict]:
+def extract(path: str, head: bytes, kind: Optional[str] = None,
+            ocr_enabled: bool = False, region: Optional[str] = None) -> Optional[dict]:
     """Pull text out of a non-plain-text file, or None if it is plain text.
 
     Never raises. A format this cannot handle comes back saying so, because a
@@ -366,7 +483,7 @@ def extract(path: str, head: bytes, kind: Optional[str] = None) -> Optional[dict
     kind = kind or sniff(path, head)
     try:
         if kind == PDF:
-            return read_pdf(path)
+            return read_pdf(path, ocr_enabled, region)
         if kind == DOCX:
             return read_docx(path)
         if kind == XLSX:
@@ -374,7 +491,7 @@ def extract(path: str, head: bytes, kind: Optional[str] = None) -> Optional[dict
         if kind == PPTX:
             return read_pptx(path)
         if kind == IMAGE:
-            return read_image(path, head)
+            return read_image(path, head, ocr_enabled, region)
         if kind == ZIP:
             return {"format": ZIP, "text": "", "complete": False,
                     "note": ("this is a zip archive; its contents have not been "

@@ -77,6 +77,19 @@ cloud:
     stale_days: 30           # how old before something counts as left behind
     max_items: 20
 
+  # Recognising characters in a scan or a photograph of a document. Word,
+  # Excel, PowerPoint and text PDFs are read on the box for nothing and never
+  # reach this. A scan has no text layer at all, and without this it is
+  # reported as unread -- correctly, but uselessly.
+  #
+  # Two things the operator is choosing by turning it on: the page image
+  # leaves the box for AWS Textract in this account and region, and it is
+  # billed per page detected. Detection only; it finds characters and does not
+  # describe pictures, which is a vision model and a separate decision.
+  document_ocr:
+    enabled: true
+    region: us-west-2
+
   notify:
     enabled: false           # set true once a destination secret exists
     channel: sns_sms         # sns_sms | sns_topic | ses_email | none

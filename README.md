@@ -283,6 +283,25 @@ model, and neither belongs behind a function called read.
 Format comes from magic bytes before extension, because an extension is a
 claim by whoever named the file and the first four bytes are a fact about it.
 
+**Scans and photographs of documents** are read by recognising the characters
+in the page image, through AWS Textract (`document_ocr`, and the Terraform
+variable of the same name). It is reached only where extraction found nothing
+to extract -- never a PDF that already read, because a text layer is the
+author's own words and recognition is a guess at their shapes, and OCR of a
+text PDF is slower, worse and billed. Recognised text is *marked* as
+recognised, so a reader can weigh it differently.
+
+Textract rather than tesseract because Amazon Linux 2023 does not package
+tesseract at all, so the local route means a third-party repository or a pip
+OCR stack with ONNX models on a small instance; this needs nothing installed
+and bills per page rather than per warm minute, which after the imported-model
+bill is a property chosen on purpose. Two things the operator is choosing when
+switching it on: the page image leaves the box for Textract in the same
+account and region, and each page detected is billed. It finds characters and
+does not describe pictures -- a photograph of something that is not a document
+comes back with no text and says its contents are still unknown, not empty.
+Describing a scene is a vision model, which is a separate decision.
+
 ## Verdicts: knowing whether it was right
 
 Self-knowledge tells the agent the *shape* of its record -- how many

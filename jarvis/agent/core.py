@@ -159,6 +159,13 @@ class AgentCore:
         raw = config.get("tools")
         self.tool_restrictions = {str(k): v for k, v in raw.items()} if isinstance(raw, dict) else {}
         self.executor.rung = self.rung
+        # Recognising characters in a scan or a photograph. Off by default:
+        # the page leaves the box for a service and is billed per page, and
+        # both halves of that are the operator's decision rather than a
+        # sensible default. Text PDFs and Office files never reach it.
+        raw_ocr = config.get("document_ocr")
+        self.executor.document_ocr = (dict(raw_ocr) if isinstance(raw_ocr, dict)
+                                      else {"enabled": bool(raw_ocr)})
         # The behaviour lab's switch. Closed until an operator opens it, and
         # it cannot be opened without the agent being told: see lab.py. A lab
         # window fills the record with answers the agent did not choose, and

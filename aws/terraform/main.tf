@@ -225,6 +225,37 @@ resource "aws_iam_role_policy" "bedrock" {
   })
 }
 
+# Reading documents the operator uploads. Word, Excel and PowerPoint files are
+# read on the box with the standard library and PDFs with pypdf, all for
+# nothing. What none of that can do is a scan: a PDF of page images has no text
+# layer, and neither does a photograph of a letter. The usual answer is
+# tesseract, which Amazon Linux 2023 does not package at all, so it would mean
+# a third-party repository or a pip OCR stack with ONNX models on a t3.small.
+#
+# Textract is already in the estate, needs nothing installed, reads scans and
+# images alike, and bills per page rather than per warm minute -- which after
+# the imported-model bill is a property worth choosing deliberately. Detection
+# only: AnalyzeDocument costs several times more and is for forms and tables,
+# which is not what "what does this bill say" needs.
+#
+# The trade the operator should know about: the page image leaves the box for
+# AWS Textract in this account and region. Document *text* already goes to
+# Bedrock as context, so this widens what travels rather than opening a new
+# door -- but it is a real difference and belongs in a comment, not a footnote.
+resource "aws_iam_role_policy" "textract" {
+  count = var.document_ocr ? 1 : 0
+  name  = "jarvis-textract"
+  role  = aws_iam_role.jarvis.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect   = "Allow"
+      Action   = ["textract:DetectDocumentText"]
+      Resource = "*"
+    }]
+  })
+}
+
 # The Glass Ledger witness: an Object Lock bucket the instance can write to
 # but never delete from or read back. The audit (aws/scripts/ledger_audit.py)
 # runs elsewhere against this copy with a pinned public key.
