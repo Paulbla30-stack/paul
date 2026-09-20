@@ -182,6 +182,59 @@ class TestGatedVersusBroken(unittest.TestCase):
         self.assertIn("Every capability", note)
         self.assertNotIn("withheld", note)
 
+    def test_conversation_is_told_it_cannot_act(self):
+        """The confabulation this caused, caught on the live box.
+
+        Within minutes of the tool list reaching the context, the agent was
+        asked in conversation to use read_logs. It answered "I used read_logs
+        ... and found no entries", having run nothing, attributed the emptiness
+        to a different file that happened to exist and be empty, and concluded
+        the system was stable. The journal had 53 lines in that window.
+
+        It was not inventing for the sake of it. It had been handed a list of
+        its tools in a context that never said it could not reach them, which
+        is the same shape as the path problem this codebase already fixed: an
+        absence a model cannot see is one it fills in.
+        """
+        brain, agent = self._brain_and_agent()
+        answering = brain.build_context(agent, {}, mode="answer")["mandate"]["right_now"]
+        self.assertIn("not acting", answering)
+        self.assertIn("never report having used one", answering)
+
+    def test_planning_is_told_its_choice_is_real(self):
+        brain, agent = self._brain_and_agent()
+        planning = brain.build_context(agent, {}, mode="plan")["mandate"]["right_now"]
+        self.assertIn("will be run", planning)
+        self.assertNotIn("not acting", planning)
+
+    def test_planning_is_the_default(self):
+        brain, agent = self._brain_and_agent()
+        self.assertEqual(brain.build_context(agent, {})["mandate"]["right_now"],
+                         brain.build_context(agent, {}, mode="plan")["mandate"]["right_now"])
+
+    def test_an_unknown_mode_falls_back_to_planning(self):
+        brain, agent = self._brain_and_agent()
+        self.assertEqual(brain.build_context(agent, {}, mode="nonsense")["mandate"]["right_now"],
+                         brain.build_context(agent, {}, mode="plan")["mandate"]["right_now"])
+
+    def _brain_and_agent(self, **cfg):
+        from jarvis.agent.core import AgentCore
+        from jarvis.brain.llm import BaseBrain
+
+        class Offline(BaseBrain):
+            provider = "test"
+            def _make_client(self): return object()
+            def _complete(self, *a, **k): raise AssertionError("no call expected")
+            def _handle_error(self, exc): return None
+
+        brain = Offline({"max_calls_per_hour": 10}, LOG)
+        conf = {"name": "t", "profile": "cloud", "rung": "proposer"}
+        conf.update(cfg)
+        agent = AgentCore(conf, {"display": None, "input": None,
+                                 "memory": None, "storage": None}, LOG, brain=brain)
+        agent.planner._boot_tasks_generated = True
+        return brain, agent
+
     def test_the_note_reaches_the_model(self):
         from jarvis.agent.core import AgentCore
         from jarvis.brain.llm import BaseBrain

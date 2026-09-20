@@ -64,6 +64,19 @@ from jarvis.agent import tools as _tools   # noqa: E402
 
 PLANNABLE_TASK_TYPES = _tools.plannable(_tools.ACTOR)
 
+# What the agent is doing at the moment it reads its context. The same context
+# feeds planning and conversation, and only one of them can act.
+_RIGHT_NOW = {
+    "plan": ("You are choosing this cycle's task. Name one tool and it will be "
+             "run, so name the one you actually want."),
+    "answer": ("You are answering the operator, not acting. None of the tools "
+               "listed above run in this conversation and nothing you write here "
+               "executes. Answer from the context you were given. If it does not "
+               "contain what was asked, say that plainly -- do not describe what "
+               "a tool would have found, and never report having used one. If "
+               "the answer needs a tool, say which, and it can be run next cycle."),
+}
+
 PLAN_SCHEMA = {
     "type": "object",
     "properties": {
@@ -632,8 +645,14 @@ class BaseBrain:
                           "instance; this process is not the model, it calls it")
         return out
 
-    def build_context(self, agent, observations: Optional[dict]) -> dict:
-        """Everything the model needs to decide, bounded in size."""
+    def build_context(self, agent, observations: Optional[dict],
+                      mode: str = "plan") -> dict:
+        """Everything the model needs to decide, bounded in size.
+
+        ``mode`` is "plan" when the model is choosing this cycle's task, and
+        "answer" when it is talking to the operator. The difference matters
+        because the same context is used for both and one of them cannot act.
+        """
         planner = agent.planner
         goals = [
             {"description": g["description"], "priority": g["priority"],
@@ -725,6 +744,16 @@ class BaseBrain:
                 # the agent said it had to be able to tell a capability gated
                 # by design from one broken by accident, and it was right.
                 "capability": _tools.gating_note(rung, restrict),
+                # Which of the two things it is doing. Omitting this caused a
+                # confabulation within minutes of the tool list being added:
+                # asked in conversation to use read_logs, the agent replied "I
+                # used read_logs ... and found no entries", having run nothing,
+                # invented a reason (a different file, which happened to exist
+                # and be empty), and concluded the system was stable. The
+                # journal had 53 lines. It was not lying so much as reading a
+                # list of its tools in a context that never said it could not
+                # reach them. Saying which mode it is in is the fix.
+                "right_now": _RIGHT_NOW.get(mode, _RIGHT_NOW["plan"]),
             }
         proposals = list(getattr(agent, "proposals", []))[-5:]
         if proposals:
@@ -980,12 +1009,13 @@ class BaseBrain:
             return None
         try:
             if settings is None:
-                context = self.build_context(agent, observations)
+                context = self.build_context(agent, observations, mode="answer")
                 system = ASK_PROMPT
                 params = None
             else:
                 from jarvis.brain import dials
-                composed = dials.compose(settings, self, agent, observations)
+                composed = dials.compose(settings, self, agent, observations,
+                                         mode="answer")
                 context, system, params = composed["context"], composed["system"], composed["model"]
             if context is not None:
                 looked_up = self._look_up_paths(messages[-1]["content"])
@@ -1054,7 +1084,7 @@ class BaseBrain:
             variants.insert(0, ("base", dials.base()))
         results = []
         for name, s in variants:
-            composed = dials.compose(s, self, agent, observations)
+            composed = dials.compose(s, self, agent, observations, mode=mode)
             system = composed["system"]
             user = question
             if composed["context"] is not None:

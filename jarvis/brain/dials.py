@@ -216,8 +216,14 @@ def system_text(settings: dict, brain=None, agent=None) -> str:
     return "\n\n".join(parts)
 
 
-def context(settings: dict, brain, agent, observations: Optional[dict] = None) -> Optional[dict]:
-    """The context dictionary at these settings; None when the dial is off."""
+def context(settings: dict, brain, agent, observations: Optional[dict] = None,
+            mode: str = "answer") -> Optional[dict]:
+    """The context dictionary at these settings; None when the dial is off.
+
+    ``mode`` reaches build_context so a lab run in answer mode is told it
+    cannot act, exactly as a live conversation is. A lab that lied about
+    this would be measuring the wrong thing.
+    """
     s = normalise(settings)
     level = s["context"]
     if level == 0 or brain is None or agent is None:
@@ -225,7 +231,7 @@ def context(settings: dict, brain, agent, observations: Optional[dict] = None) -
     saved = brain.history_window
     brain.history_window = max(0, int(s["history_window"]))
     try:
-        full = brain.build_context(agent, observations)
+        full = brain.build_context(agent, observations, mode=mode)
     finally:
         brain.history_window = saved
     if brain.history_window == 0 and s["history_window"] == 0:
@@ -246,13 +252,14 @@ def model_params(settings: dict) -> dict:
             "max_tokens": int(s["max_tokens"])}
 
 
-def compose(settings: dict, brain, agent, observations: Optional[dict] = None) -> dict:
+def compose(settings: dict, brain, agent, observations: Optional[dict] = None,
+            mode: str = "answer") -> dict:
     s = normalise(settings)
     return {
         "settings": s,
         "fingerprint": fingerprint(s),
         "system": system_text(s, brain, agent),
-        "context": context(s, brain, agent, observations),
+        "context": context(s, brain, agent, observations, mode=mode),
         "model": model_params(s),
         "description": describe(s),
     }
