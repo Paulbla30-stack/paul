@@ -315,7 +315,7 @@ a token, because nothing off the box can reach it.
 
 ## The current image
 
-`ami-0115b66dd98a02cd5` (us-west-2, built from the tree at `29e34a2`, 8GiB
+`ami-0a4be45c20c538ab4` (us-west-2, built from the tree at `4b160fa`, 8GiB
 encrypted gp3). It carries everything the
 previous image did -- the permission spine, filesystem grounding, durable memory
 with consolidation, ledger-derived self-knowledge, the operator channel, estate
@@ -373,12 +373,19 @@ which is right, because personal data does not belong in a machine image, and
 worth saying because a fresh instance launched from here starts not knowing
 anyone.
 
-Run it with `terraform apply -var ami_id=ami-0115b66dd98a02cd5`; `ami_id` has no
+It also carries **the memory's own off-box copy** (`jarvis/agent/backup.py`)
+and **measured task durations** -- the executor was already clocking every
+task for the ledger and the figure never reached the history the agent reads,
+so it was inferring durations from the gap between entries, which is the
+cycle interval whenever the loop idles. It reported a goal_step as taking 45
+seconds. It is 31ms, 15ms, 24ms and 1.2s for the probes now, measured.
+
+Run it with `terraform apply -var ami_id=ami-0a4be45c20c538ab4`; `ami_id` has no
 default on purpose.
 
-The previous image is `ami-034a2d29889fe06f0`, built from `1bdaa56`, kept as the
-rollback. This one has been verified only by the self-test inside the Packer
-build, because the same code is already running on `i-016f9f37fe6ca2ba8`, where
+The previous image is `ami-05f270613ee2b64e3`, built from `57c7e1b`, kept as
+the rollback. This one has been verified by the self-test inside the Packer
+build and by the same code running on `i-016f9f37fe6ca2ba8`, where
 it has been observed sleeping, waking on a question, reading the real disk
 figure, refusing a lab run until the window was opened, and ruling on its own
 claims against the box.
