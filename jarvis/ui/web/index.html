@@ -268,6 +268,15 @@
   </section>
 
   <section id="lab">
+    <div class="card span-2" id="labSessionCard">
+      <h2>Lab session</h2>
+      <p class="small muted" style="margin:0 0 10px">One switch. It opens the lab and it tells Jarvis, in the same move &mdash; the window cannot open without him being told, because the notice goes first and the lab only opens if it landed. While it is open he carries a line saying what is being varied, that some variants are the bare model and not him, and that entries will appear in his record that he did not choose. He is not told which dials are set.</p>
+      <div class="row" style="flex-wrap:wrap;gap:8px;align-items:center">
+        <label class="small" style="display:flex;align-items:center;gap:8px"><input type="checkbox" id="labOpen" onchange="toggleLabSession()"> <b>Lab is in use</b></label>
+        <input id="labPurpose" placeholder="what this window is for (he is told this)" style="flex:1;min-width:220px">
+        <span id="labSessionMsg" class="small muted"></span>
+      </div>
+    </div>
     <div class="card">
       <h2>Behaviour lab</h2>
       <p class="small muted" style="margin:0 0 10px">Every layer that moves the model away from its base presentation, on a dial. Level 0 everywhere is the bare model: no system prompt, no context. Change a dial, read what the model will see, then run a question under the dials and against the base side by side. Layers enforced in code stay locked: the lab changes what the model is told, never what the executor allows.</p>
@@ -574,9 +583,32 @@
     } catch (e) { $("labPreview").textContent = "Error: " + e.message; }
   }
   async function loadLab() {
-    try { labRegistry = await api("/lab"); labSettings = Object.assign({}, labRegistry.settings); $("applyChat").checked = !!labRegistry.apply_to_chat; renderDials(); previewLab(); }
+    try { labRegistry = await api("/lab"); labSettings = Object.assign({}, labRegistry.settings); $("applyChat").checked = !!labRegistry.apply_to_chat; renderLabSession(labRegistry.session); renderDials(); if (labRegistry.session && labRegistry.session.open) previewLab(); }
     catch (e) { if (e.message !== "unauthorised") $("dialsMsg").textContent = "Error: " + e.message; }
   }
+  // The window's state drives the controls, so a shut lab looks shut rather
+  // than looking broken when the endpoints refuse.
+  function renderLabSession(st) {
+    const open = !!(st && st.open);
+    $("labOpen").checked = open;
+    for (const id of ["labRunBtn", "applyChat"]) { const el = $(id); if (el) el.disabled = !open; }
+    $("labSessionCard").style.borderColor = open ? "var(--warn)" : "";
+    if (!st) { $("labSessionMsg").textContent = ""; return; }
+    $("labSessionMsg").textContent = open
+      ? "open \u00b7 he was told \u00b7 " + (st.runs || 0) + " run" + (st.runs === 1 ? "" : "s") + " this window"
+      : "closed \u00b7 dials, preview and runs are refused while it is";
+    if (open && st.purpose) $("labPurpose").value = st.purpose;
+  }
+  window.toggleLabSession = async function () {
+    const want = $("labOpen").checked;
+    $("labOpen").disabled = true; $("labSessionMsg").textContent = want ? "telling him\u2026" : "closing\u2026";
+    try {
+      const r = await api("/lab/session", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ open: want, purpose: $("labPurpose").value.trim() }) });
+      labRegistry = r.lab; labSettings = Object.assign({}, labRegistry.settings); $("applyChat").checked = !!labRegistry.apply_to_chat;
+      renderLabSession(r.session); renderDials(); if (want) previewLab();
+    } catch (e) { $("labOpen").checked = !want; $("labSessionMsg").textContent = "Error: " + e.message; }
+    $("labOpen").disabled = false;
+  };
   window.saveDials = async function () {
     try { const r = await api("/lab/settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ settings: labSettings, apply_to_chat: $("applyChat").checked }) });
       $("dialsMsg").textContent = "saved (ledgered) · fingerprint " + r.fingerprint + (r.apply_to_chat ? " · live chat uses these dials" : ""); }

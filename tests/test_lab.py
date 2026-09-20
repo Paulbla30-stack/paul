@@ -6,6 +6,7 @@ import os
 import tempfile
 import unittest
 import urllib.request
+import urllib.error
 
 from jarvis.agent.core import AgentCore
 from jarvis.brain import dials
@@ -44,10 +45,15 @@ class RecordingBrain(BaseBrain):
         return Completion(text=text, stop_reason="end_turn", usage={"input_tokens": 3, "output_tokens": 2})
 
 
-def make_agent(brain, ledger=None):
+def make_agent(brain, ledger=None, lab=True):
     agent = AgentCore({"name": "t", "profile": "cloud"}, dict(NO_HW), LOG, brain=brain, ledger=ledger)
     agent.planner._boot_tasks_generated = True
     agent.add_goal("Keep root under 80%", 3)
+    # A lab run needs an open window, and opening one tells the agent. Tests
+    # that exercise the lab therefore open it, which is the point: there is
+    # no path to an experiment that does not go through the notice.
+    if lab:
+        agent.lab.open(purpose="tests", operator="test")
     return agent
 
 
@@ -105,6 +111,13 @@ class TestDials(unittest.TestCase):
 
 
 class TestExperiment(unittest.TestCase):
+
+    def test_a_closed_lab_runs_nothing(self):
+        agent = make_agent(RecordingBrain(reply="hello"), lab=False)
+        result = agent.experiment("who are you?", settings=dials.defaults())
+        self.assertIn("lab is closed", result["error"])
+        agent.lab.open(purpose="tests", operator="test")
+        self.assertNotIn("error", agent.experiment("who are you?", settings=dials.defaults()))
 
     def test_experiment_runs_base_and_dials_with_param_overrides(self):
         brain = RecordingBrain(reply="hello")
@@ -170,7 +183,7 @@ class TestLabEndpoints(unittest.TestCase):
 
     def test_lab_endpoints(self):
         brain = RecordingBrain(reply="fine")
-        agent = make_agent(brain)
+        agent = make_agent(brain, lab=False)   # the switch is part of what is tested
         runner = HeadlessRunner(agent, LOG, interval=0, status_port=0, token="t0k", token_file=None)
         port = runner.start_status_server()
         base = f"http://127.0.0.1:{port}"
@@ -181,7 +194,17 @@ class TestLabEndpoints(unittest.TestCase):
             with urllib.request.urlopen(req, timeout=10) as r:
                 return json.loads(r.read())
         try:
+            # Everything below is refused until the window is open, and
+            # opening it is what tells the agent.
+            with self.assertRaises(urllib.error.HTTPError) as shut:
+                call("/lab/run", {"question": "how is disk?"})
+            self.assertEqual(shut.exception.code, 409)
+            opened = call("/lab/session", {"open": True, "purpose": "checking the voice dial"})
+            self.assertTrue(opened["session"]["open"])
+            self.assertTrue(opened["session"]["announced"])
+            self.assertIn("behaviour lab is open", agent.notes[-1])
             state = call("/lab")
+            self.assertTrue(state["session"]["open"])
             self.assertEqual(state["settings"], dials.defaults())
             self.assertFalse(state["apply_to_chat"])
             self.assertEqual(len(state["locked"]), 4)
@@ -201,6 +224,13 @@ class TestLabEndpoints(unittest.TestCase):
             with self.assertRaises(urllib.error.HTTPError) as cm:
                 call("/lab/run", {"question": ""})
             self.assertEqual(cm.exception.code, 400)
+            # Closing says so, and takes the dials back off live chat.
+            closed = call("/lab/session", {"open": False})
+            self.assertFalse(closed["session"]["open"])
+            self.assertFalse(closed["lab"]["apply_to_chat"])
+            self.assertIn("behaviour lab is closed", agent.notes[-1])
+            chat = call("/chat", {"messages": [{"role": "user", "content": "hi"}]})
+            self.assertFalse(chat["dials"])
         finally:
             runner.stop_status_server()
 

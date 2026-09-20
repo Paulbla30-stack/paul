@@ -728,6 +728,19 @@ class BaseBrain:
             rest = {}
         if rest:
             context["rest"] = rest
+        # That it is being experimented on, while it is. A lab window fills
+        # the record with answers it did not choose, some of them from the
+        # bare model rather than from it, and an agent reading aggregates
+        # over that window has every reason to conclude it is malfunctioning.
+        # It is told the window is open and what is being varied; it is not
+        # told which dials are set, because that would put the answer inside
+        # the question. See jarvis/agent/lab.py.
+        try:
+            window = agent.lab.notice()
+        except Exception:
+            window = None
+        if window:
+            context["lab_session"] = window
         rung = getattr(agent, "rung", None)
         if rung:
             from jarvis.agent import authority

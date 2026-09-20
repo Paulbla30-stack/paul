@@ -194,8 +194,21 @@ returned but never executed. Layers enforced in code (the deny-list,
 fail-closed recording, planner containment, the off-box witness) are listed
 and locked: the lab changes what the model is told, never what the executor
 allows. Every dial change and every run is ledgered with a fingerprint of
-the settings, so a behaviour change always has a return address. API:
-`GET /lab`, `POST /lab/settings`, `POST /lab/preview`, `POST /lab/run`.
+the settings, so a behaviour change always has a return address.
+
+The lab is a **session**, and the agent is told when one is open. A lab
+window fills the agent's own record with answers it did not choose, some of
+them produced by the bare model rather than by it, and an agent reading
+aggregates over that window has every reason to conclude something is wrong
+with it. So one switch does both things and cannot do one without the other:
+the notice is written, the model is woken and the window goes on the ledger,
+and only then does the lab open. If the agent cannot be told, the lab stays
+shut. Dials, preview and runs are all refused while the window is closed,
+and closing it takes the dials back off live chat and says so. The agent is
+told that it is being measured and not what is being measured -- the
+settings stay out of the notice, or the measurement would be measuring the
+telling. API: `GET /lab`, `POST /lab/session {open: true|false, purpose}`,
+`POST /lab/settings`, `POST /lab/preview`, `POST /lab/run`.
 
 ## Filesystem grounding
 

@@ -159,6 +159,13 @@ class AgentCore:
         raw = config.get("tools")
         self.tool_restrictions = {str(k): v for k, v in raw.items()} if isinstance(raw, dict) else {}
         self.executor.rung = self.rung
+        # The behaviour lab's switch. Closed until an operator opens it, and
+        # it cannot be opened without the agent being told: see lab.py. A lab
+        # window fills the record with answers the agent did not choose, and
+        # an agent reading its own aggregates over that window has every
+        # reason to conclude something is wrong with it.
+        from jarvis.agent import lab as _lab
+        self.lab = _lab.LabSession(self)
         # Changes the agent wanted to make and did not. Bounded here, durable
         # in the store, so they outlive the process.
         self.proposals = deque(maxlen=50)
@@ -817,7 +824,16 @@ class AgentCore:
         Nothing is executed and no agent state changes; each variant is
         ledgered as a thought with its dial fingerprint so the return address
         of any behaviour change is on the record.
+
+        Requires an open lab session, and a lab session cannot be opened
+        without the agent being told (see lab.py). The gate is here rather
+        than at the HTTP layer on purpose: a run that happens behind the
+        agent's back is exactly the thing being prevented, so the prevention
+        belongs where the run happens, not at one of the doors to it.
         """
+        if not self.lab.is_open():
+            return {"error": "the lab is closed; open a lab session first, which "
+                             "tells the agent the window has started"}
         if self.brain is None:
             return {"error": "no LLM brain configured (llm.enabled)"}
         gate = self.ledger.gate()
@@ -834,7 +850,8 @@ class AgentCore:
                 "settings": v.get("settings"), "question": (question or "")[:500],
                 "answered": "answer" in v, "answer_sha256": _sha256(v.get("answer") or ""),
                 "answer_head": (v.get("answer") or "")[:300], "error": v.get("error"),
-                "model": result.get("model")})
+                "model": result.get("model"), "lab_session": True})
+        self.lab.note_run()
         return result
 
     def withdraw_goal(self, description: str) -> bool:
@@ -936,6 +953,12 @@ class AgentCore:
             # Warm minutes, not call count: the meter on an imported model
             # runs on the former, so that is what belongs in front of a reader.
             "vigil": self.vigil.status(),
+            # Whether a behaviour-lab window is open, and nothing about what
+            # is in it. /status has no token on it, and the fact that the lab
+            # is running is what a reader of a status page needs: an answer
+            # written under dials is not the agent's ordinary behaviour, and
+            # a graph with no marker on that window is a misleading graph.
+            "lab_open": self.lab.is_open(),
         }
 
     def shutdown(self):

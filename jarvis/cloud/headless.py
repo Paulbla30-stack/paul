@@ -26,7 +26,10 @@ Endpoints (default 127.0.0.1:8471):
 A second listener (``ui`` settings) can serve the same handler on a
 public address with TLS, so the UI works from a phone without a tunnel.
 
-    GET  /lab      -> behaviour-lab dials, current settings, locked layers
+    GET  /lab      -> behaviour-lab dials, settings, locked layers, session
+    POST /lab/session {open: true|false, purpose?} -> opens or closes the lab
+         window. Opening tells the agent first and only opens if that worked;
+         the other lab endpoints refuse while the window is shut.
     POST /lab/settings {settings, apply_to_chat}, /lab/preview {settings},
          /lab/run {question, settings?, compare, mode: answer|plan}
     GET  /ledger, /ledger/tail?limit=N, /ledger/verify, /ledger/pubkey
@@ -208,7 +211,8 @@ class HeadlessRunner:
         state = _dials.registry()
         state["settings"] = dict(self.lab_settings)
         state["fingerprint"] = _dials.fingerprint(self.lab_settings)
-        state["apply_to_chat"] = self.lab_apply_to_chat
+        state["apply_to_chat"] = self.lab_apply_to_chat and self.agent.lab.is_open()
+        state["session"] = self.agent.lab.state()
         state["brain"] = self.agent.brain.status() if self.agent.brain else None
         return state
 
@@ -487,12 +491,47 @@ class HeadlessRunner:
                     turns = payload.get("messages") if isinstance(payload, dict) else None
                     if not isinstance(turns, list) or not turns:
                         return self._send(400, {"error": "messages list required"})
-                    settings = runner.lab_settings if runner.lab_apply_to_chat else None
+                    settings = (runner.lab_settings
+                                if runner.lab_apply_to_chat and runner.agent.lab.is_open()
+                                else None)
                     with runner._lock:
                         runner.agent.note_operator("chat")
                         answer = runner.agent.chat(turns, settings=settings)
                     runner.wake()
                     self._send(200, {"answer": answer, "dials": settings is not None})
+                elif path == "/lab/session":
+                    # One switch. It opens the lab and it tells the agent, and
+                    # it cannot do one without the other: the announcement
+                    # runs first and the window only opens if the agent was
+                    # actually told. See jarvis/agent/lab.py.
+                    try:
+                        payload = json.loads(body or "{}")
+                    except ValueError:
+                        return self._send(400, {"error": "body must be JSON"})
+                    if not isinstance(payload, dict):
+                        return self._send(400, {"error": "JSON object required"})
+                    from jarvis.agent import lab as _lab
+                    want = payload.get("open")
+                    if not isinstance(want, bool):
+                        return self._send(400, {"error": "open must be true or false"})
+                    with runner._lock:
+                        if want:
+                            try:
+                                state = runner.agent.lab.open(
+                                    purpose=payload.get("purpose") or "",
+                                    operator=payload.get("operator") or "operator")
+                            except _lab.NotAnnounced as e:
+                                return self._send(503, {"error": str(e), "open": False})
+                        else:
+                            state = runner.agent.lab.close(
+                                operator=payload.get("operator") or "operator")
+                            # A window that ends returns live chat to the
+                            # agent's own settings. Leaving the dials on a
+                            # closed lab is how behaviour drifts with nobody
+                            # having decided it should.
+                            runner.lab_apply_to_chat = False
+                    runner._write_status_file()
+                    self._send(200, {"session": state, "lab": runner.lab_state()})
                 elif path in ("/lab/settings", "/lab/preview", "/lab/run"):
                     try:
                         payload = json.loads(body or "{}")
@@ -500,6 +539,12 @@ class HeadlessRunner:
                         return self._send(400, {"error": "body must be JSON"})
                     if not isinstance(payload, dict):
                         return self._send(400, {"error": "JSON object required"})
+                    if not runner.agent.lab.is_open():
+                        return self._send(409, {
+                            "error": "the lab is closed",
+                            "remedy": "POST /lab/session {\"open\": true} first; it tells "
+                                      "the agent the window has started",
+                            "session": runner.agent.lab.state()})
                     from jarvis.brain import dials as _dials
                     if path == "/lab/settings":
                         settings = _dials.normalise(payload.get("settings") or {})
