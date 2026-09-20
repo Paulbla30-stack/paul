@@ -116,9 +116,13 @@ TOOLS = (
                     "path": {"type": "string",
                              "description": "Absolute path to look at."}},
          required=("path",)),
-    Tool("read_file", "Read one text file, bounded. Use it on a file the "
-                      "operator has uploaded, or any file you are allowed to "
-                      "see, rather than describing what you think is in it.",
+    Tool("read_file", "Read one file, bounded: plain text, PDF, Word, Excel, "
+                      "PowerPoint, and scans or photographs of documents, "
+                      "whose characters are recognised from the page image. "
+                      "Use it on anything the operator uploads rather than "
+                      "describing what you think is in it. It tells you what "
+                      "it could not read, and unread is never the same as "
+                      "empty.",
          arguments={**_DESC,
                     "path": {"type": "string",
                              "description": "Absolute path of the file to read."},
