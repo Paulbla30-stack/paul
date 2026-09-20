@@ -223,6 +223,32 @@ def read_file(path: str, max_bytes: int = MAX_READ_BYTES,
         return {"path": info["path"], "read": False, "reason": str(exc)}
     truncated = len(raw) > cap
     raw = raw[:cap]
+    # Not text? It may still be a document. A bill, a statement, a letter and
+    # a spreadsheet are all "binary" and all things a person would upload, and
+    # answering every one of them with "this looks like a binary file" makes
+    # the upload button decorative. See documents.py -- and note that what it
+    # could not read comes back as not read, never as nothing there.
+    from jarvis.agent import documents
+    kind = documents.sniff(info["path"], raw[:64])
+    if kind != documents.TEXT:
+        extracted = documents.extract(info["path"], raw[:4096], kind)
+        if extracted is not None:
+            out = {"path": info["path"], "read": bool(extracted.get("text")),
+                   "size": size, "modified": info.get("modified"),
+                   "format": extracted.get("format"),
+                   "complete": bool(extracted.get("complete")),
+                   "text": extracted.get("text", "")}
+            for extra in ("pages", "pages_read", "pages_without_text",
+                          "sheets", "slides", "image"):
+                if extra in extracted:
+                    out[extra] = extracted[extra]
+            if extracted.get("note"):
+                out["note"] = extracted["note"]
+            if not out["read"]:
+                # An unread document is not an empty one, and the difference
+                # has to survive into the field the model reads first.
+                out["reason"] = extracted.get("note") or "nothing could be read from this file"
+            return out
     printable = sum(1 for b in raw[:4096] if b in _TEXTISH)
     if raw[:4096] and printable / len(raw[:4096]) < 0.85:
         return {"path": info["path"], "read": False, "size": size,

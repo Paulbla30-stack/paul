@@ -76,10 +76,20 @@ fi
 # The LLM planner uses the official Anthropic SDK (llm.provider: anthropic)
 # or boto3 for Amazon Bedrock (llm.provider: bedrock). Install both so the
 # provider is a config choice at launch time.
-log "Installing the anthropic SDK and boto3"
-$PY -m pip install --no-cache-dir --upgrade "anthropic>=1.6" "boto3>=1.34" "cryptography>=42" \
-    || $PY -m pip install --no-cache-dir --upgrade --break-system-packages "anthropic>=1.6" "boto3>=1.34" "cryptography>=42"
+# pypdf is the one document format the standard library cannot reach: Word,
+# Excel and PowerPoint files are zips full of XML and are read without a
+# dependency, while a PDF is compressed streams and font encodings with no
+# plain text anywhere. Pure Python, no system libraries, and without it every
+# bill and statement the operator uploads comes back unread. The agent says
+# so when it is missing rather than returning an empty document, so this is
+# an improvement rather than a requirement -- but an unread bill is a useless
+# assistant, so it goes in the image.
+log "Installing the anthropic SDK, boto3 and the PDF reader"
+$PY -m pip install --no-cache-dir --upgrade "anthropic>=1.6" "boto3>=1.34" "cryptography>=42" "pypdf>=4.0" \
+    || $PY -m pip install --no-cache-dir --upgrade --break-system-packages "anthropic>=1.6" "boto3>=1.34" "cryptography>=42" "pypdf>=4.0"
 $PY -c 'import anthropic, boto3, cryptography; print("[provision] anthropic", anthropic.__version__, "boto3", boto3.__version__, "cryptography", cryptography.__version__)'
+$PY -c 'import pypdf; print("[provision] pypdf", pypdf.__version__)' \
+    || log "WARNING: pypdf missing; PDFs will be reported as unreadable rather than read"
 command -v aws >/dev/null 2>&1 && log "aws cli: $(aws --version 2>&1 | head -1)" \
     || log "WARNING: aws cli missing; llm.api_key_ssm_parameter will not work"
 

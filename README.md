@@ -251,6 +251,38 @@ conventions; name one only if it appears in `environment`, in
 `uploaded_files`, or in a task result; and saying a path has not been
 checked is a correct answer.
 
+## Reading what it is given
+
+The upload endpoint took a file, put it on disk and told the agent its name,
+size and timestamp. Nothing could read a word of it. `read_file` does, behind
+the same fence as everything else, bounded by bytes and lines, with binary
+reported as binary rather than decoded -- a model shown mojibake describes it
+confidently, which is this project's signature failure.
+
+Plain text is not most of what a person sends, though. A bill, a statement, a
+letter and a spreadsheet are all "binary", and answering every one of them
+with "this looks like a binary file" makes the upload button decorative. So
+`documents.py` reads Word, Excel and PowerPoint files -- all of them zips full
+of XML, handled with the standard library, because a dependency here is a
+dependency in every future image -- and PDFs through `pypdf`, which is the one
+format the standard library cannot reach.
+
+**The harder half is honesty about extraction.** A scanned PDF has no text
+layer: every naive reader returns an empty string, and an empty string is
+indistinguishable from a blank document. This codebase has met that failure
+before, when an empty security scan report was read as a report of zero
+findings. So every extraction carries `complete`, and when it is false it says
+what was missed and why: *"no page in this PDF has a text layer, so it is very
+likely a scan or photographs; nothing in it has been read and it is not
+blank"*. A Word file says how many embedded images went unread. A spreadsheet
+says its figures are the values last saved rather than recalculated formulas.
+An image is identified, measured, and declined -- *"its contents are unknown,
+not empty"* -- because pulling text from a photograph is OCR or a vision
+model, and neither belongs behind a function called read.
+
+Format comes from magic bytes before extension, because an extension is a
+claim by whoever named the file and the first four bytes are a fact about it.
+
 ## Verdicts: knowing whether it was right
 
 Self-knowledge tells the agent the *shape* of its record -- how many
