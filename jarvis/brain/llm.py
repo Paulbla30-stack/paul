@@ -604,6 +604,20 @@ class BaseBrain:
         }
         if self.cycle_interval:
             clock["cycle_interval_s"] = self.cycle_interval
+        # A timestamp is not knowing what day it is. Whether it is a weekday,
+        # whether the operator is asleep, and how far his clock is from this
+        # machine's all change what is worth doing, and none of them are in a
+        # UNIX time. See timesense.py.
+        try:
+            from jarvis.agent import timesense
+            quiet = getattr(getattr(agent, "notifier", None), "quiet_hours", None)
+            tz = getattr(getattr(agent, "notifier", None), "timezone", None)
+            clock.update(timesense.present(
+                now, tz=tz or timesense.DEFAULT_TZ, quiet_hours=quiet))
+            if last_task_at:
+                clock["last_task"] = timesense.gap(last_task_at, now)
+        except Exception:
+            pass
         return clock
 
     def _environment(self) -> dict:
@@ -716,6 +730,20 @@ class BaseBrain:
         # Framed as observations, not rules -- "this has run 340 times and
         # found nothing" is a fact it can weigh; "stop running this" is a rule
         # it would follow wrongly on the day the check finally matters.
+        # How long its own work actually takes, measured rather than guessed.
+        # A model estimating duration reaches for a prior built from text
+        # about people doing projects, and that text has no entries at all for
+        # "forty milliseconds" -- so it says a week for something the machine
+        # finishes in a second. Measurements beat priors; these are its own.
+        try:
+            from jarvis.agent import timesense
+            measured = timesense.durations(agent.task_history, now)
+            context["how_long_things_take"] = {
+                "measured_on_this_machine": measured,
+                "scales": timesense.scale(measured),
+            }
+        except Exception:
+            pass
         knower = getattr(agent, "self_knowledge", None)
         if knower is not None:
             try:

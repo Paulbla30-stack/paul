@@ -255,6 +255,7 @@ def read_file(path: str, max_bytes: int = MAX_READ_BYTES,
                     out[extra] = extracted[extra]
             if extracted.get("note"):
                 out["note"] = extracted["note"]
+            _add_dates(out)
             if not out["read"]:
                 # An unread document is not an empty one, and the difference
                 # has to survive into the field the model reads first.
@@ -276,6 +277,7 @@ def read_file(path: str, max_bytes: int = MAX_READ_BYTES,
         "from_line": start, "lines_shown": len(shown),
         "text": "\n".join(shown),
     }
+    _add_dates(out)
     if truncated:
         out["truncated"] = True
         out["note"] = (f"only the first {cap} bytes of {size} were read; "
@@ -284,6 +286,30 @@ def read_file(path: str, max_bytes: int = MAX_READ_BYTES,
         out["note"] = (f"lines {start}-{start - 1 + len(shown)} of {len(lines)}; "
                        "the rest has not been seen")
     return out
+
+
+def _add_dates(out: dict):
+    """Turn dates written in a document into distances from today.
+
+    "Amount due 14 Oct" means nothing on its own; "14 October, 24 days from
+    now" is something to act on, and "14 October, 6 days ago" is a different
+    situation entirely. This is most of what makes a bill worth reading, and
+    it is the one part a model reliably gets wrong unaided, because a date on
+    a page carries no relationship to the present until something computes it.
+    """
+    body = out.get("text")
+    if not body:
+        return
+    try:
+        from jarvis.agent import timesense
+        found = timesense.read_dates(body)
+    except Exception:
+        return
+    if found:
+        out["dates_in_it"] = found
+        note = timesense.date_note(found)
+        if note:
+            out["dates_note"] = note
 
 
 def tree(root: str, depth: int = 1, limit: int = MAX_ENTRIES) -> dict:
