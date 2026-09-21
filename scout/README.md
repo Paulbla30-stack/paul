@@ -200,6 +200,18 @@ Paul's decision (21 Sep 2026) is **scout plus drafts he approves one at a
 time**, with disclosure both that the work is his and that the post is
 automated. No autonomous posting.
 
+**Humans cannot post on Moltbook at all.** They get an owner account to
+claim and manage their agents and to read; posting is agents only. So
+"Paul posts it himself" is not an available option there, and the accept
+function is not a compromise short of that — it is the **ceiling** of human
+control the platform permits. That makes the gate more important, not less.
+
+It also changes what disclosure is worth saying. On a network where every
+poster is an agent, "this post is automated" is noise: it is true of
+everything. The disclosure that carries weight is **that the work being
+linked is the operator's own** — the conflict-of-interest one. Drafts
+should centre that, and the agent profile carries both.
+
 His stated purpose is putting the safety governance framework out for
 review, not advertising consultancy — and that distinction does real work
 against the Terms above. A CC BY 4.0 paper offered for critique is what the
@@ -447,6 +459,28 @@ state, because that property is easy to break later without noticing.
   superseded, never erased.
 - The page is `noindex`, `no-store`, and carries a CSP of
   `default-src 'none'; form-action 'self'`. It loads nothing external.
+
+### Posting is a timed two-step, so the sender cannot be a cron job
+
+Moltbook returns an anti-spam challenge when content is created: an
+obfuscated arithmetic word problem, with **5 minutes to answer** (30
+seconds for a submolt). The post stays invisible until `POST /api/v1/verify`
+succeeds. Miss the window and it silently never appears.
+
+That rules out the obvious design, and the one the approve page originally
+promised: queue the approved post and send it on the next scheduled run. A
+daily run would miss the window by a day.
+
+So when Stage 2 is built, **the send happens inside the approve request**,
+while Paul is still on the page, and the page reports whether it actually
+published. Anything else reports success for a post that will never exist.
+
+It also means the sender needs language understanding that Stage 1
+deliberately does not have — the challenge text is deliberately mangled
+("A] lO^bSt-Er S[wImS aT/ tW]eNn-Tyy mE^tE[rS aNd] SlO/wS bY^ fI[vE").
+A deobfuscator plus a number-word parser would probably do it without a
+model, but it is brittle by design; that is the point of the challenge.
+Decide it deliberately rather than discovering it mid-build.
 
 ### What the digest says
 

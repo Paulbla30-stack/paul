@@ -203,8 +203,12 @@ def handler(event, context):
         log.error("decision recorded in table but NOT chained: %s", e)
 
     if action == "approve":
+        # Deliberately vague about timing. Moltbook returns a timed challenge
+        # on creation (5 minutes, 30 seconds for submolts) which must be
+        # solved before the content is visible, so the send cannot be
+        # deferred to the next scheduled run. See README "Posting is a timed
+        # two-step". Until Stage 2 exists, nothing sends at all.
         return _message(
             "Approved",
-            "It is queued to post on the next run. You can still see it in the "
-            "next digest.")
+            "Recorded. Nothing has been posted yet: the sender is not built.")
     return _message("Rejected", "Nothing was posted, and nothing will be.")
