@@ -32,6 +32,14 @@ def test_zero_width_and_bidi_are_removed():
     assert "‮" not in sanitise("safe‮txet")
 
 
+def test_replacement_characters_are_dropped():
+    # Real Moltbook titles carry U+FFFD where an em-dash was mangled before
+    # they stored it. It means "a character was already lost", so passing it
+    # through only puts a black diamond in the digest.
+    assert sanitise("Product Areas \ufffd Mental Health") == "Product Areas Mental Health"
+    assert "\ufffd" not in sanitise("a \ufffd\ufffd b")
+
+
 def test_length_is_capped():
     assert len(sanitise("x" * 10_000, 100)) == 100
 

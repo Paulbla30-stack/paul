@@ -45,6 +45,11 @@ MAX_URL = 500
 _CONTROL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]")
 # Zero-width and bidirectional formatting characters.
 _INVISIBLE = re.compile(r"[​-‏‪-‮⁠-⁤﻿]")
+# U+FFFD is what is left when a character was already lost upstream — seen
+# in real Moltbook titles where an em-dash was mangled before they stored
+# it. By definition it carries no information, so it becomes a space
+# rather than reaching the digest as a black diamond.
+_REPLACEMENT = re.compile("\ufffd+")
 _WS = re.compile(r"\s+")
 
 
@@ -55,6 +60,7 @@ def sanitise(value, limit: int = MAX_BODY) -> str:
     s = unicodedata.normalize("NFC", s)
     s = _CONTROL.sub(" ", s)
     s = _INVISIBLE.sub("", s)
+    s = _REPLACEMENT.sub(" ", s)
     s = _WS.sub(" ", s).strip()
     if len(s) > limit:
         s = s[: limit - 1].rstrip() + "…"
