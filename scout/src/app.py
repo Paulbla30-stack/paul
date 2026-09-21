@@ -81,6 +81,20 @@ def run(cfg: dict, *, hit_store, chain_store, mailer, now: datetime | None = Non
     chain = Chain(chain_store)
     threshold = float(cfg["run"]["digest_threshold"])
 
+    # First run sweeps wide. With nothing stored there is no backlog to
+    # de-duplicate against, so a narrow window would hand over a near-empty
+    # digest and quietly lose everything published before today.
+    first_run = False
+    try:
+        first_run = chain_store.head()[0] == 0
+    except Exception:                       # noqa: BLE001 - treat unknown as not-first
+        pass
+    if first_run:
+        wide = int(cfg["run"].get("first_run_lookback_days",
+                                  cfg["run"]["lookback_days"]))
+        cfg = {**cfg, "run": {**cfg["run"], "lookback_days": wide}}
+        log.info("first run: sweeping %d days instead of the usual window", wide)
+
     items, ok, failed = collect(cfg, now)
 
     vetoed = 0
@@ -113,6 +127,8 @@ def run(cfg: dict, *, hit_store, chain_store, mailer, now: datetime | None = Non
     capped = above[: int(cfg["run"]["digest_max_items"])]
 
     stats = {
+        "first_run": first_run,
+        "lookback_days": int(cfg["run"]["lookback_days"]),
         "fetched": len(items),
         "vetoed": vetoed,
         "new": len(new_records),

@@ -316,6 +316,56 @@ def test_moltbook_items_are_marked_as_machine_written():
     assert '"written_by": "agent"' in src
 
 
+
+# ------------------------------------------------------------ the first run
+def test_first_run_sweeps_wider_than_a_normal_run():
+    # With nothing stored there is no backlog to de-duplicate against, so a
+    # narrow window would hand over a near-empty digest and quietly lose
+    # everything published before today.
+    assert (CFG["run"]["first_run_lookback_days"]
+            > CFG["run"]["lookback_days"])
+
+
+def test_first_run_is_detected_from_an_empty_chain():
+    import tempfile
+    from chain import Chain, LocalChainStore
+    path = tempfile.mktemp(suffix=".jsonl")
+    store = LocalChainStore(path)
+    assert store.head()[0] == 0                 # first run
+    Chain(store).append({"x": 1})
+    assert store.head()[0] != 0                 # and never again
+    os.remove(path)
+
+
+def test_threshold_is_reachable_by_one_on_topic_title():
+    """The original threshold of 8 was unreachable and would have sent nothing.
+
+    One broad term in a title must clear the bar; one body mention must not.
+    """
+    from datetime import datetime, timezone
+    s = Scorer(CFG)
+    now = datetime(2026, 9, 21, tzinfo=timezone.utc)
+    thr = CFG["run"]["digest_threshold"]
+    in_title = s.score(title="A sociotechnical review of healthcare AI",
+                       body="", source_weight=1.2, published=now, now=now)
+    in_body = s.score(title="An unrelated title", body="mentions healthcare AI once",
+                      source_weight=1.2, published=now, now=now)
+    assert in_title.total >= thr, f"{in_title.total} < {thr}: nothing would send"
+    assert in_body.total < thr, f"{in_body.total} >= {thr}: too noisy"
+
+
+def test_a_week_old_paper_keeps_most_of_its_score():
+    # 8%/day halved a week-old preprint, which is wrong for this material.
+    from datetime import datetime, timedelta, timezone
+    s = Scorer(CFG)
+    now = datetime(2026, 9, 21, tzinfo=timezone.utc)
+    fresh = s.score(title="healthcare AI", body="", source_weight=1.0,
+                    published=now, now=now)
+    week = s.score(title="healthcare AI", body="", source_weight=1.0,
+                   published=now - timedelta(days=7), now=now)
+    assert week.total / fresh.total > 0.75
+
+
 if __name__ == "__main__":
     fns = [(n, f) for n, f in sorted(globals().items()) if n.startswith("test_")]
     bad = 0

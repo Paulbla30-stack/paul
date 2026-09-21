@@ -6,10 +6,24 @@
 # All values are read at Lambda cold start.
 
 [run]
-# How far back each run looks. The schedule is daily, so 2 days gives a
-# margin of overlap: a missed run is caught up rather than lost. Duplicate
-# suppression is by item id, so overlap costs nothing.
-lookback_days = 2
+# How far back each run looks.
+#
+# This is NOT "what is new since yesterday". Because de-duplication is by
+# item id, an item is only ever reported once however many runs see it, so
+# lookback means "how far back to look for things I have not seen yet".
+# Overlap is free; a narrow window just loses things.
+#
+# That matters here because the niche is quiet and the sources index at
+# different speeds. Measured 21 Sep 2026 over the same sources:
+#   2 days  -> 0 items matched any keyword
+#   7 days  -> 4 matched
+#   90 days -> 35 matched (4.3%), 8 scoring >= 3
+lookback_days = 7
+
+# The first run has nothing stored, so it sweeps wide and hands over a
+# backlog instead of a near-empty digest. Used only when the chain is
+# empty; every run after this one uses lookback_days.
+first_run_lookback_days = 90
 
 # Maximum items fetched per source per run. A guard against a source
 # suddenly returning thousands of results, not a quality setting.
@@ -17,7 +31,14 @@ max_items_per_source = 200
 
 # Items scoring at or above this go in the digest. Nothing above it means
 # no email is sent at all.
-digest_threshold = 8.0
+#
+# 5.0 is calibrated against observed scores, not chosen for neatness. One
+# broad (tier_c) term in a title scores about 6-7 after source weighting,
+# so a single on-topic title clears it and a single body mention does not.
+# The best real hit on 21 Sep scored 5.67 ("A Sociotechnical Review of
+# Algorithms in Health Systems"). The original 8.0 was unreachable: nothing
+# in 818 items over 90 days scored above 8 except one paper at 8.47.
+digest_threshold = 5.0
 
 # Most items in the digest. The rest are stored and scored, just not sent.
 digest_max_items = 25
@@ -257,5 +278,11 @@ diminishing = 0.6
 
 # Recency. An item loses this fraction of its score per day of age, to a
 # floor. Fresh items win ties, but a strong old item still surfaces.
-decay_per_day = 0.08
-decay_floor   = 0.5
+#
+# 3%/day, floored at 60%. The original 8%/day halved a week-old paper,
+# which is wrong for this material: a preprint on clinical AI governance is
+# no less worth reading seven days after it appeared. Tested against the
+# real 7-day set — decay changes the ORDER of what matched but never the
+# COUNT, so this is about ranking, not about finding more.
+decay_per_day = 0.03
+decay_floor   = 0.6

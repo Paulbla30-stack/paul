@@ -148,6 +148,31 @@ def proximity_match(tokens: list[str], needles: list[str], window: int) -> bool:
     return False
 
 
+def _dedupe(matchers: list) -> list:
+    """Collapse proximity keywords that are the same matcher in disguise.
+
+    Under proximity matching, common words are dropped and order does not
+    matter, so "healthcare AI" and "AI in healthcare" reduce to exactly the
+    same test: {ai, healthcare} within the window. Left in, both fire on the
+    same text and the item scores twice for saying one thing — enough to
+    push a passing body mention over the digest threshold.
+
+    Phrase keywords are never collapsed: "AI safety case" and "clinical
+    safety case" are genuinely different phrases.
+    """
+    seen, out = set(), []
+    for m in matchers:
+        if m.mode != "proximity":
+            out.append(m)
+            continue
+        fingerprint = frozenset(m.needles)
+        if fingerprint in seen:
+            continue
+        seen.add(fingerprint)
+        out.append(m)
+    return out
+
+
 class _Matcher:
     """One keyword, matched either as an exact phrase or by proximity."""
 
@@ -182,10 +207,9 @@ class Scorer:
             "c": kw.get("tier_c_match", "proximity"),
         }
         self.modes = modes
-        self.tiers = {
-            t: [_Matcher(k, modes[t], window) for k in kw[f"tier_{t}"]]
-            for t in ("a", "b", "c")
-        }
+        self.tiers = {t: _dedupe(
+            [_Matcher(k, modes[t], window) for k in kw[f"tier_{t}"]])
+            for t in ("a", "b", "c")}
         self.negatives = [(k, _pattern(k)) for k in kw.get("negative", [])]
         self.vetoes = [(k, _pattern(k)) for k in kw.get("veto", [])]
         self.negative_penalty = float(kw.get("negative_penalty", 0.0))
