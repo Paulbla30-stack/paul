@@ -390,6 +390,12 @@ class HeadlessRunner:
                         # read. A profile its subject cannot see is a rumour
                         # with his name on it.
                         self._send(200, runner.agent.operator.state())
+                    elif path == "/vitals":
+                        # The Floor Test's nine, for him. Deliberately not in
+                        # the model's context: an agent that could see it had
+                        # never disagreed with him would manufacture a
+                        # disagreement. Signals, never targets.
+                        self._send(200, runner.agent.vitals.read())
                     elif path == "/schedule":
                         # The shape of his week, what collides, and where the
                         # gaps in what is written down are.
@@ -555,6 +561,29 @@ class HeadlessRunner:
                             return self._send(409, {"refused": str(why)})
                     runner._write_status_file()
                     self._send(200, {"profile": runner.agent.operator.state()})
+                elif path == "/vitals/declare":
+                    try:
+                        payload = json.loads(body or "{}")
+                    except ValueError:
+                        return self._send(400, {"error": "body must be JSON"})
+                    if not isinstance(payload, dict):
+                        return self._send(400, {"error": "JSON object required"})
+                    from jarvis.agent import vitals as _v
+                    with runner._lock:
+                        runner.agent.note_operator("vitals")
+                        got = runner.agent.vitals.declare(
+                            str(payload.get("kind") or ""),
+                            str(payload.get("what") or ""),
+                            str(payload.get("detail") or ""))
+                    if got is None:
+                        return self._send(409, {
+                            "error": ("kind must be one of "
+                                      + ", ".join(_v.DECLARED)
+                                      + ", and what cannot be empty"),
+                            "refused": True})
+                    runner._write_status_file()
+                    self._send(200, {"declared": got,
+                                     "vitals": runner.agent.vitals.summary()})
                 elif path in ("/schedule/add", "/schedule/confirm",
                               "/schedule/cancel", "/schedule/move"):
                     try:

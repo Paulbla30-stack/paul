@@ -102,8 +102,12 @@ STATES = ("live", "dormant", "superseded")
 # the commitments for the same reason, and because an appointment is only
 # half an entry -- the reminder that goes with it is a commitment, and the
 # two have to survive together or the calendar comes back without its voice.
+# "vital" is what only the operator can say about the working relationship --
+# whether something the agent said changed his mind, and what he makes of it.
+# It is operator-sourced by construction: an agent scoring its own influence
+# over the person it works for is writing the one number it would flatter.
 KINDS = ("note", "fact", "upload", "goal", "operator", "proposal", "verdict",
-         "commitment", "appointment")
+         "commitment", "appointment", "vital")
 SOURCES = ("brain", "operator", "system", "review", "machine")
 
 DEFAULT_PATH = "/var/lib/jarvis/memory.db"

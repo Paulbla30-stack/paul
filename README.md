@@ -54,6 +54,12 @@ jarvis/
   authority. A held message is not a delivered one, a moment missed while
   nothing was running says so, and a month of downtime is one message and a
   count rather than thirty. See `jarvis/agent/diary.py`
+- **The Floor Test's nine vitals**: the estate's own instrument, turned on this
+  deployment. Two of the nine name the two failures that actually happened
+  here and none were computed. Built as counters now so a baseline exists the
+  day it enters service; every reading says whether it means anything yet, and
+  the agent is never shown them — signals, never targets. See
+  `jarvis/agent/vitals.py`
 - **Bearing**: everything else asks whether a thing is true; this asks what it
   costs to say it to somebody. The distinction is plain (about the world)
   against pointed (aimed at a person) — identical information, and the bill
@@ -476,6 +482,53 @@ assumed, and it says so) and a bare day (all day, and it says so). `GET
 /schedule` returns the week, the clashes and what he is in now; `GET
 /schedule/free?day=` the gaps; `POST /schedule/add`, `/confirm`, `/cancel` and
 `/move` are the rest. Moving one takes its reminder with it.
+
+## The Floor Test's nine vitals
+
+`docs/jarvis-design-take.md` maps this platform onto the Heartbeat Framework's
+eight stations and reaches an uncomfortable conclusion about station 5. Of the
+nine vitals the Floor Test captures, **two are the exact names of the two
+things that went wrong here**, and not one of the nine was instrumented:
+
+> **Alert positive-predictive value** — of the findings it raises, how many are
+> real. It was low. Of five scan warnings, one was a false positive from
+> reading `conf.all` alone and one asserted Secure Boot from a variable's
+> existence. Nobody was computing it.
+>
+> **Workaround census** — times the agent worked around a control. Exactly one
+> known, and it took a human reading the journal to find it.
+
+`vitals.py` is the counters. The doc's own instruction was the design brief:
+*build the counters now so the baseline can be captured the day it enters
+service; read them after that day, not before.*
+
+**Signals, never targets** — the Character Pathway's rule about the nine, with
+a specific consequence here: **the agent is never told its own vitals.** One
+that could read *"you have never disagreed with your operator"* would
+manufacture a disagreement, and the number would stop measuring anything that
+same afternoon. They are computed for the operator and do not enter the
+model's context. Same asymmetry as the ledger, for the same reason — and there
+is a test asserting the integration does not exist.
+
+**A null reading is not a good reading.** The doc records an earlier draft
+getting the double-zero check wrong, and the correction is the discipline:
+zero overrides and zero disagreements is the alarm reading *when an operator
+is relying on a system and never contradicting it.* Where he is building the
+thing rather than relying on it, the same two zeroes mean nothing. So every
+vital carries whether its reading is meaningful yet, and an unmeaningful one
+is reported **unread** rather than healthy. On a fresh box, seven of the nine
+are unread and say why.
+
+**What only the operator can say, the operator says.** Two of the nine cannot
+be derived from any record: whether something the agent said changed his mind,
+and what he makes of it. The agent must not infer either — one scoring its own
+influence over the person it works for is writing the number it has every
+reason to flatter, which `operator.py` already forbids in the general case. He
+declares them; their emptiness is a finding rather than a gap.
+
+`GET /vitals` for the nine, `POST /vitals/declare` for the two he owns
+(`moved`, `override`, `pulse`). The trust pulse is three questions, and they
+stay questions rather than becoming a score.
 
 ## Bearing: what it costs to be right
 

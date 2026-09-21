@@ -212,6 +212,13 @@ class AgentCore:
         # answer that. See bearing.py.
         from jarvis.agent import bearing as _bearing
         self.bearing = _bearing.build_bearing(config)
+        # The Floor Test's nine, which this deployment has never computed --
+        # two of them being the exact names of the two things that went wrong
+        # here. Built now so a baseline exists the day it enters service, and
+        # read after that day, not before. The model is never shown them:
+        # signals, never targets. See vitals.py.
+        from jarvis.agent import vitals as _vitals
+        self.vitals = _vitals.build_vitals(self, config)
         # Quiet hours are a guess at when he is unavailable; the calendar is
         # a statement of it. The channel holds the agent's own notices while
         # he is sitting in something, and never the diary's.
@@ -1280,6 +1287,7 @@ class AgentCore:
             # Whether what the agent remembers exists anywhere but here.
             "diary": self.diary.summary(),
             "schedule": self.schedule.summary(),
+            "vitals": self.vitals.summary(),
             "memory_backup": (self.memory_backup.status()
                               if getattr(self, "memory_backup", None) else
                               {"enabled": False, "reason": "not configured"}),
