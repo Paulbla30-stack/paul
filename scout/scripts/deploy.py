@@ -90,6 +90,20 @@ def main() -> int:
     s3.put_object(Bucket=bucket, Key=key, Body=payload)
     print(f"uploaded s3://{bucket}/{key}")
 
+    # The HMAC key that signs approval links. CloudFormation cannot create a
+    # SecureString, so it is created here, once, and never printed or logged.
+    ssm = sess.client("ssm", region_name=a.region)
+    param = "/jarvis/scout/approval-key"
+    try:
+        ssm.get_parameter(Name=param, WithDecryption=False)
+        print(f"approval key present at {param}")
+    except ssm.exceptions.ParameterNotFound:
+        import secrets
+        ssm.put_parameter(Name=param, Value=secrets.token_urlsafe(48),
+                          Type="SecureString", Overwrite=False,
+                          Description="HMAC key signing jarvis-scout approval links")
+        print(f"created approval key at {param} (SecureString, 48 bytes, not shown)")
+
     tpl = open(os.path.join(ROOT, "template.yaml")).read()
     tpl = tpl.replace("CodeUri: ./", f"CodeUri: s3://{bucket}/{key}")
 

@@ -14,6 +14,13 @@ Parameters:
     Type: String
     Default: '7'
     Description: Local hour (Europe/London) to send the digest.
+  ApprovalSecretName:
+    Type: String
+    Default: /jarvis/scout/approval-key
+    Description: >
+      SSM SecureString holding the HMAC key that signs approval links.
+      Created by scripts/deploy.py, not by this template: CloudFormation
+      cannot create a SecureString parameter.
   Enabled:
     Type: String
     Default: 'true'
@@ -154,6 +161,93 @@ Resources:
         - Key: project
           Value: jarvis-scout
 
+  # ---------------------------------------------------------------------
+  # The accept function.
+  #
+  # A Function URL Paul opens from the digest. GET renders the draft and is
+  # safe for a mail scanner to prefetch; the decision is a POST from that
+  # page. AuthType NONE is deliberate: the HMAC token in the link is the
+  # authentication, and it is scoped to one proposal, expires, and only
+  # authorises *deciding* — there is no URL anywhere that means "approve".
+  # ---------------------------------------------------------------------
+  ApproveFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: jarvis-scout-approve
+      CodeUri: ./
+      Handler: src/approve_app.handler
+      Description: Shows Paul a draft and takes his decision. Nothing posts without it.
+      Timeout: 15
+      Environment:
+        Variables:
+          SCOUT_TABLE: !Ref ScoutTable
+          SCOUT_APPROVAL_PARAM: !Ref ApprovalSecretName
+      Role: !GetAtt ApproveRole.Arn
+      FunctionUrlConfig:
+        AuthType: NONE
+        InvokeMode: BUFFERED
+      Tags:
+        project: jarvis-scout
+        owner: jarvis
+
+  ApproveRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: jarvis-scout-approve-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: {Service: lambda.amazonaws.com}
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: proposals-and-chain
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:Query
+                  - dynamodb:TransactWriteItems
+                Resource: !GetAtt ScoutTable.Arn
+              # UpdateItem is needed here (the scout itself does not get it)
+              # because a decision changes a proposal's status. It still has
+              # no DeleteItem: a decision is never erased, only superseded.
+        - PolicyName: read-approval-key
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: ssm:GetParameter
+                Resource: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${ApprovalSecretName}'
+              - Effect: Allow
+                Action: kms:Decrypt
+                Resource: '*'
+                Condition:
+                  StringEquals:
+                    kms:ViaService: !Sub 'ssm.${AWS::Region}.amazonaws.com'
+        - PolicyName: own-logs-only
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/jarvis-scout-approve*'
+      Tags:
+        - Key: project
+          Value: jarvis-scout
+
+  ApproveLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /aws/lambda/jarvis-scout-approve
+      RetentionInDays: 90      # decisions matter longer than run logs
+
   ScoutLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
@@ -170,6 +264,9 @@ Outputs:
     Value: !Ref ScoutFunction
   RoleArn:
     Value: !GetAtt ScoutRole.Arn
+  ApproveUrl:
+    Description: Where approval links point. Paul opens this from the digest.
+    Value: !GetAtt ApproveFunctionUrl.FunctionUrl
   VerifyCommand:
     Description: How to verify the hash chain from your own machine.
     Value: !Sub 'python3 scripts/verify_chain.py --table ${ScoutTable} --region ${AWS::Region}'

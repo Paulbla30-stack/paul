@@ -198,8 +198,18 @@ are not rediscovered late:
 
 Paul's decision (21 Sep 2026) is **scout plus drafts he approves one at a
 time**, with disclosure both that the work is his and that the post is
-automated. No autonomous posting. Nothing goes out without him seeing it
-first. That is Stage 2 and has not been started.
+automated. No autonomous posting.
+
+His stated purpose is putting the safety governance framework out for
+review, not advertising consultancy — and that distinction does real work
+against the Terms above. A CC BY 4.0 paper offered for critique is what the
+licence is for; it is not "advertising, marketing or commercial sales
+content". The line to hold is in the drafts themselves: no pitch, no call
+to action, no solicitation. If a draft ever reads like an advert, it is the
+draft that is wrong, not the rule.
+
+The accept function is built (see below). The drafting is Stage 2 and has
+not been started.
 
 ### Reddit
 
@@ -374,6 +384,74 @@ The table is `DeletionPolicy: Retain`. Deleting the stack leaves the chain
 intact, on purpose.
 
 ---
+
+## The accept function
+
+Built, and built **before** the thing it gates — which is the order Paul's
+own framework argues for. *Before the Machine* is instrument zero: the
+document that says when not to deploy. The gate exists; the drafting it
+gates does not yet.
+
+Nothing Jarvis proposes can reach a network without passing through here.
+
+```
+pending ──approve──> approved ──send──> sent
+   │                                      │
+   ├──reject───────> rejected             └──(failure)──> failed
+   └──lapse────────> expired
+```
+
+There is no path from `pending` to `sent` that does not go through
+`approved`, and `approved` is only reachable from a signed POST that Paul
+made. **A proposal nobody decides on expires: silence is not consent.**
+
+### Why GET and POST are separated
+
+This is the part that makes the gate real rather than decorative.
+
+Mail clients and enterprise link scanners fetch URLs found in email to
+check them — Outlook and Gmail both do. If approving were a one-click GET,
+the scanner would approve on Paul's behalf before he ever opened the
+message, and the post would go out on its own.
+
+So **GET renders the draft and changes nothing**; it is safe to prefetch.
+The decision is a **POST** from that page. A test asserts a GET mutates no
+state, because that property is easy to break later without noticing.
+
+### The rest of the design
+
+- **One link per proposal, and it means "decide", not "approve".** There is
+  no URL in any email that posts something. The action comes from the form.
+- **The token is not the decision.** It is HMAC-SHA256 signed, scoped to one
+  proposal, and expires after seven days. But holding a valid token only
+  lets you *ask*: the proposal's status is re-checked by a DynamoDB
+  conditional write, so a forwarded or replayed link cannot decide twice,
+  or decide something already rejected or lapsed.
+- **Paul approves exact text.** The page shows the draft verbatim, not a
+  summary, with the disclosures it contains listed separately.
+- **Every decision is hash-chained, rejections included**, with the draft's
+  sha256. What was proposed, what was decided and when is checkable later
+  by someone who does not trust the writer. If the chain append fails the
+  decision still stands, and the failure is logged as a failure rather than
+  swallowed.
+- **The signing key** is an SSM SecureString at `/jarvis/scout/approval-key`,
+  created by `scripts/deploy.py` because CloudFormation cannot create a
+  SecureString. It is never printed or logged. This is the first secret the
+  project needs.
+- **The approve function has `UpdateItem`; the scout does not.** A decision
+  changes a proposal's status. Neither role has `DeleteItem`: a decision is
+  superseded, never erased.
+- The page is `noindex`, `no-store`, and carries a CSP of
+  `default-src 'none'; form-action 'self'`. It loads nothing external.
+
+### What the digest says
+
+When proposals are waiting, the digest grows an "Awaiting your decision"
+section with the draft and a decide link. The footer changes too: the
+Stage 1 wording says the scout "has not drafted anything", which stops
+being true the moment a proposal exists, so it becomes "has drafted N
+posts and posted nothing". A test enforces both wordings. An email that
+contradicts the body it sits under is worse than no footer.
 
 ## Stage 2
 
