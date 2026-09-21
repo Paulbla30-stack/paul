@@ -345,21 +345,40 @@ def test_first_run_is_detected_from_an_empty_chain():
     os.remove(path)
 
 
-def test_threshold_is_reachable_by_one_on_topic_title():
-    """The original threshold of 8 was unreachable and would have sent nothing.
+def test_threshold_sits_in_the_gap_the_real_sweep_showed():
+    """Calibrated against 722 real items, not against a tidy rule.
 
-    One broad term in a title must clear the bar; one body mention must not.
+    An earlier version of this test asserted that a single body mention
+    must never clear the threshold. The real sweep disproved it: the most
+    on-topic item in 722 — "A Sociotechnical Review of Algorithms in Health
+    Systems" — scored 3.54 on a body match alone, because its title says
+    "Algorithms in Health Systems" rather than anything with "AI" in it.
+    A threshold that excluded it would have been excluding the best thing
+    the scout found.
+
+    What the sweep actually showed is a gap: relevant items landed at
+    3.24 and above, and a band of nine clinical-ML papers with no
+    governance content all landed at 2.16. The threshold belongs in that
+    gap.
     """
-    from datetime import datetime, timezone
+    from datetime import datetime, timedelta, timezone
     s = Scorer(CFG)
     now = datetime(2026, 9, 21, tzinfo=timezone.utc)
     thr = CFG["run"]["digest_threshold"]
-    in_title = s.score(title="A sociotechnical review of healthcare AI",
-                       body="", source_weight=1.2, published=now, now=now)
-    in_body = s.score(title="An unrelated title", body="mentions healthcare AI once",
-                      source_weight=1.2, published=now, now=now)
-    assert in_title.total >= thr, f"{in_title.total} < {thr}: nothing would send"
-    assert in_body.total < thr, f"{in_body.total} >= {thr}: too noisy"
+
+    # The sociotechnical-review case: one broad term, body only, recent.
+    keeper = s.score(title="A sociotechnical review of algorithms in health systems",
+                     body="...deployment of healthcare AI across services...",
+                     source_weight=1.2, published=now, now=now)
+    assert keeper.total >= thr, (
+        f"{keeper.total} < {thr}: this excludes the best item in the sweep")
+
+    # The noise band: the same single body match, but stale, which is what
+    # the nine 2.16 papers were.
+    noise = s.score(title="Multi-horizon prediction of acute kidney injury",
+                    body="...a clinical decision support model...",
+                    source_weight=1.2, published=now - timedelta(days=60), now=now)
+    assert noise.total < thr, f"{noise.total} >= {thr}: the 2.16 band gets in"
 
 
 def test_a_week_old_paper_keeps_most_of_its_score():

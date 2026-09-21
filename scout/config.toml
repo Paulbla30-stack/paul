@@ -32,13 +32,28 @@ max_items_per_source = 200
 # Items scoring at or above this go in the digest. Nothing above it means
 # no email is sent at all.
 #
-# 5.0 is calibrated against observed scores, not chosen for neatness. One
-# broad (tier_c) term in a title scores about 6-7 after source weighting,
-# so a single on-topic title clears it and a single body mention does not.
-# The best real hit on 21 Sep scored 5.67 ("A Sociotechnical Review of
-# Algorithms in Health Systems"). The original 8.0 was unreachable: nothing
-# in 818 items over 90 days scored above 8 except one paper at 8.47.
-digest_threshold = 5.0
+# Calibrated against a real 90-day sweep of 722 items on 21 Sep 2026, by
+# reading what each band actually contained rather than picking a round
+# number. The observed distribution:
+#
+#   6.91  Agent-Based Modeling Framework for Healthcare AI Adoption   relevant
+#   5.40  5 New AI Agent Product Areas - Mental Health, Construction  marginal
+#   3.54  A Sociotechnical Review of Algorithms in Health Systems     very relevant
+#   3.24  Clinical workflows are the real bottleneck for medical AI   relevant
+#   2.70  The molecule is not metadata                                borderline
+#   2.16  x9  kidney injury prediction, head CT, symptom staging      noise
+#
+# The break is between 3.24 and 2.16: everything at 2.16 is clinical ML
+# with no governance content. So 3.0, not 5.0.
+#
+# 8.0 (the original) was unreachable — one item in 722 beat it. 5.0 was
+# worse than wrong: it would have sent the product roundup at 5.40 and
+# MISSED the sociotechnical review at 3.54, which is the most on-topic
+# item in the whole sweep. That is a ranking failure, not a threshold one:
+# the review's title says "Algorithms in Health Systems", so it matched
+# only in the body, and title_multiplier puts weaker title-matches above
+# it. Worth revisiting if the digest keeps burying the good ones.
+digest_threshold = 3.0
 
 # Most items in the digest. The rest are stored and scored, just not sent.
 digest_max_items = 25
