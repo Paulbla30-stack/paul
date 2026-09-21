@@ -315,7 +315,7 @@ a token, because nothing off the box can reach it.
 
 ## The current image
 
-`ami-026c2e8648225fe36` (us-west-2, built from the tree at `e671ebe`, 8GiB
+`ami-085e3acea2b1ff080` (us-west-2, built from the tree at `71516d7`, 8GiB
 encrypted gp3). It carries everything the
 previous image did -- the permission spine, filesystem grounding, durable memory
 with consolidation, ledger-derived self-knowledge, the operator channel, estate
@@ -390,10 +390,10 @@ planner and does not cost a call. A date found in a document he handed over
 is proposed and waits for him; only he makes one stand. The commitments live
 in `memory.db`, so the off-box copy already carries them.
 
-Run it with `terraform apply -var ami_id=ami-026c2e8648225fe36`; `ami_id` has no
+Run it with `terraform apply -var ami_id=ami-085e3acea2b1ff080`; `ami_id` has no
 default on purpose.
 
-The previous image is `ami-0a4be45c20c538ab4`, built from `4b160fa`, kept as
+The previous image is `ami-026c2e8648225fe36`, built from `e671ebe`, kept as
 the rollback. This one has been verified by the self-test inside the Packer
 build and by the same code running on `i-016f9f37fe6ca2ba8`, where it has
 been observed sleeping, waking on a question, reading the real disk figure,
@@ -420,6 +420,19 @@ planner reasoned: *"The next punctuality check in the diary is in 21 seconds,
 which will trigger the operator's notification independently. No further
 action is required this cycle."* It read the register, understood the job was
 not its own, and stood down.
+
+It also carries **the calendar** (`jarvis/agent/schedule.py`), which is the
+diary in spans rather than moments -- and therefore the first thing here that
+can say *two of these collide* and *this is where the gaps are*. Exercised on
+the box: two appointments booked half an hour apart reported their thirty
+minutes of overlap and both stayed standing; the gaps for that day came back
+as 09:00-14:00 and 15:30-18:00, carrying the sentence that is the point of
+the module -- *"these are the gaps in what is written down, which is not the
+same as being free"*. An appointment's reminder fired 1.9 seconds after its
+moment, through the diary, while he was inside another appointment, because a
+reminder he asked for is time-critical and the calendar's hold is only for
+notices the agent raised itself. Cancelling four appointments took all four
+reminders with them.
 
 Two images and two snapshots, which is the whole estate: the current one and
 one rollback. Anything older is deregistered with its snapshot when a new
