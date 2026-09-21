@@ -1,0 +1,175 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  JARVIS scout, Stage 1 — finds and logs public discussions relevant to
+  Paul Blatherwick's work, and emails a daily digest. It never posts
+  anywhere and calls no model.
+
+  Personal to JARVIS. Strictly firewalled from Arkin Engine Ltd: no Arkin
+  code, accounts or data. No access to the heartbeat-memory server. No
+  credentials for any posting account.
+
+Parameters:
+  DigestHour:
+    Type: String
+    Default: '7'
+    Description: Local hour (Europe/London) to send the digest.
+  Enabled:
+    Type: String
+    Default: 'true'
+    AllowedValues: ['true', 'false']
+    Description: Set false to pause the schedule without deleting the stack.
+
+Globals:
+  Function:
+    Runtime: python3.12          # tomllib is stdlib from 3.11; config.toml needs it
+    MemorySize: 512
+    Timeout: 300                 # arXiv backoff alone can take ~45s
+    Architectures: [arm64]       # ~20% cheaper per GB-second than x86_64
+
+Resources:
+
+  # ---------------------------------------------------------------------
+  # Storage. One table holds the hits and the hash chain. On-demand
+  # billing: no hourly cost, nothing to leave running by accident.
+  # ---------------------------------------------------------------------
+  ScoutTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain       # the chain is the record; never auto-delete it
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: jarvis-scout
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: pk
+          AttributeType: S
+        - AttributeName: sk
+          AttributeType: S
+      KeySchema:
+        - AttributeName: pk
+          KeyType: HASH
+        - AttributeName: sk
+          KeyType: RANGE
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+      Tags:
+        - Key: project
+          Value: jarvis-scout
+        - Key: owner
+          Value: jarvis
+
+  # ---------------------------------------------------------------------
+  # The scout itself.
+  # ---------------------------------------------------------------------
+  ScoutFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: jarvis-scout
+      CodeUri: ./
+      Handler: src/app.handler
+      Description: Stage 1 find-and-log. Never posts. Calls no model.
+      Environment:
+        Variables:
+          SCOUT_TABLE: !Ref ScoutTable
+          SCOUT_CONFIG: /var/task/config.toml
+      Role: !GetAtt ScoutRole.Arn
+      Events:
+        Daily:
+          Type: ScheduleV2
+          Properties:
+            Name: jarvis-scout-daily
+            # ScheduleV2 (EventBridge Scheduler) takes a timezone, so 07:00
+            # stays 07:00 through the BST/GMT change. A plain cron rule is
+            # UTC-only and would drift by an hour twice a year.
+            ScheduleExpression: !Sub 'cron(0 ${DigestHour} * * ? *)'
+            ScheduleExpressionTimezone: Europe/London
+            State: !If [ScheduleOn, ENABLED, DISABLED]
+            Description: JARVIS scout daily digest, 07:00 UK.
+      Tags:
+        project: jarvis-scout
+        owner: jarvis
+
+  # ---------------------------------------------------------------------
+  # Least-privilege runtime role.
+  #
+  # The scout can write to its own table and send email as the two
+  # addresses below. It cannot read any other table, reach Secrets Manager,
+  # assume another role, or call Bedrock or any other model service. It has
+  # no network permissions to the heartbeat-memory worker beyond ordinary
+  # public egress, and no credential that would let it authenticate there.
+  # ---------------------------------------------------------------------
+  ScoutRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: jarvis-scout-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: {Service: lambda.amazonaws.com}
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: own-table-only
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:Query
+                  - dynamodb:TransactWriteItems
+                Resource: !GetAtt ScoutTable.Arn
+              # Deliberately absent: DeleteItem and UpdateItem. The scout
+              # appends; it has no reason to be able to rewrite or remove a
+              # chain entry, so it is not given the ability.
+        - PolicyName: send-digest-only
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: ses:SendEmail
+                Resource: '*'
+                Condition:
+                  StringEquals:
+                    ses:FromAddress:
+                      - paulblatherwick@heartbeat-framework.org
+                      - Paulbla30@hotmail.com
+              - Effect: Allow
+                Action: ses:ListEmailIdentities
+                Resource: '*'
+        - PolicyName: own-logs-only
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/jarvis-scout*'
+      Tags:
+        - Key: project
+          Value: jarvis-scout
+
+  ScoutLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /aws/lambda/jarvis-scout
+      RetentionInDays: 30        # logs are not the record; the chain is
+
+Conditions:
+  ScheduleOn: !Equals [!Ref Enabled, 'true']
+
+Outputs:
+  TableName:
+    Value: !Ref ScoutTable
+  FunctionName:
+    Value: !Ref ScoutFunction
+  RoleArn:
+    Value: !GetAtt ScoutRole.Arn
+  VerifyCommand:
+    Description: How to verify the hash chain from your own machine.
+    Value: !Sub 'python3 scripts/verify_chain.py --table ${ScoutTable} --region ${AWS::Region}'
