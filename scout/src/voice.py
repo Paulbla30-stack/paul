@@ -47,6 +47,15 @@ MARKETING = [
     r"\bDM me\b", r"\breach out to me\b",
 ]
 
+# Paul is a sole author. "We published" is a small falsehood that makes the
+# estate sound like an organisation, which is the opposite of what it is.
+# Written by the first clean draft, so it is not hypothetical.
+PLURAL_AUTHOR = [
+    r"\bwe (?:published|wrote|produced|developed|built|created)\b",
+    r"\bour (?:paper|framework|research|work|instrument)\b",
+    r"\bthe team (?:published|wrote|behind)\b",
+]
+
 # Telling people they are wrong. Paul's rule: extend rather than correct.
 CORRECTING = [
     r"\byou(?:'re| are) wrong\b", r"\bthat(?:'s| is) (?:wrong|incorrect|false)\b",
@@ -91,7 +100,8 @@ def _own_dois() -> set[str]:
                         "config.toml")
     try:
         with open(path, "rb") as fh:
-            return {d.lower() for d in tomllib.load(fh)["citations"]["own_dois"]}
+            cfg = tomllib.load(fh)
+            return {r["doi"].lower() for r in cfg["citations"]["records"]}
     except Exception:                                    # noqa: BLE001
         return set()
 
@@ -129,6 +139,7 @@ def check(draft: str, *, links_own_work: bool | None = None,
     for label, pats in (("names Arkin", FORBIDDEN_NAMES),
                         ("makes a claim Paul does not hold", FORBIDDEN_CLAIMS),
                         ("reads as marketing", MARKETING),
+                        ("speaks as a group; Paul is a sole author", PLURAL_AUTHOR),
                         ("corrects rather than extends", CORRECTING)):
         found = _hits(pats, text)
         if found:

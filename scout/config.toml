@@ -109,39 +109,43 @@ bedrock_region = "us-west-2"
 max_drafts_per_run = 3
 
 [citations]
-# The only DOIs a draft may cite as Paul's own work.
+# The estate, as the drafter is allowed to cite it.
 #
-# This list is not documentation, it is a check. On the first real drafting
-# run the model cited "10.5281/zenodo.14263451" and captioned it "This is
-# the author's own paper". That DOI is not his — and it RESOLVES, to a
-# real Zenodo record belonging to someone else. A dead link is obviously
-# broken; a live link to a stranger's work, presented as his own, is a
-# false attribution that looks entirely legitimate and would sit on a
-# permanent public record under his name.
+# This is not documentation, it is the mechanism. On the first real drafting
+# run the model invented "10.5281/zenodo.14263451", captioned it "This is
+# the author's own paper", and that DOI RESOLVES — to a real Zenodo record
+# belonging to somebody else. A dead link is visibly wrong; a live one
+# attributed to Paul reads as a genuine citation for as long as the post
+# exists.
 #
-# A draft citing any DOI not on this list is dropped. Add a record here
-# when one is published; nothing else needs changing.
-own_dois = [
-  "10.5281/zenodo.21243118",  # The 24-Hour Team
-  "10.5281/zenodo.21249771",  # The Character Pathway
-  "10.5281/zenodo.21245205",  # The Long Handover
-  "10.5281/zenodo.21245130",  # The Mixed Shift
-  "10.5281/zenodo.21260388",  # Same Monsters, New Casings
-  "10.5281/zenodo.21264935",  # The Endless Shift
-  "10.5281/zenodo.21279944",  # The Overseer's Bible
-  "10.5281/zenodo.21282804",  # The Second Signature
-  "10.5281/zenodo.21340572",  # The Second Pair Of Hands
-  "10.5281/zenodo.21357450",  # The AI Interaction Risk Screen
-  "10.5281/zenodo.21443120",  # The Cultural Safety Case
-  "10.5281/zenodo.21445040",  # Before the Machine
-  "10.5281/zenodo.21445071",  # The Floor Test
-  "10.5281/zenodo.21455540",  # The Damping Audit
-  "10.5281/zenodo.21515861",  # The Glass Ledger
-  "10.5281/zenodo.21515932",  # After the Machine (AIOP)
-  "10.5281/zenodo.21516401",  # Reading Map
-  "10.5281/zenodo.22045477",  # The Instrument Deck
-  "10.5281/zenodo.22164015",  # The Tenant's Record
-  "10.5281/zenodo.22771015",  # What the Signature Certifies
+# Checking afterwards is not enough, because any model may invent one. So
+# the model no longer writes DOIs at all: it picks a paper by name from
+# this list, the schema constrains the choice to these exact strings, and
+# the code renders the citation. A fabricated DOI is not caught — it is
+# unreachable.
+#
+# Add a record here when one is published. Nothing else needs changing.
+records = [
+  { doi = "10.5281/zenodo.21243118", title = "The 24-Hour Team", about = "day and night run as two teams, and the failures that follow" },
+  { doi = "10.5281/zenodo.21245130", title = "The Mixed Shift", about = "what breaks when part of the team is software" },
+  { doi = "10.5281/zenodo.21245205", title = "The Long Handover", about = "five confessions the earlier papers do not contain" },
+  { doi = "10.5281/zenodo.21249771", title = "The Character Pathway", about = "machine dispositions are made, not found; governing them" },
+  { doi = "10.5281/zenodo.21260388", title = "Same Monsters, New Casings", about = "parallel bestiaries of human and machine failure patterns" },
+  { doi = "10.5281/zenodo.21264935", title = "The Endless Shift", about = "machine temperament as a clinical safety property" },
+  { doi = "10.5281/zenodo.21279944", title = "The Overseer's Bible", about = "what a person told to oversee an AI actually does on a Tuesday" },
+  { doi = "10.5281/zenodo.21282804", title = "The Second Signature", about = "self-written records cannot testify" },
+  { doi = "10.5281/zenodo.21340572", title = "The Second Pair Of Hands", about = "why single-form omnicompetence is impossible in principle" },
+  { doi = "10.5281/zenodo.21357450", title = "The AI Interaction Risk Screen", about = "assessing a person's AI use; displacement versus supplementation" },
+  { doi = "10.5281/zenodo.21443120", title = "The Cultural Safety Case", about = "deployment risk is capability multiplied by culture" },
+  { doi = "10.5281/zenodo.21445040", title = "Before the Machine", about = "ten pre-deployment checks and four red lines; when not to deploy" },
+  { doi = "10.5281/zenodo.21445071", title = "The Floor Test", about = "a 90-day field protocol; baseline, change one thing, read the result" },
+  { doi = "10.5281/zenodo.21455540", title = "The Damping Audit", about = "the discretion layer where staff absorb, correct and escalate" },
+  { doi = "10.5281/zenodo.21515861", title = "The Glass Ledger", about = "a tamper-evident decision journal for AI agents" },
+  { doi = "10.5281/zenodo.21515932", title = "After the Machine", about = "the AI Interaction Outcome Profile; what sustained AI use does to a person" },
+  { doi = "10.5281/zenodo.21516401", title = "Reading Map", about = "the index to the whole estate" },
+  { doi = "10.5281/zenodo.22045477", title = "The Instrument Deck", about = "every worksheet from the estate, in deployment order" },
+  { doi = "10.5281/zenodo.22164015", title = "The Tenant's Record", about = "who the system serves when the system is not yours" },
+  { doi = "10.5281/zenodo.22771015", title = "What the Signature Certifies", about = "four asks for the revision of DCB0129 and DCB0160" },
 ]
 
 [email]

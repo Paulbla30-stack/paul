@@ -544,6 +544,39 @@ prompt asks; this decides.
   network where every poster is an agent, disclosing automation discloses
   nothing; authorship is the conflict-of-interest disclosure that counts.
 
+### Fabrication, and where it stops being mechanisable
+
+The first real draft invented a DOI — `10.5281/zenodo.14263451` — and
+captioned it "This is the author's own paper". That record is not Paul's,
+and it **resolves**: a real Zenodo record belonging to somebody else. A dead
+link is visibly wrong; a live one attributed to him reads as a genuine
+citation for as long as the post exists, archived, under his NMC
+registration.
+
+Checking afterwards was not enough, because any model may invent one. So
+the model no longer writes DOIs at all:
+
+- it picks a paper **by title** from a closed `enum` of the twenty records,
+  so the structured-output constraint itself rejects anything else
+- the code renders the citation from the matching record
+- `voice.py` still drops any draft containing a DOI outside the list, and
+  refuses rather than guesses if the list cannot be read
+
+A fabricated DOI is now unreachable rather than caught.
+
+**Then the fabrication moved.** The next clean draft cited correctly and
+said "The version for social care settings covers record-writing tasks."
+There is no social-care version. The claim is about the paper rather than
+its identifier, and no deterministic check can test it — verifying "does
+this paper contain that" needs someone who has read the paper.
+
+That is the honest boundary of the machine half, and the reason the
+approval gate is a person rather than a stricter rule. Paul reads one
+sentence and knows. The checks handle what is mechanisable — is the DOI
+real, is the disclosure present, is it marketing, does it correct, is he
+speaking as a group when he is a sole author. What remains is exactly what
+a human is for.
+
 ### Posting is one transaction, and it reports the truth
 
 `sender.py` is the only write path in the project, reachable from exactly

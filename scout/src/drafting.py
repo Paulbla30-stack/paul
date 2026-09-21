@@ -117,8 +117,54 @@ the framework adds nothing the thread does not already have; or the only \
 reason to post is visibility. Declining is the normal outcome and costs \
 nothing. A thin post costs his name.
 
-Keep drafts under 1200 characters. Link a DOI rather than the site when \
-citing a record, because a DOI is the citable form."""
+Keep drafts under 1200 characters.
+
+CITATIONS — read this twice
+Do NOT write a DOI, a URL or a link of any kind in the draft. Not one. If \
+the draft should point at one of Paul's papers, name the paper in the text \
+and put its exact title in the `cites` field; the citation is appended for \
+you afterwards, correctly. A DOI you write from memory will be wrong, and a \
+wrong DOI often still resolves — to somebody else's paper — so it reads as \
+a real citation for as long as the post exists. Naming the paper is the \
+only safe way to cite it.
+
+These are the only papers you may cite, and the `cites` field accepts these \
+titles and nothing else:
+
+{CATALOGUE}"""
+
+def _records() -> list[dict]:
+    """The estate, from config.toml. One place, one truth."""
+    import tomllib
+    path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                        "config.toml")
+    with open(path, "rb") as fh:
+        return tomllib.load(fh)["citations"]["records"]
+
+
+def _catalogue(records: list[dict]) -> str:
+    return "\n".join(f"  - {r['title']}: {r['about']}" for r in records)
+
+
+def build_schema(records: list[dict]) -> dict:
+    """The output schema, with `cites` constrained to real paper titles.
+
+    This is the fix for the worst failure a draft can carry. The model does
+    not write DOIs; it picks a paper BY TITLE from a closed list, and the
+    enum means the structured-output constraint itself rejects anything
+    else. The code then renders the citation from the matching record. A
+    fabricated DOI is not caught after the fact — it is unreachable.
+    """
+    schema = json.loads(json.dumps(SCHEMA))
+    schema["properties"]["cites"] = {
+        "type": "string",
+        "enum": [""] + [r["title"] for r in records],
+        "description": ("The TITLE of the one paper this draft points at, "
+                        "exactly as listed, or \"\" for none. Never write a "
+                        "DOI or a URL yourself."),
+    }
+    return schema
+
 
 SCHEMA = {
     "type": "object",
@@ -146,13 +192,27 @@ SCHEMA = {
         },
         "cites": {
             "type": "string",
-            "description": "DOI cited, or empty.",
+            "description": "Paper title cited, or empty. Replaced by build_schema.",
         },
     },
     "required": ["worth_posting", "reason", "draft", "rationale",
                  "disclosures", "cites"],
     "additionalProperties": False,
 }
+
+
+CITATION_TEMPLATE = ("\n\n{title} — https://doi.org/{doi} "
+                     "(disclosure: this is Paul Blatherwick's own paper)")
+
+
+def attach_citation(draft: str, cites: str, records: list[dict]) -> str:
+    """Render the citation from the record, never from the model's text."""
+    if not cites:
+        return draft
+    rec = next((r for r in records if r["title"].lower() == cites.strip().lower()), None)
+    if rec is None:
+        return draft
+    return draft.rstrip() + CITATION_TEMPLATE.format(title=rec["title"], doi=rec["doi"])
 
 
 def _untrusted_block(item: dict) -> str:
@@ -188,7 +248,11 @@ def _untrusted_block(item: dict) -> str:
 
 class Drafter:
     def __init__(self, model: str | None = None, client=None, effort: str = "high",
-                 provider: str | None = None, region: str | None = None):
+                 provider: str | None = None, region: str | None = None,
+                 records: list[dict] | None = None):
+        self.records = records if records is not None else _records()
+        self.schema = build_schema(self.records)
+        self.system = SYSTEM.replace("{CATALOGUE}", _catalogue(self.records))
         self.provider = (provider
                          or os.environ.get("SCOUT_DRAFT_PROVIDER", PROVIDER_ANTHROPIC))
         self.region = region or os.environ.get("AWS_REGION", "us-west-2")
@@ -220,14 +284,14 @@ class Drafter:
         rt = self._client or boto3.client("bedrock-runtime", region_name=self.region)
         tools = [{"toolSpec": {"name": "reply",
                                "description": "Return the drafting decision.",
-                               "inputSchema": {"json": SCHEMA}}}]
+                               "inputSchema": {"json": self.schema}}}]
         cfg = {"tools": tools}
         if not any(m in self.model for m in _NO_FORCED_TOOL):
             cfg["toolChoice"] = {"tool": {"name": "reply"}}
         try:
             r = rt.converse(
                 modelId=self.model,
-                system=[{"text": SYSTEM}],
+                system=[{"text": self.system}],
                 messages=[{"role": "user",
                            "content": [{"text": _untrusted_block(item)}]}],
                 inferenceConfig={"maxTokens": MAX_TOKENS},
@@ -261,11 +325,12 @@ class Drafter:
             response = self.client.messages.create(
                 model=self.model,
                 max_tokens=MAX_TOKENS,
-                system=[{"type": "text", "text": SYSTEM,
+                system=[{"type": "text", "text": self.system,
                          "cache_control": {"type": "ephemeral"}}],
                 thinking={"type": "adaptive"},
                 output_config={"effort": self.effort,
-                               "format": {"type": "json_schema", "schema": SCHEMA}},
+                               "format": {"type": "json_schema",
+                                          "schema": self.schema}},
                 messages=[{"role": "user", "content": _untrusted_block(item)}],
             )
         except anthropic.RateLimitError as e:
@@ -306,6 +371,12 @@ class Drafter:
         if not out.get("worth_posting"):
             out["draft"] = ""
             return out
+
+        # The model names a paper; the code writes the citation. Anything
+        # that looks like a DOI in the model's own text is a fabrication
+        # attempt and voice.check will drop it below.
+        out["draft"] = attach_citation(out.get("draft", ""),
+                                       out.get("cites", ""), self.records)
         result = voice.check(out.get("draft", ""))
         out["voice_ok"] = result.ok
         out["voice_failures"] = result.failures

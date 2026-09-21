@@ -64,6 +64,44 @@ def test_a_plain_on_topic_reply_passes():
         "Agreed - the discretion layer is where most of this lands on a ward.").ok
 
 
+def test_a_fabricated_doi_is_structurally_unreachable():
+    """The real fix: the model never writes a DOI.
+
+    Checking afterwards is not enough, because any model may invent one.
+    The model picks a paper BY TITLE from a closed enum, so the
+    structured-output constraint itself rejects anything else, and the code
+    renders the citation from the matching record.
+    """
+    from drafting import build_schema, _records, attach_citation
+    recs = _records()
+    enum = build_schema(recs)["properties"]["cites"]["enum"]
+    assert len(enum) == len(recs) + 1        # every title, plus ""
+    assert "" in enum
+    assert all(r["title"] in enum for r in recs)
+    # A title the model might invent renders nothing rather than a bad link.
+    assert attach_citation("text", "Record 7 On AI Documentation", recs) == "text"
+    # A real title renders the real DOI.
+    out = attach_citation("text", "The Cultural Safety Case", recs)
+    assert "10.5281/zenodo.21443120" in out
+
+
+def test_the_model_is_told_not_to_write_urls():
+    from drafting import SYSTEM
+    low = SYSTEM.lower()
+    assert "do not write a doi" in low
+    assert "url or a link of any kind" in low
+    assert "{CATALOGUE}" in SYSTEM     # filled per-Drafter from config
+
+
+def test_speaking_as_a_group_is_dropped():
+    """Paul is a sole author; the first clean draft said "We published"."""
+    r = voice.check("We published 'The AI Interaction Risk Screen' for this. "
+                    "This is the author's own paper: "
+                    "https://doi.org/10.5281/zenodo.21357450")
+    assert not r.ok
+    assert any("sole author" in f for f in r.failures)
+
+
 # ------------------------------------------------------------- citations
 def test_a_fabricated_doi_is_dropped():
     """The worst thing a draft can contain, found on the first real run.
@@ -90,9 +128,9 @@ def test_a_real_doi_passes():
 def test_every_real_record_is_accepted():
     import tomllib
     cfg = tomllib.load(open(os.path.join(ROOT, "config.toml"), "rb"))
-    dois = cfg["citations"]["own_dois"]
-    assert len(dois) == 20, f"expected 20 records, config has {len(dois)}"
-    for d in dois:
+    records = cfg["citations"]["records"]
+    assert len(records) == 20, f"expected 20 records, config has {len(records)}"
+    for d in (r["doi"] for r in records):
         r = voice.check(f"Worth reading. This is the author's own paper: "
                         f"https://doi.org/{d}")
         assert r.ok, (d, r.failures)
