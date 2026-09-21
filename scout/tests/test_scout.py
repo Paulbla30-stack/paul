@@ -242,6 +242,27 @@ def test_arxiv_endpoint_is_https():
     assert CFG["sources"]["arxiv"]["endpoint"].startswith("https://")
 
 
+def test_arxiv_prefers_rss_over_the_flaky_api():
+    # RSS is what arXiv publishes for "new submissions" and it is reliable.
+    # The Atom API 406s under load and is fallback only, for wide lookbacks.
+    src = open(os.path.join(ROOT, "src", "sources", "arxiv.py")).read()
+    assert "rss.arxiv.org" in src
+    assert src.index("_from_rss(cat") < src.index("_from_api(cfg")
+
+
+def test_arxiv_drops_revisions_but_keeps_cross_lists():
+    from sources.arxiv import KEEP_ANNOUNCE
+    assert "new" in KEEP_ANNOUNCE and "cross" in KEEP_ANNOUNCE
+    assert "replace" not in KEEP_ANNOUNCE
+
+
+def test_arxiv_abstract_is_extracted_from_the_rss_preamble():
+    from sources.arxiv import _abstract
+    d = "arXiv:2609.21194v1 Announce Type: new  Abstract: The real text here."
+    assert _abstract(d).strip() == "The real text here."
+    assert _abstract("no marker present") == "no marker present"
+
+
 # ----------------------------------------------------------------- moltbook
 def _code_without_docstrings(path: str) -> str:
     """Source with all docstrings removed.

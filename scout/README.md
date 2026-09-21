@@ -150,7 +150,7 @@ title is not enough; two are, and one specific term is.
 | Hacker News | Algolia, keyless | Searched per keyword, relevance-ranked |
 | Moltbook | public REST, keyless | Searched per keyword, **read only** |
 | LessWrong | public GraphQL, keyless | Recent posts swept, filtered locally |
-| arXiv | public Atom API, keyless | `cs.CY`, `cs.AI`, `cs.HC`, swept |
+| arXiv | public RSS, keyless | `cs.CY`, `cs.AI`, `cs.HC` new submissions |
 | medRxiv | public API, keyless | Date range, filtered to 4 categories |
 
 **Stage 1 needs no secrets at all.** Every API above is public and keyless,
@@ -236,13 +236,20 @@ Excluded by the brief. Not implemented, not stubbed.
 Each of these cost real time. They are written down so they do not cost it
 twice.
 
+- **Use arXiv's RSS feed, not the Atom API.** `rss.arxiv.org/rss/<cat>` is
+  what arXiv publishes for "what was announced in this category", and it is
+  reliable. It carries the title, abstract, authors, date and an
+  `announce_type` separating new papers from revisions. The Atom API is
+  fallback only, for lookbacks wider than RSS covers.
+- **arXiv's Atom API throttles with 406, not 429**, and unhelpfully. A
+  request with `max_results=100` and `sortBy=submittedDate` will 406 while a
+  `max_results=1` request to the same host succeeds seconds later. It is not
+  a header problem, not a parameter problem and not a URL-encoding problem —
+  all of those were tested and eliminated. Switching to RSS made the whole
+  question go away; an API failure is now logged and tolerated rather than
+  failing the source.
 - **arXiv must be `https`.** The `http://` form returns HTTP 200 with a
   well-formed but *empty* feed — indistinguishable from "no new papers".
-- **arXiv throttles with 406, not 429.** Under load it answers `406 Not
-  Acceptable` on every request after the first in a batch, then recovers on
-  its own. It is not a header problem and not a parameter problem: the same
-  URL that 406s will return 200 a minute later. The fetcher backs off
-  3→6→12→24s and runs first, before the Hacker News burst.
 - **Hacker News: use `/search`, never `/search_by_date`.** The latter sorts
   chronologically and discards relevance ranking entirely, which returns
   the firehose filtered by date. With `/search_by_date` the top result for
@@ -252,16 +259,13 @@ twice.
 - **LessWrong's GraphQL endpoint times out on a cold first call** and then
   answers in under a second. It gets 2 retries.
 
-### One thing still unproven
+### arXiv: resolved
 
-**arXiv has not been observed succeeding inside a full run from this
-sandbox.** It works in isolation — 12 consecutive requests returned 200 —
-but every full run from here failed it, because this environment shares an
-outbound proxy IP that arXiv had already rate-limited from the testing.
-The code is believed correct and the backoff is generous, but *believed
-correct is not proven*. The first Lambda run, from its own IP making three
-requests a day, will settle it. The digest names failed sources explicitly,
-so a silent arXiv failure cannot hide.
+Earlier notes in this file recorded arXiv as unproven, because every full
+run failed it while isolated requests succeeded. That is fixed, not
+excused: the fetcher now reads the RSS feed, which answered on every
+attempt. A full run of all five sources returned `failed=[]`, with arXiv
+contributing 104 of 155 items — the largest single source.
 
 ---
 

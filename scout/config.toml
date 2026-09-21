@@ -197,6 +197,10 @@ endpoint = "https://export.arxiv.org/api/query"
 categories = ["cs.CY", "cs.AI", "cs.HC"]
 # arXiv asks for no more than one request every three seconds.
 min_interval_s = 3.0
+# How many days the RSS feed is assumed to cover. Beyond this the Atom API
+# is tried as well, since RSS only carries the latest announcement. The API
+# is flaky (see README) and its failure no longer fails the source.
+rss_covers_days = 2
 
 [sources.medrxiv]
 enabled = true
