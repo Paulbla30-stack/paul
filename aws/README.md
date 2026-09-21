@@ -315,7 +315,7 @@ a token, because nothing off the box can reach it.
 
 ## The current image
 
-`ami-0a4be45c20c538ab4` (us-west-2, built from the tree at `4b160fa`, 8GiB
+`ami-026c2e8648225fe36` (us-west-2, built from the tree at `e671ebe`, 8GiB
 encrypted gp3). It carries everything the
 previous image did -- the permission spine, filesystem grounding, durable memory
 with consolidation, ledger-derived self-knowledge, the operator channel, estate
@@ -380,15 +380,46 @@ so it was inferring durations from the gap between entries, which is the
 cycle interval whenever the loop idles. It reported a goal_step as taking 45
 seconds. It is 31ms, 15ms, 24ms and 1.2s for the probes now, measured.
 
-Run it with `terraform apply -var ami_id=ami-0a4be45c20c538ab4`; `ami_id` has no
+And **the diary** (`jarvis/agent/diary.py`), which is the other half of the
+sense of time. Reading a date and keeping it are different jobs: "due 14 Oct"
+was true for one cycle, went into a note, and nothing was ever going to
+happen on the fourteenth. The register holds a thing, a moment and when to
+speak about it, is checked on the idle path beside the backup, and therefore
+fires **while the model is asleep** -- a reminder does not wait on the
+planner and does not cost a call. A date found in a document he handed over
+is proposed and waits for him; only he makes one stand. The commitments live
+in `memory.db`, so the off-box copy already carries them.
+
+Run it with `terraform apply -var ami_id=ami-026c2e8648225fe36`; `ami_id` has no
 default on purpose.
 
-The previous image is `ami-05f270613ee2b64e3`, built from `57c7e1b`, kept as
+The previous image is `ami-0a4be45c20c538ab4`, built from `4b160fa`, kept as
 the rollback. This one has been verified by the self-test inside the Packer
-build and by the same code running on `i-016f9f37fe6ca2ba8`, where
-it has been observed sleeping, waking on a question, reading the real disk
-figure, refusing a lab run until the window was opened, and ruling on its own
-claims against the box.
+build and by the same code running on `i-016f9f37fe6ca2ba8`, where it has
+been observed sleeping, waking on a question, reading the real disk figure,
+refusing a lab run until the window was opened, and ruling on its own claims
+against the box.
+
+The diary was exercised there too, and two of the three things worth knowing
+about it were found that way rather than in a test. A commitment added
+through the API fired 79 seconds after its moment, because the loop stretches
+its wait between cycles to protect the planner's call budget -- a trade that
+is right for thinking and wrong for a reminder; the loop now shortens its
+sleep to the diary's next moment, and the second one went out 1.5 seconds
+late. Asked to read a real bill the agent chose `read_file` on its own, took
+the two dates that had a reason beside them, left the statement period and
+the previous payment alone -- and wrote both proposals under the upload
+folder's path rather than the name of the file, with "by 14 October" where
+"payable by 14 October" was meant. Both fixed. What it does now:
+
+    octopus.txt: payable by 28 October 2026
+    octopus.txt: appointment is on 9 October 2026
+
+The third thing needed no fix. Seeing a commitment two minutes out, the
+planner reasoned: *"The next punctuality check in the diary is in 21 seconds,
+which will trigger the operator's notification independently. No further
+action is required this cycle."* It read the register, understood the job was
+not its own, and stood down.
 
 Two images and two snapshots, which is the whole estate: the current one and
 one rollback. Anything older is deregistered with its snapshot when a new
