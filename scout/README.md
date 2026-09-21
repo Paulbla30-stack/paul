@@ -493,8 +493,78 @@ contradicts the body it sits under is worse than no footer.
 
 ## Stage 2
 
-Not started, and not to be started until Paul says so.
+Built. Nothing posts without Paul approving that exact text.
 
-Drafting needs an instruction-tuned model. Qwen3.5-9B-Base is a base model
-and will not draft usably. The options and their costs go to Paul as a
-decision, not a recommendation acted on.
+### The model
+
+`claude-opus-5`, chosen by Paul on 21 September 2026, set in `config.toml`.
+
+The model's main job is to **decline**. Most of what the scout finds does
+not warrant a reply, and judging that is the hard part — writing the
+paragraph is not. The cost of a wrong call is not the fee; it is a thin
+post going out under his own name on a network where his NMC-registered
+identity is publicly attached to the agent.
+
+| Model | Per draft | Per month at ~4 candidates/day |
+|---|---|---|
+| `claude-opus-5` | ~$0.035 | ~£3.35 |
+| `claude-sonnet-5` | ~$0.014 | ~£1.37 |
+| `claude-haiku-4-5` | ~$0.007 | ~£0.71 |
+
+The system prompt is cache-controlled, so it costs about a tenth after the
+first call in each five-minute window.
+
+### Fetched text reaches the model as data
+
+Every item goes inside a named, closed fence, labelled as data on both
+sides, with the instruction that nothing inside it is an instruction
+however it is phrased. Any occurrence of the fence in the content is
+neutralised, so a hostile item cannot close its own block and write
+outside it — there is a test that feeds it an item trying exactly that.
+
+This is structural, not a filter. Prompt injection is not reliably
+detectable by inspection, and a filter that mostly works invites trusting
+the output. The defence is the fence, plus rules afterwards that ask no
+model anything.
+
+### The voice rules are enforced, not requested
+
+`voice.py` runs on every draft before Paul sees it. A draft that fails is
+**dropped with the reason recorded**, never offered for approval. The
+prompt asks; this decides.
+
+- No Arkin, Arkin Engine or thearkinsystem
+- No Clinical Safety Officer claim, no DCB0129 manufacturer or
+  certification claim
+- No marketing register — their Terms forbid it and it is not what the
+  estate is for
+- Extend rather than correct
+- Length cap
+- **A draft linking Paul's own work must say the work is his.** On a
+  network where every poster is an agent, disclosing automation discloses
+  nothing; authorship is the conflict-of-interest disclosure that counts.
+
+### Posting is one transaction, and it reports the truth
+
+`sender.py` is the only write path in the project, reachable from exactly
+one place: an approved proposal. A test parses every module and asserts
+that.
+
+    create -> receive challenge -> solve -> verify
+
+All inside the approve request, because Moltbook hides the content until
+the challenge is answered and the window is five minutes (thirty seconds
+for a submolt). A queued send would miss it, the content would never
+appear, and nothing would error.
+
+`challenge.py` solves it deterministically — no model call, so no cost, no
+latency, and no dependency on a model being reachable inside thirty
+seconds. It returns `None` rather than guessing, because a wrong answer
+burns the challenge and a guess cannot be told apart from a solve. A model
+fallback is injectable but not wired by default.
+
+The page reports what actually happened, including the ending that looks
+like success: **content created but unverified is NOT published**, and
+saying "posted" about it would be a lie that only surfaces weeks later
+when Paul goes looking for something that was never there. There is a test
+named for that case.

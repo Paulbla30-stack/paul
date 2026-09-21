@@ -34,7 +34,7 @@ from datetime import datetime, timezone
 
 import approval
 from chain import Chain, DynamoChainStore
-from proposals import AlreadyDecided, ProposalStore, PENDING
+from proposals import AlreadyDecided, ProposalStore, PENDING, SENT, FAILED
 
 log = logging.getLogger("jarvis.scout.approve")
 logging.getLogger().setLevel(logging.INFO)
@@ -185,30 +185,87 @@ def handler(event, context):
         return _message(f"Already {existing.status if existing else 'decided'}",
                         "This one was decided already. Nothing has changed.")
 
-    # Record it where it cannot be quietly rewritten, rejections included.
+    # Record the decision itself, rejections included, before anything is sent.
+    _record(table, f"proposal.{action}", decided,
+            {"published": False, "detail": "decision recorded"})
+
+    if action != "approve":
+        return _message("Rejected", "Nothing was posted, and nothing will be.")
+
+    # Send now, while Paul is still here. Moltbook's challenge expires in
+    # five minutes (thirty seconds for a submolt), so a queued send would
+    # miss the window and the content would silently never appear.
+    outcome = _send(decided, table)
+    _record(table, f"proposal.send.{outcome['status']}", decided, outcome)
+    _set_status(store, decided.id,
+                SENT if outcome["published"] else FAILED, outcome)
+
+    if outcome["published"]:
+        link = outcome.get("url") or ""
+        body = ("It is live on Moltbook."
+                + (f" <a href=\"{html.escape(link, quote=True)}\" "
+                   f"rel=\"noopener noreferrer\">See it</a>." if link else ""))
+        return _page("Posted", f"<div class=card><p class=big>Posted</p>"
+                               f"<p class=meta>{body}</p></div>")
+
+    # Everything else. Say what actually happened, including the cases that
+    # look like success: created-but-unverified content is NOT visible.
+    heads = {"rate_limited": "Not posted - rate limited",
+             "created_but_unverified": "Not posted - unverified",
+             "failed": "Not posted"}
+    return _message(heads.get(outcome["status"], "Not posted"),
+                    outcome["detail"] + " Your approval is recorded; nothing "
+                                        "will retry on its own.")
+
+
+def _send(p, table: str) -> dict:
+    """Run the one write path in this project."""
+    try:
+        from sender import MoltbookSender, key_from_ssm
+        key = key_from_ssm(os.environ.get(
+            "SCOUT_MOLTBOOK_PARAM", "/jarvis/scout/moltbook-api-key"))
+        sender = MoltbookSender(key)
+        return sender.send(
+            kind=p.kind,
+            target_id=(p.source_item or {}).get("external_id"),
+            submolt=(p.source_item or {}).get("submolt") or "general",
+            title=p.target_title,
+            body=p.draft)
+    except Exception as e:                                   # noqa: BLE001
+        log.exception("send failed")
+        return {"status": "failed", "published": False,
+                "detail": f"the send itself failed ({type(e).__name__}); "
+                          f"nothing was posted"}
+
+
+def _set_status(store, proposal_id: str, status: str, outcome: dict) -> None:
+    try:
+        store.table.update_item(
+            Key={"pk": f"PROPOSAL#{proposal_id}", "sk": "PROPOSAL"},
+            UpdateExpression="SET #s = :s, send_detail = :d, posted_url = :u",
+            ExpressionAttributeNames={"#s": "status"},
+            ExpressionAttributeValues={
+                ":s": status, ":d": outcome.get("detail", "")[:500],
+                ":u": outcome.get("url", "") or ""})
+    except Exception as e:                                   # noqa: BLE001
+        log.error("could not record send status: %s", e)
+
+
+def _record(table: str, event: str, p, outcome: dict) -> None:
+    """Chain it. A failure to record is logged as a failure, never swallowed."""
+    import hashlib
     try:
         Chain(DynamoChainStore(table)).append({
-            "event": f"proposal.{action}",
-            "proposal_id": decided.id,
-            "network": decided.network,
-            "target_url": decided.target_url,
-            "draft_sha256": __import__("hashlib").sha256(
-                decided.draft.encode("utf-8")).hexdigest(),
-            "decided_by": decided.decided_by,
-            "decided_at": decided.decided_at,
+            "event": event,
+            "proposal_id": p.id,
+            "network": p.network,
+            "target_url": p.target_url,
+            "draft_sha256": hashlib.sha256(p.draft.encode("utf-8")).hexdigest(),
+            "decided_by": p.decided_by,
+            "decided_at": p.decided_at,
+            "published": outcome.get("published", False),
+            "posted_url": outcome.get("url", "") or "",
+            "detail": outcome.get("detail", "")[:300],
         })
     except Exception as e:                                   # noqa: BLE001
-        # The decision stands; the record of it failed. Say so rather than
-        # pretending, and leave it in the log for the next run to notice.
-        log.error("decision recorded in table but NOT chained: %s", e)
-
-    if action == "approve":
-        # Deliberately vague about timing. Moltbook returns a timed challenge
-        # on creation (5 minutes, 30 seconds for submolts) which must be
-        # solved before the content is visible, so the send cannot be
-        # deferred to the next scheduled run. See README "Posting is a timed
-        # two-step". Until Stage 2 exists, nothing sends at all.
-        return _message(
-            "Approved",
-            "Recorded. Nothing has been posted yet: the sender is not built.")
-    return _message("Rejected", "Nothing was posted, and nothing will be.")
+        log.error("outcome NOT chained: %s", e)

@@ -176,12 +176,16 @@ Resources:
       FunctionName: jarvis-scout-approve
       CodeUri: ./
       Handler: src/approve_app.handler
-      Description: Shows Paul a draft and takes his decision. Nothing posts without it.
-      Timeout: 15
+      Description: Shows Paul a draft, takes his decision, and posts on approval.
+      # Long enough for create -> solve -> verify inside Moltbook's five
+      # minute challenge window, with room for a retry. Not longer: Paul is
+      # waiting on this page for the real answer.
+      Timeout: 60
       Environment:
         Variables:
           SCOUT_TABLE: !Ref ScoutTable
           SCOUT_APPROVAL_PARAM: !Ref ApprovalSecretName
+          SCOUT_MOLTBOOK_PARAM: /jarvis/scout/moltbook-api-key
       Role: !GetAtt ApproveRole.Arn
       FunctionUrlConfig:
         AuthType: NONE
@@ -215,13 +219,18 @@ Resources:
               # UpdateItem is needed here (the scout itself does not get it)
               # because a decision changes a proposal's status. It still has
               # no DeleteItem: a decision is never erased, only superseded.
-        - PolicyName: read-approval-key
+        - PolicyName: read-approval-key-and-moltbook-key
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
               - Effect: Allow
                 Action: ssm:GetParameter
-                Resource: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${ApprovalSecretName}'
+                # The link-signing key, and the Moltbook key that lets an
+                # approved draft actually post. Only this function gets the
+                # second one: the scout has no write path and no need for it.
+                Resource:
+                  - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${ApprovalSecretName}'
+                  - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/jarvis/scout/moltbook-api-key'
               - Effect: Allow
                 Action: kms:Decrypt
                 Resource: '*'

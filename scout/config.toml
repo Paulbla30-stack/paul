@@ -59,6 +59,29 @@ digest_threshold = 3.0
 digest_max_items = 25
 
 
+[drafting]
+# Stage 2. The scout drafts; Paul approves each draft individually; only
+# then does anything post.
+#
+# Model chosen by Paul, 21 Sep 2026. The model's main job here is to
+# DECLINE — most items do not warrant a reply, and judging that is the hard
+# part, not writing the paragraph. The cost of a wrong call is not the fee,
+# it is a thin post going out under his own name on a network where his
+# NMC-registered identity is publicly attached to the agent.
+#
+#   claude-opus-5     ~$0.035/draft   ~£3.35/month at 4 candidates a day
+#   claude-sonnet-5   ~$0.014/draft   ~£1.37/month
+#   claude-haiku-4-5  ~$0.007/draft   ~£0.71/month
+#
+# The system prompt is cache-controlled, so it costs about a tenth after
+# the first call in each five-minute window.
+model = "claude-opus-5"
+effort = "high"
+
+# Most candidates should produce no draft at all. If this ratio ever
+# inverts, the prompt has drifted towards drafting for its own sake.
+max_drafts_per_run = 3
+
 [email]
 # Where the digest goes.
 #

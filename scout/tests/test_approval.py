@@ -282,6 +282,149 @@ def test_digest_link_says_decide_not_approve():
     assert "Review and decide" in html_body
 
 
+
+# ------------------------------------------------------------- the sending
+import contextlib
+
+
+@contextlib.contextmanager
+def _stubbed(app, **attrs):
+    """Patch module attributes and put them back.
+
+    Without the restore, a stub set by one test leaks into every test that
+    sorts after it — which is exactly how an earlier version of this file
+    made the send-failure test pass by accident.
+    """
+    saved = {k: getattr(app, k) for k in attrs}
+    for k, v in attrs.items():
+        setattr(app, k, v)
+    try:
+        yield app
+    finally:
+        for k, v in saved.items():
+            setattr(app, k, v)
+
+
+def _approve_with_outcome(outcome):
+    """Approve a proposal with the send stubbed to a given outcome."""
+    p = _proposal()
+    store = _FakeStore(p)
+    store.table = type("T", (), {"update_item": lambda self, **kw: None})()
+    app = _handler_with(store)
+    with _stubbed(app,
+                  _send=lambda proposal, table: outcome,
+                  _record=lambda *a, **k: None,
+                  _set_status=lambda *a, **k: None):
+        r = app.handler(_event("POST", approval.mint(SECRET, p.id), "approve"), None)
+    return r, p
+
+
+def test_a_published_send_says_posted():
+    r, _ = _approve_with_outcome({
+        "status": "published", "published": True,
+        "detail": "published (challenge solved by solver)",
+        "url": "https://www.moltbook.com/post/abc"})
+    assert "Posted" in r["body"]
+    assert "moltbook.com/post/abc" in r["body"]
+
+
+def test_created_but_unverified_is_never_reported_as_posted():
+    """The failure mode worth a test of its own.
+
+    Moltbook accepts the content, returns a challenge, and hides the content
+    until it is answered. If the answer never lands, the content does not
+    exist for anyone. Reporting that as "posted" would only surface weeks
+    later when Paul goes looking for something that was never there.
+    """
+    r, _ = _approve_with_outcome({
+        "status": "created_but_unverified", "published": False,
+        "detail": "created, but the challenge could not be solved, so it is "
+                  "not visible. It expires unposted."})
+    body = r["body"]
+    assert "Not posted" in body
+    assert "not visible" in body
+    # The word "Posted" must not appear as the headline.
+    assert "<p class=big>Posted</p>" not in body
+
+
+def test_rate_limited_is_reported_as_not_posted():
+    r, _ = _approve_with_outcome({
+        "status": "rate_limited", "published": False,
+        "detail": "Moltbook rate limit: one post every 30 minutes."})
+    assert "rate limited" in r["body"].lower()
+    assert "<p class=big>Posted</p>" not in r["body"]
+
+
+def test_a_send_that_throws_does_not_report_success():
+    """The real _send must swallow nothing into a false success.
+
+    The sender is stubbed to raise rather than left to reach AWS — a unit
+    test that can touch the live network is not a unit test.
+    """
+    p = _proposal()
+    store = _FakeStore(p)
+    store.table = type("T", (), {"update_item": lambda self, **kw: None})()
+    app = _handler_with(store)
+
+    def boom(proposal, table):
+        raise RuntimeError("ssm unreachable")
+
+    with _stubbed(app, _record=lambda *a, **k: None,
+                  _set_status=lambda *a, **k: None):
+        # Exercise the real _send's own catch-all by breaking what it calls.
+        import sender
+        saved = sender.key_from_ssm
+        sender.key_from_ssm = lambda *a, **k: (_ for _ in ()).throw(
+            RuntimeError("ssm unreachable"))
+        try:
+            r = app.handler(
+                _event("POST", approval.mint(SECRET, p.id), "approve"), None)
+        finally:
+            sender.key_from_ssm = saved
+
+    assert "<p class=big>Posted</p>" not in r["body"]
+    assert "nothing was posted" in r["body"]
+
+
+def test_rejecting_still_sends_nothing():
+    p = _proposal()
+    store = _FakeStore(p)
+    app = _handler_with(store)
+    called = []
+    with _stubbed(app,
+                  _send=lambda *a, **k: called.append(1) or {
+                      "status": "published", "published": True, "detail": ""},
+                  _record=lambda *a, **k: None,
+                  _set_status=lambda *a, **k: None):
+        r = app.handler(_event("POST", approval.mint(SECRET, p.id), "reject"), None)
+    assert called == [], "rejecting must not reach the sender"
+    assert "Rejected" in r["body"]
+
+
+def test_only_the_sender_can_write_to_moltbook():
+    """One write path in the project, and the scout cannot reach it.
+
+    Checked against the parsed code rather than the raw text, so prose in a
+    docstring explaining the write path is not mistaken for one.
+    """
+    import ast
+    import glob
+    src_dir = os.path.join(ROOT, "src")
+    writers = []
+    for f in sorted(glob.glob(os.path.join(src_dir, "**", "*.py"), recursive=True)):
+        tree = ast.parse(open(f).read())
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef)):
+                if (node.body and isinstance(node.body[0], ast.Expr)
+                        and isinstance(node.body[0].value, ast.Constant)):
+                    node.body[0] = ast.Pass()
+        code = ast.unparse(tree)
+        if 'method="POST"' in code or "'POST'" in code or '"POST"' in code:
+            if "moltbook.com" in code or "BASE" in code:
+                writers.append(os.path.basename(f))
+    assert writers == ["sender.py"], f"write paths found in: {writers}"
+
+
 if __name__ == "__main__":
     fns = [(n, f) for n, f in sorted(globals().items()) if n.startswith("test_")]
     bad = 0
