@@ -29,9 +29,14 @@
   button.btn, .file-btn { background:var(--accent); color:#04101a; border:0; border-radius:8px; padding:9px 14px; font-weight:600; cursor:pointer; }
   button.ghost { background:transparent; color:var(--accent); border:1px solid var(--line); }
   button:disabled { opacity:.5; }
-  input, textarea { width:100%; background:var(--bg); color:var(--text); border:1px solid var(--line); border-radius:8px; padding:10px; font-size:15px; }
+  input, textarea, select { width:100%; background:var(--bg); color:var(--text); border:1px solid var(--line); border-radius:8px; padding:10px; font-size:15px; }
   textarea { resize:none; }
+  select { min-height:44px; }
   .row { display:flex; gap:8px; align-items:center; }
+  /* Two fields side by side fit a tablet and not a 360px phone. Wrapping is
+     what keeps the page from scrolling sideways, which is the classic break. */
+  .row.wrap { flex-wrap:wrap; }
+  .row.wrap > input, .row.wrap > select { flex:1; min-width:150px; }
   ul { list-style:none; padding:0; margin:0; }
   li { padding:8px 0; border-top:1px solid var(--line); }
   li:first-child { border-top:0; }
@@ -86,6 +91,7 @@
   nav::-webkit-scrollbar { display:none; }
   nav button { flex:1 0 auto; white-space:nowrap; padding:0 16px; min-height:48px;
                scroll-snap-align:center; }
+  select { min-height:48px; }
   button.btn, .file-btn, button.ghost { min-height:44px; display:inline-flex;
                align-items:center; justify-content:center; }
   header button.ghost { min-height:40px; padding:8px 12px; }
@@ -243,11 +249,11 @@
 
     <div class="card span-2">
       <h2>Add one</h2>
-      <div class="row">
+      <div class="row wrap">
         <input id="diaryWhat" placeholder="What to remind you about" style="flex:2" />
-        <input id="diaryWhen" placeholder="14 Oct 9am · tomorrow · friday 2pm · in 3 days" style="flex:2" />
+        <input id="diaryWhen" placeholder="14 Oct 9am · tomorrow · in 3 days" style="flex:2" />
       </div>
-      <div class="row" style="margin-top:8px">
+      <div class="row wrap" style="margin-top:8px">
         <select id="diaryRepeat">
           <option value="once">once</option>
           <option value="daily">every day</option>
