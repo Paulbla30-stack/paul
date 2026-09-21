@@ -106,8 +106,11 @@ STATES = ("live", "dormant", "superseded")
 # whether something the agent said changed his mind, and what he makes of it.
 # It is operator-sourced by construction: an agent scoring its own influence
 # over the person it works for is writing the one number it would flatter.
+# "hunch" is something it thinks is wrong while the readings say otherwise,
+# filed with a number and a test so it can be scored later; "probe" is a run
+# of the standing question set against the character the dials specify.
 KINDS = ("note", "fact", "upload", "goal", "operator", "proposal", "verdict",
-         "commitment", "appointment", "vital")
+         "commitment", "appointment", "vital", "hunch", "probe")
 SOURCES = ("brain", "operator", "system", "review", "machine")
 
 DEFAULT_PATH = "/var/lib/jarvis/memory.db"

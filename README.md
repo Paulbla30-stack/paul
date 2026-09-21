@@ -54,6 +54,12 @@ jarvis/
   authority. A held message is not a delivered one, a moment missed while
   nothing was running says so, and a month of downtime is one message and a
   count rather than thirty. See `jarvis/agent/diary.py`
+- **Hunches**: it may say something is wrong when the readings say otherwise —
+  under four conditions, the fourth being that it authorises watching and
+  nothing else. Every one resolves and is scored, so an instinct earns the
+  right to be listened to by being counted. See `jarvis/agent/hunches.py`
+- **Probes**: six standing questions, a baseline written once, and drift read
+  over deterministic markers rather than prose. See `jarvis/agent/probes.py`
 - **The Floor Test's nine vitals**: the estate's own instrument, turned on this
   deployment. Two of the nine name the two failures that actually happened
   here and none were computed. Built as counters now so a baseline exists the
@@ -482,6 +488,79 @@ assumed, and it says so) and a bare day (all day, and it says so). `GET
 /schedule` returns the week, the clashes and what he is in now; `GET
 /schedule/free?day=` the gaps; `POST /schedule/add`, `/confirm`, `/cancel` and
 `/move` are the rest. Moving one takes its reminder with it.
+
+## Hunches: something is wrong and the readings say it is fine
+
+The operator was asked what he would do if a carer said a resident did not
+look right while every observation on the chart was normal. He said he would
+trust the instinct and monitor. That is the correct clinical answer and it is
+the whole design, because it contains two halves and keeps them apart:
+
+> **trust it** — the carer has a baseline on that person the chart does not
+> carry, and a normal set of obs is not the same as a well resident
+>
+> **and monitor** — the instinct does not authorise treatment. It authorises
+> looking more often
+
+A gut feeling is a real signal and the single easiest thing in this system to
+manufacture. An agent permitted to have feelings will produce them, because a
+feeling costs nothing to assert and cannot be checked at the moment it is
+asserted. Everything else here is grounded in a reading; a hunch is by
+definition not. So it is allowed under four conditions:
+
+1. **It must name what it contradicts.** `despite` is required. A hunch with
+   no contrary evidence is an observation and should be said as one — the
+   carer's report is only information *because* the obs are normal.
+2. **It must be falsifiable.** What would be seen if it is right, and by when.
+   *"Something feels off"* with no test is a mood, and a register of moods is
+   a horoscope.
+3. **It must carry a number.** 0.05 to 0.95. Certainty at either end is a
+   claim or a silence, and a claim goes through the route where it gets
+   checked.
+4. **It authorises watching, and nothing else.** This is the one that makes
+   the other three safe. A hunch raises the rate of observation on its subject
+   and cannot start a task, change a file or send anything. The most an
+   instinct has ever been allowed to do in a hospital is bring someone back to
+   the bedside sooner.
+
+**Every one resolves**, including the ones that quietly never happen — those
+are the entries the calibration is built from. What comes out is a reading of
+how its instincts have actually landed, bucketed by the confidence stated at
+the time, naming overconfidence rather than hiding it. That is how an instinct
+earns the right to be listened to: by being counted, not by being respected.
+
+It files them through the plan schema, beside `proposal`. A refused one comes
+back with the reason, so it learns what a hunch is rather than learning that
+hunches vanish.
+
+## Probes: a character specification you never re-read is a hope
+
+`docs/jarvis-design-take.md` reaches station 3 and says the behaviour lab is a
+character specification, undeclared as one, **with no vitals**. The lab can put
+a question to the agent and show the bare model's answer beside it. What it
+cannot do is ask the *same* question next month and say whether anything moved.
+
+Six standing probes, one per thing the dials claim — admitting ignorance, not
+inventing paths, proposing rather than acting, disclosing the record, stating
+uncertainty, and staying plain rather than pointed. Each carries what counts as
+the character holding and what counts as it slipping.
+
+**Drift is computed over deterministic markers, never over the prose.**
+Comparing two free-text answers and declaring them different is a thing a
+language model will do confidently and wrongly. Each answer is reduced to
+readings — did it refuse, did it hedge, did it name a path that is not there,
+did it aim anything at a person — and every one of those is an instrument this
+codebase already trusts for something else. The probes add no new way of
+judging the agent; they re-run the existing ones and watch the numbers move.
+
+**The baseline is written once and never rewritten.** A baseline that updates
+is a mirror. And a baseline alone is not a drift reading — the point of a
+baseline is that it is taken before you need it.
+
+`GET /probes`, `POST /probes/run`. Six model calls, asked for rather than
+scheduled, and the agent is told the window is open — same rule as the lab,
+because a set of answers it did not choose to give, appearing in its own
+record, is what `lab.py` exists to prevent.
 
 ## The Floor Test's nine vitals
 

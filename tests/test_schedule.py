@@ -172,6 +172,15 @@ class TestHoldingOne(Base):
         self.assertEqual(self.cal.standing(), [])
         self.assertEqual(self.agent.diary.standing(), [])
 
+    def test_a_configured_zero_lead_means_no_warning_not_the_default(self):
+        """`or DEFAULT` would turn "book it, do not warn me" into a half-hour
+        warning without a word."""
+        quiet = sc.Schedule(self.agent, {"timezone": TZ, "remind_before_s": 0},
+                            clock=lambda: NOW)
+        item = quiet.add("Dentist", "friday 2pm for 30 minutes")
+        self.assertEqual(item.remind_before_s, 0)
+        self.assertEqual(self.agent.diary.standing(), [])
+
     def test_the_calendar_is_bounded(self):
         self.cal.max_items = 1
         self.cal.add("One", "friday 2pm for 1 hour")

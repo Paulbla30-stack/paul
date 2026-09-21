@@ -352,7 +352,10 @@ class Schedule:
         self.max_items = int(cfg.get("max_appointments") or MAX_APPOINTMENTS)
         hours = cfg.get("hours") or DEFAULT_HOURS
         self.hours = (int(hours[0]), int(hours[1]))
-        self.lead_s = float(cfg.get("remind_before_s") or DEFAULT_LEAD_S)
+        # Same trap: remind_before_s: 0 means "book it, do not warn me", and
+        # `or DEFAULT` would quietly give him a half-hour warning instead.
+        lead = cfg.get("remind_before_s")
+        self.lead_s = float(DEFAULT_LEAD_S if lead is None else lead)
         self.items: list = []
 
     # ---- writing -------------------------------------------------------

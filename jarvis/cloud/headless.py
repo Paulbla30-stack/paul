@@ -390,6 +390,10 @@ class HeadlessRunner:
                         # read. A profile its subject cannot see is a rumour
                         # with his name on it.
                         self._send(200, runner.agent.operator.state())
+                    elif path == "/hunches":
+                        self._send(200, runner.agent.hunches.state())
+                    elif path == "/probes":
+                        self._send(200, runner.agent.probes.state())
                     elif path == "/vitals":
                         # The Floor Test's nine, for him. Deliberately not in
                         # the model's context: an agent that could see it had
@@ -561,6 +565,32 @@ class HeadlessRunner:
                             return self._send(409, {"refused": str(why)})
                     runner._write_status_file()
                     self._send(200, {"profile": runner.agent.operator.state()})
+                elif path in ("/hunches/resolve", "/hunches/withdraw",
+                              "/probes/run"):
+                    try:
+                        payload = json.loads(body or "{}")
+                    except ValueError:
+                        return self._send(400, {"error": "body must be JSON"})
+                    if not isinstance(payload, dict):
+                        return self._send(400, {"error": "JSON object required"})
+                    with runner._lock:
+                        runner.agent.note_operator("hunches")
+                        if path == "/probes/run":
+                            # Six model calls, asked for rather than scheduled,
+                            # and the agent is told the window is open.
+                            return self._send(200, runner.agent.probes.run(
+                                as_baseline=bool(payload.get("baseline"))))
+                        ident = str(payload.get("id") or payload.get("about") or "")
+                        if path == "/hunches/withdraw":
+                            done = runner.agent.hunches.withdraw(ident)
+                        else:
+                            done = runner.agent.hunches.resolve(
+                                ident, bool(payload.get("borne_out")),
+                                str(payload.get("outcome") or "")) is not None
+                    runner._write_status_file()
+                    self._send(200 if done else 404,
+                               {"changed": done,
+                                "hunches": runner.agent.hunches.state()})
                 elif path == "/vitals/declare":
                     try:
                         payload = json.loads(body or "{}")
@@ -1080,6 +1110,17 @@ class HeadlessRunner:
         # Roll any finished repeat forward first, so the reminder the diary
         # is about to look at belongs to the occurrence in front rather than
         # to one that ended an hour ago.
+        # A hunch past its window has passed. Resolved out loud rather than
+        # forgotten -- the ones that quietly never happen are the entries the
+        # calibration is actually built from.
+        felt = getattr(self.agent, "hunches", None)
+        if felt is not None:
+            try:
+                for gone in felt.tick().get("passed", []):
+                    self.log.info("Hunch passed (%.0f%%): %s",
+                                  gone["confidence"] * 100, gone["about"])
+            except Exception as e:
+                self.log.warning("hunch tick failed: %s", e)
         calendar = getattr(self.agent, "schedule", None)
         if calendar is not None:
             try:

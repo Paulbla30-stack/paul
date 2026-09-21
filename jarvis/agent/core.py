@@ -219,6 +219,17 @@ class AgentCore:
         # signals, never targets. See vitals.py.
         from jarvis.agent import vitals as _vitals
         self.vitals = _vitals.build_vitals(self, config)
+        # Something is wrong and the readings say it is fine. Allowed, under
+        # four conditions, the fourth being that it authorises watching and
+        # nothing else. Scored afterwards, because an instinct earns the right
+        # to be listened to by being counted. See hunches.py.
+        from jarvis.agent import hunches as _hunches
+        self.hunches = _hunches.build_hunches(self, config)
+        # The standing question set: a character specification you never
+        # re-read is a hope. Baseline written once, drift computed over
+        # deterministic markers rather than prose. See probes.py.
+        from jarvis.agent import probes as _probes
+        self.probes = _probes.build_probes(self, config)
         # Quiet hours are a guess at when he is unavailable; the calendar is
         # a statement of it. The channel holds the agent's own notices while
         # he is sitting in something, and never the diary's.
@@ -497,6 +508,29 @@ class AgentCore:
                          self.rung, entry["description"])
         return entry
 
+    def _raise_hunch(self, decision) -> Optional[dict]:
+        """File a hunch the model attached to this decision.
+
+        Refused under the four conditions rather than filed and ignored, and
+        the reason goes back as a note so the model learns what a hunch is
+        instead of learning that hunches vanish. See hunches.py.
+        """
+        felt = getattr(decision, "hunch", None)
+        if not isinstance(felt, dict) or not felt.get("about"):
+            return None
+        from jarvis.agent import hunches as _hunches
+        try:
+            item = self.hunches.raise_one(
+                about=felt.get("about", ""), feeling=felt.get("feeling", ""),
+                despite=felt.get("despite", ""), expect=felt.get("expect", ""),
+                confidence=felt.get("confidence", 0))
+        except _hunches.Refused as why:
+            self.remember(f"A hunch about {str(felt.get('about'))[:80]} was not "
+                          f"filed: {why}", kind="note", source="system")
+            self.log.info("Hunch refused: %s", why)
+            return None
+        return item.state_dict()
+
     def _record_stated_proposal(self, decision) -> Optional[dict]:
         """File a change the model asked for rather than attempted.
 
@@ -546,6 +580,8 @@ class AgentCore:
         # answer them and it could not learn from the answer.
         if decision.proposal:
             self._record_stated_proposal(decision)
+        # And anything it thinks is wrong while the readings say otherwise.
+        self._raise_hunch(decision)
         self.last_thought = {
             "cycle": self.cycle_count,
             "reasoning": decision.reasoning,
@@ -1288,6 +1324,8 @@ class AgentCore:
             "diary": self.diary.summary(),
             "schedule": self.schedule.summary(),
             "vitals": self.vitals.summary(),
+            "hunches": self.hunches.summary(),
+            "probes": self.probes.summary(),
             "memory_backup": (self.memory_backup.status()
                               if getattr(self, "memory_backup", None) else
                               {"enabled": False, "reason": "not configured"}),

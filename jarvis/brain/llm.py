@@ -129,9 +129,37 @@ PLAN_SCHEMA = {
                            "are not permitted to make: state it as the change, not "
                            "as a sentence about yourself. Empty if none.",
         },
+        "hunch": {
+            "type": "object",
+            "description": ("Something you think is wrong while the readings "
+                            "say it is fine. Leave every field empty and "
+                            "confidence 0 when you have none, which is most "
+                            "cycles. It authorises watching and nothing else."),
+            "properties": {
+                "about": {"type": "string",
+                          "description": "The subject: a path, a service, a figure."},
+                "feeling": {"type": "string",
+                            "description": "What is off about it."},
+                "despite": {"type": "string",
+                            "description": ("What the evidence says, which this "
+                                            "contradicts. Required: if the "
+                                            "readings agree with you it is a "
+                                            "finding, not a hunch.")},
+                "expect": {"type": "string",
+                           "description": ("What would be seen if you are right. "
+                                           "It has to be something that could "
+                                           "fail to appear.")},
+                "confidence": {"type": "number",
+                               "description": "0.05 to 0.95. Certainty at either "
+                                              "end is a claim or a silence."},
+            },
+            "required": ["about", "feeling", "despite", "expect", "confidence"],
+            "additionalProperties": False,
+        },
     },
     "required": ["reasoning", "task_type", "description", "priority",
-                 "command", "goal", "completed_goals", "note", "proposal"],
+                 "command", "goal", "completed_goals", "note", "proposal",
+                 "hunch"],
     "additionalProperties": False,
 }
 
@@ -264,6 +292,10 @@ class Decision:
     # Kept separate from `note` on purpose: a note is prose the operator has
     # no way to answer, and an unanswered recommendation teaches nothing.
     proposal: str = ""
+    # Something it thinks is wrong while the readings say otherwise. Kept
+    # separate from a note for the same reason a proposal is: a hunch carries
+    # a number and a test, and is scored later. See hunches.py.
+    hunch: dict = field(default_factory=dict)
     raw: dict = field(default_factory=dict)
 
     @property
@@ -781,6 +813,14 @@ class BaseBrain:
             carried = None
         if carried:
             context["saying_it_to_someone"] = carried
+        # That it may say something is wrong when the readings say otherwise,
+        # under four conditions, and how its own have landed so far.
+        try:
+            felt = agent.hunches.context(now)
+        except Exception:
+            felt = None
+        if felt:
+            context["when_something_feels_wrong"] = felt
         knower = getattr(agent, "self_knowledge", None)
         if knower is not None:
             try:
@@ -1012,6 +1052,8 @@ class BaseBrain:
         reasoning = str(raw.get("reasoning") or "")[:2000]
         note = str(raw.get("note") or "")[:1000]
         proposal = str(raw.get("proposal") or "")[:500]
+        felt = raw.get("hunch")
+        hunch = dict(felt) if isinstance(felt, dict) and felt.get("about") else {}
         completed_raw = raw.get("completed_goals")
         completed = []
         if isinstance(completed_raw, list):
@@ -1034,7 +1076,7 @@ class BaseBrain:
                 command = str(raw.get("command") or "").strip()
                 if not command:
                     return Decision(reasoning=reasoning + " (shell_command without a command; idling)",
-                                    completed_goals=completed, note=note, proposal=proposal, raw=raw)
+                                    completed_goals=completed, note=note, proposal=proposal, hunch=hunch, raw=raw)
                 metadata["command"] = command
             # Every tool that declares a path argument takes it through the
             # plan's single command field. Derived from the register, because
@@ -1048,12 +1090,12 @@ class BaseBrain:
                 target = str(raw.get("command") or "").strip()
                 if not target:
                     return Decision(reasoning=reasoning + f" ({kind} without a path; idling)",
-                                    completed_goals=completed, note=note, proposal=proposal, raw=raw)
+                                    completed_goals=completed, note=note, proposal=proposal, hunch=hunch, raw=raw)
                 metadata["path"] = target
             task = Task(priority=priority, description=description[:200],
                         task_type=TaskType(kind), metadata=metadata, max_retries=1)
         return Decision(reasoning=reasoning, task=task, completed_goals=completed,
-                        note=note, proposal=proposal, raw=raw)
+                        note=note, proposal=proposal, hunch=hunch, raw=raw)
 
     def ask(self, agent, question: str, observations: Optional[dict] = None) -> Optional[str]:
         """Free-form question about the system, answered with agent context."""
