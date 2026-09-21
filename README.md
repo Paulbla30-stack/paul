@@ -377,6 +377,17 @@ ones that passed. Three reminders for the same thing arriving together
 because the box was off is one reminder and two pieces of noise; the closest
 to the due date wins and the others are marked as passed with the reason.
 
+**Punctuality is not the planner's cost problem.** The loop stretches its
+wait between cycles, up to five minutes, so a confused model cannot retry a
+bad idea every second. Applied to a reminder that means a nine o'clock
+commitment goes out whenever the loop next happens to look -- the first real
+one on the live box went out 79 seconds late for exactly that reason. The
+loop now asks the diary when its next moment is and shortens its sleep to
+match, with a one-second floor so a moment just ahead cannot turn the loop
+into a spin. A moment already passed and unspoken is being held by the
+channel and does not shorten anything, because its reason will not change in
+the next second.
+
 Add one from the Diary tab, or in chat:
 
 ```

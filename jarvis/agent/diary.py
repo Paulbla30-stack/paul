@@ -697,6 +697,33 @@ class Diary:
         last_look = self.last_tick if self.last_tick is not None else self.started_at
         return moment > last_look and (now - last_look) > self.blind_gap_s
 
+    def seconds_until_next(self, now: Optional[float] = None) -> Optional[float]:
+        """How long until the register next has something to say.
+
+        The loop stretches its wait between cycles -- up to five minutes when
+        nothing is happening -- so that a confused planner cannot burn its
+        call budget. That is the right trade for thinking and the wrong one
+        for a reminder: a nine o'clock commitment does not care what the
+        planner costs, and the first one on the live box went out 79 seconds
+        after its moment because the loop was four cycles into an idle
+        streak. The loop asks this and shortens its sleep to match.
+
+        Only moments still ahead count. One that has passed and has not been
+        spoken is being held by the channel, and its reason will not change
+        in the next second, so it waits for the ordinary cadence.
+        """
+        now = self.clock() if now is None else now
+        soonest = None
+        for item in self.items:
+            if item.state != STANDING:
+                continue
+            for lead, at in item.moments():
+                if at <= now or item.spoken_for(lead):
+                    continue
+                if soonest is None or (at - now) < soonest:
+                    soonest = at - now
+        return soonest
+
     def _tick_one(self, item: Commitment, now: float, report: dict):
         behind = item.catch_up(now)
         if behind:

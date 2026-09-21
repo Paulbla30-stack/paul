@@ -1011,6 +1011,17 @@ class HeadlessRunner:
         if report.get("sent") or report.get("unsaid"):
             self._write_status_file()
 
+    def _diary_wait(self) -> Optional[float]:
+        """Seconds until the diary's next moment, or None if it has none."""
+        diary = getattr(self.agent, "diary", None)
+        if diary is None:
+            return None
+        try:
+            soon = diary.seconds_until_next()
+        except Exception:
+            return None
+        return None if soon is None else max(1.0, soon)
+
     def wake(self):
         """Cut short an idle wait: something new arrived for the planner."""
         self.idle_streak = 0
@@ -1074,6 +1085,14 @@ class HeadlessRunner:
                     if self.failure_streak >= 3:
                         self.log.warning("%d consecutive failed tasks; waiting %.0fs before "
                                          "the next cycle", self.failure_streak, wait)
+                # A reminder's punctuality is not the planner's cost problem.
+                # The backoff above exists so a confused model cannot retry a
+                # bad idea every second; applied to the diary it means a 9am
+                # commitment goes out whenever the loop next happens to look,
+                # which on an idle streak is up to five minutes later.
+                soon = self._diary_wait()
+                if soon is not None:
+                    wait = min(wait, soon)
                 self._last_action = action
                 self._wake.clear()
                 self._wake.wait(wait)

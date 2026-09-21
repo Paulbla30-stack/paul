@@ -665,5 +665,61 @@ class TestItIsActuallyWiredIn(unittest.TestCase):
         self.assertTrue(agent.diary.context()["in_the_next_fortnight"])
 
 
+class TestItDoesNotWaitOnTheLoopsConvenience(Base):
+    """Found on the live box, not in a test: the first real reminder went out
+    79 seconds after its moment. Nothing was broken -- the loop stretches its
+    wait between cycles, up to five minutes, so a confused planner cannot
+    burn its call budget retrying a bad idea every second. That trade is
+    right for thinking and wrong for a reminder."""
+
+    def test_it_says_how_long_until_the_next_moment(self):
+        self.diary.add("Dentist", "14 Oct at 9am", remind_before=["3 days", 0])
+        got = self.diary.seconds_until_next(NOW)
+        self.assertEqual(got, at(2026, 10, 11, 9, 0) - NOW)
+
+    def test_a_moment_already_passed_does_not_shorten_anything(self):
+        """One that has gone by unspoken is being held by the channel, and
+        its reason will not change in the next second."""
+        self.diary.add("Dentist", "14 Oct at 9am")
+        self.agent.notifier.hold = "hourly cap reached (4)"
+        self.diary.clock = lambda: at(2026, 10, 14, 9, 0)
+        self.diary.tick(at(2026, 10, 14, 9, 0))
+        self.assertIsNone(self.diary.seconds_until_next(at(2026, 10, 14, 9, 30)))
+
+    def test_something_already_said_does_not_shorten_anything(self):
+        self.diary.add("Dentist", "14 Oct at 9am")
+        self.diary.clock = lambda: at(2026, 10, 14, 9, 0)
+        self.diary.tick(at(2026, 10, 14, 9, 0))
+        self.assertIsNone(self.diary.seconds_until_next(at(2026, 10, 14, 9, 1)))
+
+    def test_an_empty_diary_asks_for_nothing(self):
+        self.assertIsNone(self.diary.seconds_until_next(NOW))
+
+    def test_a_proposal_he_has_not_ruled_on_does_not_shorten_anything(self):
+        self.diary.suggest("bill.pdf: due tomorrow", "tomorrow", origin="bill.pdf")
+        self.assertIsNone(self.diary.seconds_until_next(NOW))
+
+    def test_the_runner_shortens_its_sleep_to_the_next_moment(self):
+        import logging
+        from jarvis.cloud.headless import HeadlessRunner
+        self.agent.diary = self.diary
+        runner = HeadlessRunner(self.agent, logging.getLogger("test"), interval=30,
+                                status_port=None, token=None, token_file=None)
+        self.assertIsNone(runner._diary_wait())          # nothing to wait for
+        self.diary.add("Dentist", "tomorrow 9am")
+        self.assertEqual(runner._diary_wait(), at(2026, 9, 22, 9, 0) - NOW)
+
+    def test_the_runner_never_shortens_its_sleep_to_nothing(self):
+        """A moment one second away must not turn the loop into a spin."""
+        import logging
+        from jarvis.cloud.headless import HeadlessRunner
+        self.agent.diary = self.diary
+        runner = HeadlessRunner(self.agent, logging.getLogger("test"), interval=30,
+                                status_port=None, token=None, token_file=None)
+        self.diary.add("Dentist", "tomorrow 9am")
+        self.diary.clock = lambda: at(2026, 9, 22, 9, 0) - 0.2
+        self.assertEqual(runner._diary_wait(), 1.0)
+
+
 if __name__ == "__main__":
     unittest.main()
