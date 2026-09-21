@@ -18,6 +18,22 @@ agent:
   # still under the deny-list. Anything unrecognised falls back to proposer.
   rung: proposer
 
+  # What is coming, and speaking up before it arrives. Reading a date off a
+  # page and keeping it are different jobs, and only the first one existed:
+  # "due 14 Oct" was true for one cycle, went into a note, and nothing was
+  # ever going to happen on the fourteenth.
+  #
+  # The commitments live in the memory database rather than a file of their
+  # own, because that database is the one thing copied off the box. Nothing
+  # here fills itself: a date found in a document is proposed and waits for
+  # him. Timezone is deliberately absent -- it is derived from
+  # cloud.notify.timezone, so where he lives is declared exactly once.
+  diary:
+    max_commitments: 80
+    give_up_after_s: 259200   # a reminder the channel never took, said as unsaid
+    blind_gap_s: 600          # a longer gap between looks means it was not looking
+
+
 hardware:
   # EC2 instances have no framebuffer or physical input devices.
   display:

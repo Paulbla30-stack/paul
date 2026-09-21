@@ -387,6 +387,10 @@ class HeadlessRunner:
                         # read. A profile its subject cannot see is a rumour
                         # with his name on it.
                         self._send(200, runner.agent.operator.state())
+                    elif path == "/diary":
+                        # What is coming, what he has not ruled on, and when
+                        # the register last looked.
+                        self._send(200, runner.agent.diary.state())
                     elif path == "/lab":
                         self._send(200, runner.lab_state())
                     elif path == "/ledger":
@@ -540,6 +544,44 @@ class HeadlessRunner:
                             return self._send(409, {"refused": str(why)})
                     runner._write_status_file()
                     self._send(200, {"profile": runner.agent.operator.state()})
+                elif path in ("/diary/add", "/diary/confirm", "/diary/drop",
+                              "/diary/done"):
+                    try:
+                        payload = json.loads(body or "{}")
+                    except ValueError:
+                        return self._send(400, {"error": "body must be JSON"})
+                    if not isinstance(payload, dict):
+                        return self._send(400, {"error": "JSON object required"})
+                    from jarvis.agent import diary as _diary
+                    with runner._lock:
+                        runner.agent.note_operator("diary")
+                        if path == "/diary/add":
+                            try:
+                                item = runner.agent.diary.add(
+                                    str(payload.get("what") or ""),
+                                    str(payload.get("when") or ""),
+                                    repeat=payload.get("repeat") or _diary.ONCE,
+                                    remind_before=payload.get("remind_before"),
+                                    severity=str(payload.get("severity") or "notice"))
+                            except _diary.Refused as why:
+                                # The reason is the useful part -- every
+                                # refusal in diary.py says what would work
+                                # instead -- so it goes where a generic
+                                # client will actually show it.
+                                return self._send(409, {"error": str(why),
+                                                        "refused": True})
+                            return self._send(200, {"commitment": item.state_dict(),
+                                                    "diary": runner.agent.diary.state()})
+                        ident = str(payload.get("id") or payload.get("what") or "")
+                        if path == "/diary/confirm":
+                            done = runner.agent.diary.confirm(ident) is not None
+                        elif path == "/diary/drop":
+                            done = runner.agent.diary.drop(ident)
+                        else:
+                            done = runner.agent.diary.done(ident)
+                    runner._write_status_file()
+                    self._send(200 if done else 404,
+                               {"changed": done, "diary": runner.agent.diary.state()})
                 elif path in ("/questions/ask", "/questions/answer"):
                     try:
                         payload = json.loads(body or "{}")
@@ -943,6 +985,32 @@ class HeadlessRunner:
         except Exception as e:                       # never stops the loop
             self.log.warning("memory backup failed: %s", e)
 
+    def _diary_tick(self):
+        """Ask the diary which moments have come round.
+
+        On the idle path beside consolidation and the backup, and for the
+        same reason: a reminder the planner has to decide to send is one it
+        will skip on the day there is something more interesting to do. It
+        costs nothing when nothing is due, and it is the only part of this
+        loop whose failure the operator would feel directly.
+        """
+        diary = getattr(self.agent, "diary", None)
+        if diary is None:
+            return
+        try:
+            report = diary.tick()
+        except Exception as e:                       # never stops the loop
+            self.log.warning("diary tick failed: %s", e)
+            return
+        for entry in report.get("sent", []):
+            self.log.info("Diary: told him about '%s'%s", entry["what"],
+                          " (late)" if entry.get("late") else "")
+        for entry in report.get("unsaid", []):
+            self.log.warning("Diary: never managed to say '%s': %s",
+                             entry["what"], entry.get("reason"))
+        if report.get("sent") or report.get("unsaid"):
+            self._write_status_file()
+
     def wake(self):
         """Cut short an idle wait: something new arrived for the planner."""
         self.idle_streak = 0
@@ -976,6 +1044,7 @@ class HeadlessRunner:
                     self.log.warning("ledger anchor tick failed: %s", e)
                 self._consolidation_tick()
                 self._backup_tick()
+                self._diary_tick()
                 if self.max_cycles and cycles >= self.max_cycles:
                     break
                 # Idle cycles wait the full interval; successful work goes

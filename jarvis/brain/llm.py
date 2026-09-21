@@ -752,6 +752,15 @@ class BaseBrain:
             who = None
         if who:
             context["your_operator"] = who
+        # What is coming in his world. Context for what he may be dealing
+        # with, and deliberately framed as not the agent's work: a model
+        # shown a list of dated things will otherwise try to plan them.
+        try:
+            coming = agent.diary.context(now)
+        except Exception:
+            coming = None
+        if coming:
+            context["his_diary"] = coming
         knower = getattr(agent, "self_knowledge", None)
         if knower is not None:
             try:

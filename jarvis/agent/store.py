@@ -94,8 +94,12 @@ STATES = ("live", "dormant", "superseded")
 # second reader who is neither the operator nor this machine. Both are here
 # because an unknown kind falls back to a plain note from the brain, and a
 # verdict that loses its provenance is the one thing verdicts.py says must
-# never happen: a ruling with no attribution is a rumour.
-KINDS = ("note", "fact", "upload", "goal", "operator", "proposal", "verdict")
+# never happen: a ruling with no attribution is a rumour. "commitment" is a
+# dated thing the operator asked to be reminded of; it is here rather than in
+# a file of its own because this database is the one thing copied off the box,
+# and a diary that is not backed up loses the appointment nobody wrote down.
+KINDS = ("note", "fact", "upload", "goal", "operator", "proposal", "verdict",
+         "commitment")
 SOURCES = ("brain", "operator", "system", "review", "machine")
 
 DEFAULT_PATH = "/var/lib/jarvis/memory.db"

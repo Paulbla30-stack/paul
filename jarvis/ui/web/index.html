@@ -174,6 +174,7 @@
 <nav>
   <button data-tab="chat" class="active">Chat</button>
   <button data-tab="agent">Agent</button>
+  <button data-tab="diary">Diary</button>
   <button data-tab="files">Files</button>
   <button data-tab="ledger">Ledger</button>
   <button data-tab="lab">Lab</button>
@@ -224,6 +225,51 @@
     <div class="card">
       <h2>Brain</h2>
       <pre id="brainStats" class="small"></pre>
+    </div>
+  </section>
+
+  <section id="diary">
+    <div class="card span-2">
+      <h2>Coming up</h2>
+      <ul id="diaryStanding"></ul>
+      <p class="small muted" style="margin:8px 0 0">It sends these itself when they come round. If nothing was running at the time, the message says so rather than arriving as though it were on time.</p>
+    </div>
+
+    <div class="card span-2" id="diaryProposedCard" style="display:none">
+      <h2>Noticed in your files <span class="small muted" style="text-transform:none;letter-spacing:0">— waiting on you</span></h2>
+      <ul id="diaryProposed"></ul>
+      <p class="small muted" style="margin:8px 0 0">It only ever suggests these. Nothing here will fire until you confirm it.</p>
+    </div>
+
+    <div class="card span-2">
+      <h2>Add one</h2>
+      <div class="row">
+        <input id="diaryWhat" placeholder="What to remind you about" style="flex:2" />
+        <input id="diaryWhen" placeholder="14 Oct 9am · tomorrow · friday 2pm · in 3 days" style="flex:2" />
+      </div>
+      <div class="row" style="margin-top:8px">
+        <select id="diaryRepeat">
+          <option value="once">once</option>
+          <option value="daily">every day</option>
+          <option value="weekly">every week</option>
+          <option value="monthly">every month</option>
+          <option value="yearly">every year</option>
+        </select>
+        <select id="diaryLead">
+          <option value="">tell me on the day</option>
+          <option value="1 day">and a day before</option>
+          <option value="3 days">and three days before</option>
+          <option value="1 week">and a week before</option>
+        </select>
+        <button class="btn" onclick="addCommitment()">Add</button>
+      </div>
+      <p id="diaryMsg" class="small" style="margin:8px 0 0"></p>
+    </div>
+
+    <div class="card span-2">
+      <h2>Done and dropped</h2>
+      <ul id="diaryFinished"></ul>
+      <p id="diaryFooter" class="small muted" style="margin:8px 0 0"></p>
     </div>
   </section>
 
@@ -393,6 +439,7 @@
     const onChat = b.dataset.tab === "chat";
     $("composer").style.display = onChat ? "" : "none";
     document.body.classList.toggle("chat-open", onChat);
+    if (b.dataset.tab === "diary") loadDiary();
     if (b.dataset.tab === "files") loadUploads();
     if (b.dataset.tab === "ledger") loadLedger();
     if (b.dataset.tab === "lab") loadLab();
@@ -411,6 +458,20 @@
     const text = $("chatInput").value.trim(); if (!text) return;
     $("chatInput").value = ""; $("chatInput").style.height = "auto";
     if (text.startsWith("/goal ")) { pushTurn("user", text); try { const r = await api("/goal", { method: "POST", body: text.slice(6) }); pushTurn("system", "Goal added: " + r.added); refresh(); } catch (e) { pushTurn("system", "Error: " + e.message); } return; }
+    if (text.startsWith("/remind")) {
+      pushTurn("user", text);
+      const rest = text.slice(7).trim();
+      const cut = rest.lastIndexOf("@");
+      if (cut < 1) { pushTurn("system", "Say it as /remind <what> @ <when>, for example: /remind pay the gas bill @ 14 Oct 9am"); return; }
+      try {
+        const r = await api("/diary/add", { method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ what: rest.slice(0, cut).trim(), when: rest.slice(cut + 1).trim() }) });
+        const c = r.commitment;
+        pushTurn("system", "In the diary: " + c.what + " — " + c.reads_as + ", " + c.when + (c.note ? "\n" + c.note : ""));
+        loadDiary();
+      } catch (e) { pushTurn("system", e.message); }
+      return;
+    }
     if (text === "/think") { pushTurn("user", text); await thinkNow(true); return; }
     if (text === "/clear") { turns = []; saveChat(); renderChat(); return; }
     pushTurn("user", text);
@@ -509,6 +570,62 @@
       if (fromChat) pushTurn("assistant", line); else { $("lastThought").textContent = "Thinking: " + (r.reasoning || ""); }
     } catch (e) { if (fromChat) pushTurn("system", "Error: " + e.message); else alert(e.message); }
     refresh();
+  };
+
+  // ---- diary ----
+  function commitmentLine(c) {
+    const li = document.createElement("li"); li.className = "row";
+    const bits = [c.reads_as, c.when];
+    const every = { daily: "every day", weekly: "every week", monthly: "every month", yearly: "every year" };
+    if (every[c.repeat]) bits.push(every[c.repeat]);
+    if ((c.remind_before || []).length) bits.push("warning " + c.remind_before.join(" and ") + " before");
+    if (c.from) bits.push("from " + c.from);
+    if (c.missed_occurrences) bits.push(c.missed_occurrences + " went by unsaid");
+    li.innerHTML = '<span style="flex:1">' + (c.overdue ? "⚠️ " : "⬜ ") + escapeHtml(c.what) +
+      '<br><span class="small muted">' + escapeHtml(bits.join(" · ")) + '</span>' +
+      (c.note ? '<br><span class="small" style="color:var(--warn)">' + escapeHtml(c.note) + '</span>' : '') + '</span>';
+    return li;
+  }
+  function diaryButton(label, path, id) {
+    const b = document.createElement("button"); b.className = "ghost"; b.textContent = label;
+    b.onclick = async () => { try { await api(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id }) }); } catch (e) { alert(e.message); } loadDiary(); };
+    return b;
+  }
+  async function loadDiary() {
+    let d; try { d = await api("/diary"); } catch (e) { return; }
+    const standing = $("diaryStanding"); standing.innerHTML = "";
+    if (!d.standing.length) standing.innerHTML = '<li class="muted small">Nothing in the diary.</li>';
+    for (const c of d.standing) { const li = commitmentLine(c);
+      li.appendChild(diaryButton("Done", "/diary/done", c.id));
+      li.appendChild(diaryButton("Drop", "/diary/drop", c.id));
+      standing.appendChild(li); }
+    $("diaryProposedCard").style.display = d.proposed.length ? "" : "none";
+    const prop = $("diaryProposed"); prop.innerHTML = "";
+    for (const c of d.proposed) { const li = commitmentLine(c);
+      li.appendChild(diaryButton("Keep it", "/diary/confirm", c.id));
+      li.appendChild(diaryButton("No", "/diary/drop", c.id));
+      prop.appendChild(li); }
+    const fin = $("diaryFinished"); fin.innerHTML = "";
+    if (!d.finished.length) fin.innerHTML = '<li class="muted small">Nothing yet.</li>';
+    for (const c of d.finished) { const li = document.createElement("li"); li.className = "small muted";
+      li.textContent = (c.state === "done" ? "✅ " : "✖ ") + c.what + " — " + c.reads_as; fin.appendChild(li); }
+    $("diaryFooter").textContent = "Last looked " + d.last_checked +
+      (d.durable ? "." : ". No durable memory on this box: these will be lost on a restart.");
+  }
+  window.addCommitment = async function () {
+    const what = $("diaryWhat").value.trim(), when = $("diaryWhen").value.trim();
+    const msg = $("diaryMsg"); msg.style.color = ""; msg.textContent = "";
+    if (!what || !when) { msg.textContent = "Both a thing and a time, please."; return; }
+    const lead = $("diaryLead").value;
+    try {
+      const r = await api("/diary/add", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ what, when, repeat: $("diaryRepeat").value,
+                               remind_before: lead ? [lead, 0] : [0] }) });
+      $("diaryWhat").value = ""; $("diaryWhen").value = "";
+      msg.textContent = r.commitment.reads_as + " — " + r.commitment.when +
+        (r.commitment.note ? " · " + r.commitment.note : "");
+      loadDiary();
+    } catch (e) { msg.style.color = "var(--bad)"; msg.textContent = e.message; }
   };
 
   // ---- ledger ----

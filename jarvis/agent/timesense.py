@@ -82,6 +82,14 @@ def _zone(name: str = DEFAULT_TZ):
         return timezone.utc
 
 
+def zone(name: str = DEFAULT_TZ):
+    """The operator's timezone, for anything that has to turn a wall clock
+    reading into an instant. Public because the diary needs it: "9am on the
+    14th" is a local time, and resolving it once to an epoch would move it by
+    an hour the next time the clocks change."""
+    return _zone(name)
+
+
 def phrase(seconds: float) -> str:
     """A duration in the unit that is true for it.
 

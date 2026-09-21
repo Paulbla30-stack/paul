@@ -48,6 +48,12 @@ jarvis/
   by the operator, by a material change in observations, or on a heartbeat,
   and does its thinking in one burst before going quiet again. Sleep removes
   the model, not the agent. See `jarvis/agent/vigil.py`
+- **The Diary**: a register of what is coming. Reading a date off a page and
+  keeping it are different jobs; this is the second one. A date found in a
+  document is proposed and waits for the operator, never held on its own
+  authority. A held message is not a delivered one, a moment missed while
+  nothing was running says so, and a month of downtime is one message and a
+  count rather than thirty. See `jarvis/agent/diary.py`
 
 ## Building the ISO
 
@@ -175,9 +181,10 @@ set it.
 TLS with a self-signed certificate) serving `/ui`: a chat with the agent,
 an agent panel with goals, recent tasks and a "Think now" button, and file
 uploads that land in `cloud.ui.upload_dir` and are handed to the brain as
-`uploaded_files`. Login is the runner token. The API behind it: `POST
-/chat` (multi-turn), `POST /upload` (raw body + `X-Filename`), `GET
-/uploads`, plus everything the loopback status server offers.
+`uploaded_files`, and a diary of what is coming. Login is the runner token.
+The API behind it: `POST /chat` (multi-turn), `POST /upload` (raw body +
+`X-Filename`), `GET /uploads`, `GET /diary` and its four `POST` companions,
+plus everything the loopback status server offers.
 
 ## Behaviour lab
 
@@ -301,6 +308,89 @@ account and region, and each page detected is billed. It finds characters and
 does not describe pictures -- a photograph of something that is not a document
 comes back with no text and says its contents are still unknown, not empty.
 Describing a scene is a vision model, which is a separate decision.
+
+## The diary: keeping a date, not just reading one
+
+`timesense.py` could already turn *"amount due 14 Oct"* into *"Wednesday 14
+October 2026, 24 days from now"*, which is the difference between a string and
+a fact. That was the end of it. The fact was true for one cycle, went into a
+note, and nothing was ever going to happen on the fourteenth. Reading a date
+and keeping it are different jobs, and only the first one was built.
+
+`diary.py` is the second. It holds a small register of commitments -- a thing,
+a moment, and when to speak about it -- and every cycle it asks which of them
+have come round. When one has, the agent says so through the same channel it
+uses for everything else, under the same rate limits.
+
+Four things it is deliberately not.
+
+**Not a scheduler for the agent's own work.** The planner already decides what
+to do next. A commitment is about the operator's world: a bill, a renewal, an
+appointment. The agent's effect is that it *says something*; it does not pay
+the bill. The model is shown what is coming as context for what he may be
+dealing with, with that stated plainly, because a model handed a list of dated
+things will otherwise try to plan them.
+
+**Not filled by inference.** A date found in a document becomes a
+*suggestion* he rules on, never a standing commitment. `suggest_from_document`
+is narrow on purpose -- a file he handed over, a future date, a word like
+"due" or "expires" beside it, at most two from any one document -- because the
+agent reads config files, logs and certificates too, and the commonest pair of
+dates on a bill is its statement period, and a register that turns *"01 August to 31
+August"* into two reminders is one he mutes. The first wrong reminder at 7am
+teaches him to ignore the next right one.
+
+**Not a cron.** Once, daily, weekly, monthly, yearly. Anything finer is a
+scheduling language, and a scheduling language is a thing to get wrong
+quietly. A monthly commitment anchored on the 31st lands on the 28th in
+February, says that it was clamped, and rolls from the anchor rather than the
+clamped date so it does not drift to the 28th for good.
+
+**Not stored as instants.** "Nine in the morning" is a wall-clock reading in
+his timezone, and an epoch computed once moves by an hour the next time the
+clocks change. The local reading is kept and the instant is worked out fresh.
+The timezone itself is declared once, beside the quiet hours it already
+governs, and derived from there.
+
+Three failures it is built against, all of them the register quietly lying
+about what it did.
+
+**A held message is not a delivered one.** The channel has a severity floor,
+an hourly cap, a gap between messages and quiet hours, and `send` returns a
+verdict rather than raising. Marking a reminder done because `send` returned
+is how a 9am reminder silently becomes nothing at all. Only a message that
+actually left marks its moment as spoken; a held one is retried, and one that
+never lands is recorded as **unsaid**, which is a state he can see. Retried,
+delivered, and never said are three outcomes, and the third one is the one a
+naive register cannot express.
+
+**A missed moment is said late, not said as if on time.** The register keeps
+its own heartbeat, so *"nothing was running when this came round"* and *"the
+channel held it"* are distinguishable rather than both becoming an awkward
+silence. The first is worth apologising for and the second is worth
+reporting.
+
+**Catching up is not repeating.** A daily commitment and a month of downtime
+is not thirty messages -- and it is not one message about a morning four weeks
+gone, either. It is one message about *this* morning, plus the count of the
+ones that passed. Three reminders for the same thing arriving together
+because the box was off is one reminder and two pieces of noise; the closest
+to the due date wins and the others are marked as passed with the reason.
+
+Add one from the Diary tab, or in chat:
+
+```
+/remind pay the British Gas bill @ 14 Oct 9am
+```
+
+`GET /diary` returns the register; `POST /diary/add`, `/diary/confirm`,
+`/diary/drop` and `/diary/done` are the rest. A refusal comes back with what
+would have worked instead -- a date already gone, a year that is almost
+certainly mistyped, a repeat the register does not hold.
+
+The commitments live in the memory database rather than a file of their own,
+because that database is the one thing copied off the box. A diary that is
+not backed up loses the appointment nobody wrote down.
 
 ## Questions: its side of the conversation
 

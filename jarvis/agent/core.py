@@ -192,6 +192,13 @@ class AgentCore:
         self.operator = _operator.OperatorProfile(
             self, name=str(config.get("operator_name") or "your operator"))
         self.operator.load()
+        # What is coming, and speaking up before it arrives. Reading a date
+        # off a page and keeping it are different jobs, and only the first
+        # one was built: "due 14 Oct" was true for one cycle, went into a
+        # note, and nothing was ever going to happen on the fourteenth.
+        # See diary.py.
+        from jarvis.agent import diary as _diary
+        self.diary = _diary.build_diary(self, config)
         # Set by main.py when a bucket is configured. None means the memory
         # lives on exactly one volume.
         self.memory_backup = None
@@ -671,6 +678,7 @@ class AgentCore:
                 })
 
         self.current_task = None
+        self._notice_dates(task, result)
         # How long the task itself took. It was already being measured for
         # the ledger and never reached the history, so timesense.durations()
         # had to infer it from the gap between consecutive entries -- which
@@ -686,6 +694,41 @@ class AgentCore:
         })
 
         return result
+
+    def _notice_dates(self, task: Task, result: dict):
+        """A date on a page that looks like something expected of him.
+
+        The agent could already read the date and say what it meant; this is
+        the part where noticing it leaves a trace past the cycle. It only
+        ever *proposes*: a register that fills itself is a register nobody
+        trusts, and the first wrong reminder at 7am teaches him to ignore the
+        next right one. See diary.py, where the narrowing lives.
+        """
+        if task.task_type != TaskType.READ_FILE or not result.get("success"):
+            return
+        output = result.get("output")
+        if not isinstance(output, dict) or not output.get("dates_in_it"):
+            return
+        # Only documents he handed over. The agent reads config files, logs
+        # and certificates too, and those are full of dates next to words
+        # like "expires" -- none of which is a commitment of his. The upload
+        # list is the exact definition of "a document he gave it".
+        path = str(output.get("path") or "")
+        given = {str(u.get("path") or "") for u in self.uploads}
+        if path not in given:
+            return
+        try:
+            made = self.diary.suggest_from_document(
+                str(output.get("name") or path or "a document"),
+                output.get("text") or "", output.get("dates_in_it"))
+        except Exception as exc:
+            self.log.debug("could not read dates into the diary: %s", exc)
+            return
+        for item in made:
+            self.log.info("Diary suggestion from %s: %s", item.origin, item.what)
+            self.remember(f"Noticed in {item.origin}: {item.what} "
+                          f"({item.reads_as()}). Waiting on him.", kind="note",
+                          source="system")
 
     def reflect(self, task: Task, result: dict):
         """Update memory and state based on task results."""
@@ -1179,6 +1222,7 @@ class AgentCore:
             # a graph with no marker on that window is a misleading graph.
             "lab_open": self.lab.is_open(),
             # Whether what the agent remembers exists anywhere but here.
+            "diary": self.diary.summary(),
             "memory_backup": (self.memory_backup.status()
                               if getattr(self, "memory_backup", None) else
                               {"enabled": False, "reason": "not configured"}),

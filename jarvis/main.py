@@ -422,6 +422,17 @@ class JarvisSystem:
         # Sleeping is configured beside the planner whose cost it governs,
         # under llm:, and handed to the agent with the rest of its settings.
         agent_cfg["sleep"] = (llm_cfg or {}).get("sleep") or {}
+        # The diary keeps wall-clock readings in the operator's timezone, and
+        # that timezone is already declared once, beside the quiet hours it
+        # governs. Derived rather than configured again: two places to say
+        # where he lives is one place to get it wrong, and the failure would
+        # be an hour of drift in a reminder, which is the kind nobody traces.
+        agent_cfg["diary"] = dict(agent_cfg.get("diary") or {})
+        agent_cfg["diary"].setdefault(
+            "timezone", getattr(self.notifier, "timezone", None)
+            or ((self.config.get("cloud") or {}).get("notify") or {}).get("timezone"))
+        if not agent_cfg["diary"].get("timezone"):
+            agent_cfg["diary"].pop("timezone", None)
         self.agent = AgentCore(
             config=agent_cfg,
             hardware=hardware,
