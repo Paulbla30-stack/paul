@@ -27,6 +27,7 @@ Two things that cost real time and must not be undone:
 
 from __future__ import annotations
 
+import re
 import time
 import urllib.parse
 import xml.etree.ElementTree as ET
@@ -43,6 +44,20 @@ RSS_BASE = "https://rss.arxiv.org/rss"
 # "new" is a first announcement, "cross" is a cross-list into this category
 # (new to a reader of it), "replace" is a revision of something already seen.
 KEEP_ANNOUNCE = {"new", "cross", "cross-list"}
+
+
+def _norm_id(raw: str) -> str:
+    """One arXiv paper, one id.
+
+    RSS and the Atom API disagree about the version suffix: RSS links to
+    ".../abs/2609.22070" and the API to ".../abs/2609.22070v1". Left alone
+    they are two different ids for the same paper, so on any run wide enough
+    to use both it is stored twice, chained twice and appears in the digest
+    twice — which is exactly what the first live run did.
+
+    The version is dropped so the identity is the paper, not the revision.
+    """
+    return re.sub(r"v\d+$", "", (raw or "").strip())
 
 
 def _abstract(description: str) -> str:
@@ -65,7 +80,7 @@ def _from_rss(cat: str, cutoff, limit: int) -> list[Item]:
         if ann not in KEEP_ANNOUNCE:
             continue
         link = e.findtext("link") or ""
-        aid = link.rsplit("/", 1)[-1]
+        aid = _norm_id(link.rsplit("/", 1)[-1])
         if not aid:
             continue
         try:
@@ -113,7 +128,10 @@ def _from_api(endpoint: str, cat: str, cutoff, limit: int, interval: float) -> l
         authors = [sanitise(a.findtext(f"{ATOM}name"), 80) for a in e.findall(f"{ATOM}author")]
         cats = [c.get("term") for c in e.findall(f"{ATOM}category") if c.get("term")]
         out.append(Item(
-            source=SOURCE, external_id=aid.rsplit("/", 1)[-1], url=safe_url(aid),
+            source=SOURCE, external_id=_norm_id(aid.rsplit("/", 1)[-1]),
+            # The API returns http:// here; normalise so the same paper does
+            # not also differ by scheme between the two paths.
+            url=safe_url(aid.replace("http://", "https://", 1)),
             title=sanitise(e.findtext(f"{ATOM}title"), MAX_TITLE),
             author=sanitise(", ".join(a for a in authors if a)[:MAX_AUTHOR], MAX_AUTHOR),
             published=published,

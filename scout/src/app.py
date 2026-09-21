@@ -114,12 +114,23 @@ def run(cfg: dict, *, hit_store, chain_store, mailer, now: datetime | None = Non
             continue        # nothing matched; not worth a row or a chain entry
         rec = record_from(it, sc, now)
         if not dry_run:
-            hit_store.put(it.key, rec)
-            entry = chain.append({k: rec[k] for k in
-                                  ("source", "external_id", "url", "title",
-                                   "published", "first_seen", "matched_keywords",
-                                   "score")})
+            # Chain FIRST, then store the hit. The order matters and the
+            # obvious one is wrong: storing the hit first marks it seen, so
+            # if the chain append then fails the item is skipped as a
+            # duplicate on every future run and never enters the record at
+            # all — a silent, permanent gap. This way a failed append leaves
+            # the item unseen and the next run picks it up again.
+            try:
+                entry = chain.append({k: rec[k] for k in
+                                      ("source", "external_id", "url", "title",
+                                       "published", "first_seen",
+                                       "matched_keywords", "score")})
+            except Exception as e:                    # noqa: BLE001
+                log.error("chain append failed for %s; not storing the hit so "
+                          "it is retried next run: %s", it.key, e)
+                continue
             rec["chain_seq"] = entry["seq"]
+            hit_store.put(it.key, rec)
         new_records.append(rec)
 
     above = sorted([r for r in new_records if r["score"] >= threshold],

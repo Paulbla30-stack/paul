@@ -264,6 +264,20 @@ def test_arxiv_drops_revisions_but_keeps_cross_lists():
     assert "replace" not in KEEP_ANNOUNCE
 
 
+def test_arxiv_ids_are_version_normalised():
+    """RSS and the API disagree about the version suffix.
+
+    RSS links to .../abs/2609.22070, the API to .../abs/2609.22070v1. Left
+    alone that is two ids for one paper, and the first live run duly stored,
+    chained and digested "A Sociotechnical Review of Algorithms in Health
+    Systems" twice.
+    """
+    from sources.arxiv import _norm_id
+    assert _norm_id("2609.22070v1") == "2609.22070"
+    assert _norm_id("2609.22070v12") == "2609.22070"
+    assert _norm_id("2609.22070") == "2609.22070"
+
+
 def test_arxiv_abstract_is_extracted_from_the_rss_preamble():
     from sources.arxiv import _abstract
     d = "arXiv:2609.21194v1 Announce Type: new  Abstract: The real text here."
@@ -391,6 +405,69 @@ def test_a_week_old_paper_keeps_most_of_its_score():
     week = s.score(title="healthcare AI", body="", source_weight=1.0,
                    published=now - timedelta(days=7), now=now)
     assert week.total / fresh.total > 0.75
+
+
+
+# -------------------------------------------------- the chain is the record
+def test_a_failed_chain_append_does_not_mark_the_hit_seen():
+    """Ordering bug found on the first real Lambda run.
+
+    The hit was stored before the chain entry. When the append failed the
+    item was already marked seen, so every later run skipped it as a
+    duplicate and it never entered the chain — a silent, permanent gap.
+    """
+    import app as _app
+    from datetime import datetime, timezone
+
+    class _Boom:
+        def head(self): return (0, "0" * 64)
+        def append_entry(self, *a, **k): raise RuntimeError("dynamo said no")
+        def entries(self): return iter(())
+
+    class _Store:
+        def __init__(self): self.puts = []
+        def seen(self, key): return False
+        def put(self, key, rec): self.puts.append(key)
+
+    class _Mail:
+        def send(self, *a, **k): return False
+
+    item = type("I", (), {
+        "source": "arxiv", "external_id": "x1", "key": "HIT#arxiv#x1",
+        "url": "https://arxiv.org/abs/x1",
+        "title": "Healthcare AI governance in practice", "author": "a",
+        "published": datetime.now(timezone.utc), "body": "clinical AI",
+        "extra": {}})()
+
+    cfg = _app.load_config(os.path.join(ROOT, "config.toml"))
+    store = _Store()
+    saved = _app.collect
+    _app.collect = lambda c, n: ([item], ["arxiv"], [])
+    try:
+        _app.run(cfg, hit_store=store, chain_store=_Boom(), mailer=_Mail())
+    finally:
+        _app.collect = saved
+    assert store.puts == [], "hit was marked seen despite the chain failing"
+
+
+def test_the_chain_stores_the_exact_bytes_it_hashed():
+    """DynamoDB has no float type, and the obvious workaround breaks the hash.
+
+    float -> Decimal means Decimal("3.0") reads back as int 3, which
+    re-canonicalises to "3" where the hash was taken over "3.0". The chain
+    would then fail to verify, but only for scores landing on whole numbers.
+    """
+    import json
+    from decimal import Decimal
+    from chain import canonical, entry_hash
+    payload = {"score": 3.0, "url": "https://x"}
+    direct = entry_hash(1, "0" * 64, "T", payload)
+    via_string = entry_hash(1, "0" * 64, "T", json.loads(canonical(payload)))
+    assert direct == via_string
+
+    naive = {k: (int(Decimal(str(v))) if isinstance(v, float) and v.is_integer()
+                 else v) for k, v in payload.items()}
+    assert entry_hash(1, "0" * 64, "T", naive) != direct
 
 
 if __name__ == "__main__":

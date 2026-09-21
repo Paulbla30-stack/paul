@@ -174,10 +174,27 @@ class DynamoChainStore:
         return int(it["seq"]), it["entry_hash"]
 
     def append_entry(self, seq: int, entry: dict, prev_entry_hash: str) -> None:
+        """Store the payload as its canonical JSON string, not as a map.
+
+        DynamoDB has no float type, and the obvious workaround is worse than
+        the problem. Converting float -> Decimal on write means Decimal("3.0")
+        comes back as int 3, which re-canonicalises to "3" where the hash was
+        taken over "3.0" — the chain would fail to verify, and only for
+        scores that happen to land on a whole number.
+
+        Storing the exact bytes that were hashed removes the whole class of
+        coercion bug: there is nothing for DynamoDB to interpret, and what
+        verify() re-reads is what append() hashed.
+        """
         from boto3.dynamodb.types import TypeSerializer
         ser = TypeSerializer()
 
-        item = {"pk": "CHAIN", "sk": f"{seq:0{SEQ_WIDTH}d}", **entry}
+        item = {"pk": "CHAIN", "sk": f"{seq:0{SEQ_WIDTH}d}",
+                "seq": entry["seq"], "ts": entry["ts"],
+                "prev_hash": entry["prev_hash"],
+                "entry_hash": entry["entry_hash"],
+                "payload_sha256": entry["payload_sha256"],
+                "payload_json": canonical(entry["payload"])}
         head = {"pk": "CHAIN", "sk": "HEAD", "seq": seq, "entry_hash": entry["entry_hash"]}
 
         def av(d):
@@ -214,7 +231,10 @@ class DynamoChainStore:
         while True:
             r = self.table.query(**kwargs)
             for it in r.get("Items", []):
-                yield _to_plain(it)
+                e = _to_plain(it)
+                if "payload_json" in e:
+                    e["payload"] = json.loads(e.pop("payload_json"))
+                yield e
             if "LastEvaluatedKey" not in r:
                 return
             kwargs["ExclusiveStartKey"] = r["LastEvaluatedKey"]
