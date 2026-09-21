@@ -75,8 +75,34 @@ digest_max_items = 25
 #
 # The system prompt is cache-controlled, so it costs about a tenth after
 # the first call in each five-minute window.
+# How to reach Claude. This is a credentials decision, not a quality one —
+# the models are the same either way.
+#
+#   "bedrock"    authenticates by IAM, so there is NO secret to store or
+#                rotate, and it bills to the account the $50 jarvis-monthly
+#                alarm already watches. The better shape for this system.
+#   "anthropic"  first-party API, needs a key in SSM.
+#
+# Set to bedrock once BOTH of these are granted in the AWS console. Checked
+# 21 Sep 2026 and both were blocking:
+#   1. The Anthropic "use case details" form, in Bedrock > Model access.
+#      Until it is submitted, every Anthropic model returns 404 "Model use
+#      case details have not been submitted for this account". Worth
+#      knowing: a few calls went through before the gate engaged, so one
+#      successful call does not mean it is clear.
+#   2. Model access for claude-opus-5 specifically. It returned 403 "not
+#      available for this account" while opus-4-5, sonnet-4-6 and haiku-4-5
+#      were already granted.
+provider = "anthropic"
+
 model = "claude-opus-5"
 effort = "high"
+
+# Used when provider = "bedrock". Bedrock serves these through a
+# cross-region inference profile, so the id needs the "us." prefix — the
+# bare form returns "on-demand throughput isn't supported".
+bedrock_model = "us.anthropic.claude-opus-5"
+bedrock_region = "us-west-2"
 
 # Most candidates should produce no draft at all. If this ratio ever
 # inverts, the prompt has drifted towards drafting for its own sake.

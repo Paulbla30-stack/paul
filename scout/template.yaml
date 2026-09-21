@@ -237,6 +237,23 @@ Resources:
                 Condition:
                   StringEquals:
                     kms:ViaService: !Sub 'ssm.${AWS::Region}.amazonaws.com'
+        - PolicyName: draft-via-bedrock
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              # Inference only, on Anthropic models, through the inference
+              # profile. Deliberately NOT bedrock:CreateModelCustomizationJob,
+              # CreateProvisionedModelThroughput or anything that imports a
+              # model: provisioned throughput on imported models is what
+              # produced the $462 leak in September, and this role should not
+              # be able to repeat it.
+              - Effect: Allow
+                Action:
+                  - bedrock:InvokeModel
+                  - bedrock:InvokeModelWithResponseStream
+                Resource:
+                  - !Sub 'arn:aws:bedrock:*::foundation-model/anthropic.*'
+                  - !Sub 'arn:aws:bedrock:*:${AWS::AccountId}:inference-profile/us.anthropic.*'
         - PolicyName: own-logs-only
           PolicyDocument:
             Version: '2012-10-17'

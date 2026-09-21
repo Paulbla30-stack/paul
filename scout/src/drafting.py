@@ -31,6 +31,31 @@ log = logging.getLogger("jarvis.scout.drafting")
 DEFAULT_MODEL = "claude-opus-5"
 MAX_TOKENS = 4000
 
+# Two ways to reach Claude, and the choice is about credentials, not quality.
+#
+#   "anthropic"  first-party API. Needs an API key, which means a secret to
+#                store and rotate.
+#   "bedrock"    same models through AWS. Authenticates by IAM, so there is
+#                NO secret at all — the Lambda role is the credential — and
+#                it bills to the account the $50 budget alarm already
+#                watches. Strictly the better shape for this system.
+#
+# Bedrock needs two things granted in the AWS console first, both of them
+# Paul's to do, and both confirmed blocking on 21 Sep 2026:
+#   1. The Anthropic "use case details" form. Until it is submitted every
+#      Anthropic model returns 404 "Model use case details have not been
+#      submitted for this account". A handful of calls went through before
+#      the gate engaged, so a single successful call does not mean it is
+#      clear.
+#   2. Model access for the specific model. claude-opus-5, opus-4-8 and
+#      sonnet-5 each returned 403 "not available for this account" while
+#      opus-4-5, sonnet-4-6 and haiku-4-5 were granted.
+#
+# Bedrock model ids need a region prefix and an inference profile:
+# "us.anthropic.claude-opus-5", not "anthropic.claude-opus-5".
+PROVIDER_ANTHROPIC = "anthropic"
+PROVIDER_BEDROCK = "bedrock"
+
 # Stable, so it caches. Nothing volatile (no timestamps, no ids) may go in
 # here or the prefix changes every call and the cache never hits.
 SYSTEM = """You draft short posts and comments for Paul Blatherwick RMN, a \
@@ -149,8 +174,18 @@ def _untrusted_block(item: dict) -> str:
 
 
 class Drafter:
-    def __init__(self, model: str | None = None, client=None, effort: str = "high"):
+    def __init__(self, model: str | None = None, client=None, effort: str = "high",
+                 provider: str | None = None, region: str | None = None):
+        self.provider = (provider
+                         or os.environ.get("SCOUT_DRAFT_PROVIDER", PROVIDER_ANTHROPIC))
+        self.region = region or os.environ.get("AWS_REGION", "us-west-2")
         self.model = model or os.environ.get("SCOUT_DRAFT_MODEL", DEFAULT_MODEL)
+        if self.provider == PROVIDER_BEDROCK and not self.model.startswith("us."):
+            # Bedrock serves these through a cross-region inference profile;
+            # the bare id returns "on-demand throughput isn't supported".
+            self.model = "us." + self.model.removeprefix("anthropic.")
+            if not self.model.startswith("us.anthropic."):
+                self.model = self.model.replace("us.", "us.anthropic.", 1)
         self.effort = effort
         self._client = client
 
@@ -158,7 +193,10 @@ class Drafter:
     def client(self):
         if self._client is None:
             import anthropic
-            self._client = anthropic.Anthropic()
+            if self.provider == PROVIDER_BEDROCK:
+                self._client = anthropic.AnthropicBedrock(aws_region=self.region)
+            else:
+                self._client = anthropic.Anthropic()
         return self._client
 
     def draft(self, item: dict) -> dict:
@@ -200,6 +238,7 @@ class Drafter:
             "cache_write": getattr(response.usage, "cache_creation_input_tokens", 0),
         }
         out["model"] = self.model
+        out["provider"] = self.provider
 
         if not out.get("worth_posting"):
             out["draft"] = ""
