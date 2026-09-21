@@ -206,6 +206,12 @@ class AgentCore:
         # this codebase and not two. See schedule.py.
         from jarvis.agent import schedule as _schedule
         self.schedule = _schedule.build_schedule(self, config)
+        # What it costs to be right, which is not settled by being right.
+        # Everything else here asks whether a thing is true; this asks what
+        # saying it to somebody costs, and it never softens the claim to
+        # answer that. See bearing.py.
+        from jarvis.agent import bearing as _bearing
+        self.bearing = _bearing.build_bearing(config)
         # Quiet hours are a guess at when he is unavailable; the calendar is
         # a statement of it. The channel holds the agent's own notices while
         # he is sitting in something, and never the diary's.
@@ -709,6 +715,16 @@ class AgentCore:
 
         return result
 
+    def _bearing_note(self, answer: str) -> Optional[str]:
+        """Whether anything in this was aimed at a person. Never rewrites."""
+        register = getattr(self, "bearing", None)
+        if register is None or not answer:
+            return None
+        try:
+            return register.note(answer)
+        except Exception:               # a note is never worth losing an answer
+            return None
+
     def busy_now(self) -> Optional[dict]:
         """What he is sitting in right now, for the channel to be civil about.
 
@@ -1081,6 +1097,13 @@ class AgentCore:
             note = _verdicts.note(rulings)
             if note:
                 answer = f"{answer}\n\n[claim check] {note}"
+        # And what it would cost to say. Reported beside the answer rather
+        # than applied to it: the words that go out are the words it wrote,
+        # every time. An agent that quietly rounded off its own claims to
+        # spare somebody is the agent that reports an empty scan as clean.
+        aimed = self._bearing_note(answer)
+        if aimed:
+            answer = f"{answer}\n\n[bearing] {aimed}"
         last_user = ""
         for t in reversed(list(turns or [])):
             if isinstance(t, dict) and t.get("role") == "user":

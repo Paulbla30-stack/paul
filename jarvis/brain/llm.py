@@ -771,6 +771,16 @@ class BaseBrain:
             shape = None
         if shape:
             context["his_week"] = shape
+        # What it costs to be right. Given as a fact about people rather
+        # than a rule about tone, and carrying its own warning against the
+        # failure it could otherwise cause: never hedge a finding.
+        try:
+            register = getattr(agent, "bearing", None)
+            carried = register.context() if register is not None else None
+        except Exception:
+            carried = None
+        if carried:
+            context["saying_it_to_someone"] = carried
         knower = getattr(agent, "self_knowledge", None)
         if knower is not None:
             try:

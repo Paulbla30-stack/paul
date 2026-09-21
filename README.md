@@ -54,6 +54,12 @@ jarvis/
   authority. A held message is not a delivered one, a moment missed while
   nothing was running says so, and a month of downtime is one message and a
   count rather than thirty. See `jarvis/agent/diary.py`
+- **Bearing**: everything else asks whether a thing is true; this asks what it
+  costs to say it to somebody. The distinction is plain (about the world)
+  against pointed (aimed at a person) — identical information, and the bill
+  falls on whoever said it. It reports and never rewrites, never softens a
+  claim, and never touches a finding, a refusal or the agent's own mistakes.
+  See `jarvis/agent/bearing.py`
 - **The Calendar**: the diary holds moments, this holds spans -- which is what
   makes a clash and a gap expressible at all. A collision is reported and
   never resolved; a gap is never called free time, because an empty calendar
@@ -470,6 +476,62 @@ assumed, and it says so) and a bare day (all day, and it says so). `GET
 /schedule` returns the week, the clashes and what he is in now; `GET
 /schedule/free?day=` the gaps; `POST /schedule/add`, `/confirm`, `/cancel` and
 `/move` are the rest. Moving one takes its reminder with it.
+
+## Bearing: what it costs to be right
+
+Everything else here asks whether a statement is **true**. The verdict register
+rules on it, the path checker tests it against the disk, the claim checker
+compares a stated figure with the real reading. None of them ask the other
+question, which is what it costs to say it to somebody.
+
+The distinction that matters is not plain against polished. It is **plain**
+against **pointed**:
+
+    plain    — about the world:     the record is held by the supplier
+    pointed  — aimed at a person:   you did not read the pack
+
+Identical information. Completely different bill, and the bill falls on the
+person who said it. A true thing about a situation is free. The same true thing
+with somebody in the subject position asks them to pay in standing for your
+accuracy, and almost nobody will — they pay in avoidance instead. They go
+quiet, and a fortnight later they decline without giving a reason.
+
+**It never softens a claim and never rewrites one.** That has to lead, because
+a module that adjusted tone would be the exact inversion of what the rest of
+this codebase is for: an agent that hedges a finding to spare someone is the
+agent that reports an empty scan as zero findings. The words that go out are
+the words it wrote. The note goes *beside* the answer, never into it.
+
+Three things it will not touch, because they are the point of everything else:
+a finding about the world however unwelcome, a refusal and its reason, and the
+agent's own account of its own mistakes — *"I did not check that"* is
+accountability, and the patterns are second-person for exactly that reason.
+
+It looks for three shapes:
+
+| | |
+|---|---|
+| **scorekeeping** | *"as I said"*, *"as per my previous email"* — establishing who was right rather than what is true |
+| **blame** | *"you didn't"*, *"you should have"*, *"if you had"* — a person in the subject position of a failure |
+| **after the fact** | *"next time"*, *"in future"* — advice to someone who did not ask, about a thing already decided |
+
+And it carries one standing question, borrowed from the question register:
+**what does the other person do differently if they accept this?** No answer
+means it is not a correction, it is a scoreboard — and a scoreboard is the most
+expensive sentence there is, because it buys nothing and it is remembered.
+
+**Finding nothing is not a clearance.** The most pointed sentences are often
+the ones with no phrase to catch: *"read the pack before meeting someone"* is
+as pointed as writing gets and contains nothing a regular expression can hold.
+So a clean result says what it actually checked and never that a message is
+safe to send. There is a test that asserts precisely this, on the real sentence
+that prompted the module.
+
+The first version fired on *"If you would like, I can draft it this week"* —
+the friendliest sentence in the language — because a bare *"if you"* was being
+read as a counterfactual. Half the tests here are about what it must **not**
+catch. A check that goes off on ordinary writing is switched off within a week,
+and then it catches nothing at all.
 
 ## Questions: its side of the conversation
 
