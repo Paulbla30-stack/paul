@@ -101,6 +101,10 @@ _DUE_WORDS = re.compile(
     r"appointment|starts?|ends?|closes?|cancel|return|submit|deliver(?:y|ed)?|"
     r"valid until|last day|reminder)\b", re.IGNORECASE)
 
+# Two due words this close together are one phrase ("payable by", "valid
+# until"), not two separate reasons.
+_SAME_PHRASE = 12
+
 _RELATIVE = re.compile(
     r"\bin\s+(\d{1,3})\s*(minute|min|hour|hr|day|week|month)s?\b", re.IGNORECASE)
 _WEEKDAYS = ("monday", "tuesday", "wednesday", "thursday", "friday",
@@ -840,7 +844,18 @@ class Diary:
             # than sixty characters of whatever came before. A slab of a
             # statement period is how "renews 3 November" turns into a line
             # he has to decode before he can rule on it.
-            headline = " ".join(window[reasons[-1].start():].split())[:70]
+            #
+            # The nearest such word is the anchor, but a phrase often has
+            # two: "payable by 14 October" matches both, and starting from
+            # the nearer one gives "by 14 October", which has lost the half
+            # that says what is being asked. So it reaches back over any
+            # other due word close enough to be part of the same phrase.
+            start = reasons[-1].start()
+            for earlier in reasons[:-1]:
+                if start - earlier.end() <= _SAME_PHRASE:
+                    start = earlier.start()
+                    break
+            headline = " ".join(window[start:].split())[:70]
             try:
                 item = self.suggest(
                     f"{name}: {headline}",

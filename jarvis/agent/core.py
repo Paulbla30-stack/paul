@@ -719,7 +719,11 @@ class AgentCore:
             return
         try:
             made = self.diary.suggest_from_document(
-                str(output.get("name") or path or "a document"),
+                # The name he gave it, not the path it landed at. A
+                # commitment reading "/var/lib/jarvis/uploads/british-gas.txt:
+                # by 14 October" is a line he has to decode before he can
+                # rule on it.
+                str(output.get("name") or path.rsplit("/", 1)[-1] or "a document"),
                 output.get("text") or "", output.get("dates_in_it"))
         except Exception as exc:
             self.log.debug("could not read dates into the diary: %s", exc)

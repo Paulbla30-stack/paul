@@ -458,8 +458,26 @@ class TestReadingItOffAPage(Base):
     def test_a_due_date_is_suggested(self):
         made = self.diary.suggest_from_document("british-gas.pdf", self.BILL)
         self.assertTrue(made)
-        self.assertIn("14 Oct", made[0].note or made[0].what + " ")
+        self.assertIn("14 Oct", made[0].what)
         self.assertEqual(made[0].due_local[:10], "2026-10-14")
+
+    def test_the_line_says_what_is_being_asked_not_just_when(self):
+        """Two due words next to each other are one phrase. Anchoring on the
+        nearer alone gives "by 14 October", which has lost the half that says
+        what it is for."""
+        made = self.diary.suggest_from_document(
+            "bill.pdf", "Amount due 92.50, payable by 14 October 2026.")
+        self.assertIn("payable by 14 October 2026", made[0].what)
+
+    def test_a_lone_due_word_is_not_reached_past(self):
+        made = self.diary.suggest_from_document(
+            "note.pdf", "Some unrelated words here. Renews 3 November 2026.")
+        self.assertTrue(made[0].what.lower().startswith("note.pdf: renews"))
+
+    def test_it_is_named_by_the_file_not_the_path_it_landed_at(self):
+        made = self.diary.suggest_from_document("british-gas.txt", self.BILL)
+        self.assertTrue(made[0].what.startswith("british-gas.txt:"))
+        self.assertNotIn("/var/lib", made[0].what)
 
     def test_a_suggestion_fires_nothing_until_he_says(self):
         made = self.diary.suggest_from_document("british-gas.pdf", self.BILL)
@@ -632,6 +650,9 @@ class TestItIsActuallyWiredIn(unittest.TestCase):
         waiting = agent.diary.proposed()
         self.assertEqual(len(waiting), 1)
         self.assertEqual(waiting[0].due_local[:10], "2027-10-14")
+        # Named by the file, not by where the upload folder put it.
+        self.assertTrue(waiting[0].what.startswith("bill.txt:"))
+        self.assertNotIn(tempfile.gettempdir(), waiting[0].what)
 
     def test_a_document_with_no_dates_leaves_the_diary_alone(self):
         import os
