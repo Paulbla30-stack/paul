@@ -242,6 +242,59 @@ def test_arxiv_endpoint_is_https():
     assert CFG["sources"]["arxiv"]["endpoint"].startswith("https://")
 
 
+# ----------------------------------------------------------------- moltbook
+def _code_without_docstrings(path: str) -> str:
+    """Source with all docstrings removed.
+
+    The docstrings deliberately discuss the write endpoints in order to
+    explain why they are not used, so a naive text search over the whole
+    file finds its own documentation and fails.
+    """
+    import ast
+    tree = ast.parse(open(path).read())
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef,
+                             ast.AsyncFunctionDef)):
+            if (node.body and isinstance(node.body[0], ast.Expr)
+                    and isinstance(node.body[0].value, ast.Constant)
+                    and isinstance(node.body[0].value.value, str)):
+                node.body.pop(0)
+    return ast.unparse(tree)
+
+
+def test_moltbook_is_enabled_and_read_only():
+    assert CFG["sources"]["moltbook"]["enabled"] is True
+    code = _code_without_docstrings(
+        os.path.join(ROOT, "src", "sources", "moltbook.py"))
+    # No write path, no credentials. This is the whole safety property.
+    for forbidden in ("api_key", "Authorization", "Bearer", "data=",
+                      "create_post", "/feed", "/vote", "/comment"):
+        assert forbidden not in code, \
+            f"moltbook.py must stay read-only: found {forbidden!r} in code"
+
+
+def test_no_source_module_can_write_anywhere():
+    # Stage 1 never posts. If this fails, something has gained a write path.
+    import glob
+    for f in glob.glob(os.path.join(ROOT, "src", "sources", "*.py")):
+        src = open(f).read()
+        assert "urlopen" not in src or "sources/__init__" in f or "http_" in src, f
+    base = open(os.path.join(ROOT, "src", "sources", "__init__.py")).read()
+    # http_get is the only egress, and only lesswrong passes data= (GraphQL read).
+    assert base.count("urlopen") == 1
+
+
+def test_moltbook_highlight_markers_are_stripped():
+    from sources.moltbook import _clean
+    assert _clean("⟦HL⟧Healthcare⟦/HL⟧ AI") == "Healthcare AI"
+
+
+def test_moltbook_items_are_marked_as_machine_written():
+    # The digest must not present agent output as human conversation.
+    src = open(os.path.join(ROOT, "src", "sources", "moltbook.py")).read()
+    assert '"written_by": "agent"' in src
+
+
 if __name__ == "__main__":
     fns = [(n, f) for n, f in sorted(globals().items()) if n.startswith("test_")]
     bad = 0

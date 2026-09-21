@@ -148,13 +148,58 @@ title is not enough; two are, and one specific term is.
 | Source | Access | How it is queried |
 |---|---|---|
 | Hacker News | Algolia, keyless | Searched per keyword, relevance-ranked |
+| Moltbook | public REST, keyless | Searched per keyword, **read only** |
 | LessWrong | public GraphQL, keyless | Recent posts swept, filtered locally |
 | arXiv | public Atom API, keyless | `cs.CY`, `cs.AI`, `cs.HC`, swept |
 | medRxiv | public API, keyless | Date range, filtered to 4 categories |
 
 **Stage 1 needs no secrets at all.** Every API above is public and keyless,
 so there is nothing in Secrets Manager or SSM and nothing in the code. The
-first secret this project needs will be Reddit's, if it is ever approved.
+first secret this project needs will be Reddit's, if it is ever approved,
+or Moltbook's, if Paul approves posting in Stage 2.
+
+### Moltbook and the agent networks
+
+Moltbook is the agent-only social network — AI agents post, humans observe.
+It launched in January 2026 and has over 167,000 registered agents.
+
+**The scout reads it and never writes to it.** There is no write path in
+`sources/moltbook.py` and no credential anywhere in this project. Read
+endpoints (`/posts`, `/search`, `/submolts`) are public and keyless; only
+`/feed` needs an API key, and the scout does not use it. Their Terms of
+Service say nothing about programmatic reading.
+
+It is the **best source in this project for Paul's subject matter** —
+better than Hacker News by a wide margin. A 30-day read returned posts like
+"The structural limits of model-centric clinical AI" (+16), "Human
+Oversight in AI Agent Collaboration", and "CDS Hooks in TrakCare: Why SMART
+on FHIR Changes Clinical Decision Support".
+
+It is weighted **below** the preprint servers (0.9) for a reason that is
+not about quality. Everything on it was written by a machine. A consensus
+there is evidence about what agents say, not about what is true, and the
+network's own research literature includes a paper titled *"When Agents
+Talk: Discourse, Manipulation, and Risk in an Agentic Social Network"*.
+The digest records `written_by: agent` on every item from it.
+
+#### If posting is ever added (Stage 2)
+
+Two clauses in Moltbook's Terms bear directly on it, recorded here so they
+are not rediscovered late:
+
+- **"AI AGENTS ARE NOT GRANTED ANY LEGAL ELIGIBILITY WITH USE OF OUR
+  SERVICES."** The human owner is solely responsible for what their agent
+  does. That is Paul personally, as an RMN on the NMC register — not a
+  company.
+- The Terms prohibit use "in conjunction with sending unauthorized
+  advertising, marketing, spam or commercial sales content." Posting the
+  Heartbeat Framework to drive consultancy enquiries sits close to that
+  line however it is phrased.
+
+Paul's decision (21 Sep 2026) is **scout plus drafts he approves one at a
+time**, with disclosure both that the work is his and that the post is
+automated. No autonomous posting. Nothing goes out without him seeing it
+first. That is Stage 2 and has not been started.
 
 ### Reddit
 

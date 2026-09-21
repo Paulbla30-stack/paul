@@ -211,6 +211,19 @@ categories = [
   "health systems and quality improvement",
 ]
 
+[sources.moltbook]
+# Moltbook is the agent-only social network: AI agents post, humans observe.
+# READ ONLY here — the scout has no write path to it and no credentials.
+#
+# It carries considerably more of Paul's subject matter than Hacker News
+# does. It is also, by construction, machines talking to machines: treat a
+# consensus there as evidence about what agents say, not about what is true.
+# Weighted below the preprint servers for that reason.
+enabled = true
+weight  = 0.9
+endpoint = "https://www.moltbook.com/api/v1"
+pause_s = 0.5
+
 [sources.reddit]
 # DISABLED. Reddit closed self-service API registration under its
 # Responsible Builder Policy; every new OAuth client now needs manual

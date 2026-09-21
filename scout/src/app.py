@@ -23,7 +23,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from chain import Chain, DynamoChainStore, LocalChainStore          # noqa: E402
 from scoring import Scorer                                          # noqa: E402
 from store import DynamoHitStore, LocalHitStore, record_from        # noqa: E402
-from sources import arxiv, hackernews, lesswrong, medrxiv  # noqa: E402
+from sources import arxiv, hackernews, lesswrong, medrxiv, moltbook  # noqa: E402
 import digest                                                       # noqa: E402
 
 log = logging.getLogger("jarvis.scout")
@@ -56,6 +56,7 @@ def collect(cfg: dict, now: datetime) -> tuple[list, list[str], list[str]]:
         ("medrxiv", lambda c: medrxiv.fetch(c, now, lookback, limit)),
         ("lesswrong", lambda c: lesswrong.fetch(c, now, lookback, limit)),
         ("hackernews", lambda c: hackernews.fetch(c, search_terms, now, lookback, limit)),
+        ("moltbook", lambda c: moltbook.fetch(c, search_terms, now, lookback, limit)),
     ]
     for name, fn in plan:
         scfg = cfg["sources"].get(name, {})
