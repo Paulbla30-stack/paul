@@ -801,8 +801,12 @@ class Diary:
         notifier = getattr(self.agent, "notifier", None)
         if notifier is None:
             return {"sent": False, "reason": "no channel to reach him on"}
+        # A reminder he asked for arrives when he asked for it. The channel
+        # will hold the agent's own notices while he is in something; this is
+        # not one of those, and the contract is what makes the difference.
         verdict = notifier.send(item.what, body, severity=item.severity,
-                                key=f"diary:{item.id}:{int(lead)}")
+                                key=f"diary:{item.id}:{int(lead)}",
+                                time_critical=True)
         self._record("diary_fired", item, extra={
             "lead_s": lead, "late": late, "sent": bool(verdict.get("sent")),
             "reason": verdict.get("reason")})

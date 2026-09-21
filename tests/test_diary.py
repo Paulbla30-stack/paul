@@ -40,9 +40,11 @@ class FakeNotifier:
 
     def __init__(self, hold=None):
         self.sent = []
+        self.calls = []
         self.hold = hold                       # a reason, or None
 
-    def send(self, subject, body="", severity="notice", key=None):
+    def send(self, subject, body="", severity="notice", key=None, **kw):
+        self.calls.append(dict(kw, subject=subject, severity=severity))
         if self.hold:
             return {"sent": False, "held": True, "reason": self.hold}
         self.sent.append({"subject": subject, "body": body,

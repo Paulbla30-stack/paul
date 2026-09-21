@@ -98,8 +98,12 @@ STATES = ("live", "dormant", "superseded")
 # dated thing the operator asked to be reminded of; it is here rather than in
 # a file of its own because this database is the one thing copied off the box,
 # and a diary that is not backed up loses the appointment nobody wrote down.
+# "appointment" is a span of his time rather than a moment; it lives beside
+# the commitments for the same reason, and because an appointment is only
+# half an entry -- the reminder that goes with it is a commitment, and the
+# two have to survive together or the calendar comes back without its voice.
 KINDS = ("note", "fact", "upload", "goal", "operator", "proposal", "verdict",
-         "commitment")
+         "commitment", "appointment")
 SOURCES = ("brain", "operator", "system", "review", "machine")
 
 DEFAULT_PATH = "/var/lib/jarvis/memory.db"

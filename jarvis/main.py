@@ -433,6 +433,11 @@ class JarvisSystem:
             or ((self.config.get("cloud") or {}).get("notify") or {}).get("timezone"))
         if not agent_cfg["diary"].get("timezone"):
             agent_cfg["diary"].pop("timezone", None)
+        agent_cfg["schedule"] = dict(agent_cfg.get("schedule") or {})
+        agent_cfg["schedule"].setdefault("timezone",
+                                         agent_cfg["diary"].get("timezone"))
+        if not agent_cfg["schedule"].get("timezone"):
+            agent_cfg["schedule"].pop("timezone", None)
         self.agent = AgentCore(
             config=agent_cfg,
             hardware=hardware,

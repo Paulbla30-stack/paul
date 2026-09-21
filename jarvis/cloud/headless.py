@@ -343,6 +343,7 @@ class HeadlessRunner:
                     return self._send(200, runner.list_uploads())
                 limit = 20
                 search = ""
+                day = None
                 for part in query.split("&"):
                     if part.startswith("limit="):
                         try:
@@ -351,6 +352,8 @@ class HeadlessRunner:
                             pass
                     elif part.startswith("q="):
                         search = urllib.parse.unquote_plus(part[2:])[:200].strip()
+                    elif part.startswith("day="):
+                        day = urllib.parse.unquote_plus(part[4:])[:10].strip() or None
                 with runner._lock:
                     if path in ("/", "/health"):
                         if loopback_only:
@@ -387,6 +390,14 @@ class HeadlessRunner:
                         # read. A profile its subject cannot see is a rumour
                         # with his name on it.
                         self._send(200, runner.agent.operator.state())
+                    elif path == "/schedule":
+                        # The shape of his week, what collides, and where the
+                        # gaps in what is written down are.
+                        self._send(200, runner.agent.schedule.state())
+                    elif path == "/schedule/free":
+                        # Never "free time". See schedule.py: the answer
+                        # carries what it is actually a statement about.
+                        self._send(200, runner.agent.schedule.free(day))
                     elif path == "/diary":
                         # What is coming, what he has not ruled on, and when
                         # the register last looked.
@@ -544,6 +555,46 @@ class HeadlessRunner:
                             return self._send(409, {"refused": str(why)})
                     runner._write_status_file()
                     self._send(200, {"profile": runner.agent.operator.state()})
+                elif path in ("/schedule/add", "/schedule/confirm",
+                              "/schedule/cancel", "/schedule/move"):
+                    try:
+                        payload = json.loads(body or "{}")
+                    except ValueError:
+                        return self._send(400, {"error": "body must be JSON"})
+                    if not isinstance(payload, dict):
+                        return self._send(400, {"error": "JSON object required"})
+                    from jarvis.agent import diary as _d
+                    with runner._lock:
+                        runner.agent.note_operator("schedule")
+                        try:
+                            if path == "/schedule/add":
+                                item = runner.agent.schedule.add(
+                                    str(payload.get("what") or ""),
+                                    str(payload.get("when") or ""),
+                                    length=payload.get("length"),
+                                    repeat=payload.get("repeat") or _d.ONCE,
+                                    where=str(payload.get("where") or ""),
+                                    remind_before=payload.get("remind_before"))
+                                return self._send(
+                                    200, {"appointment": item.state_dict(),
+                                          "schedule": runner.agent.schedule.state()})
+                            ident = str(payload.get("id") or payload.get("what") or "")
+                            if path == "/schedule/move":
+                                item = runner.agent.schedule.move(
+                                    ident, str(payload.get("when") or ""),
+                                    length=payload.get("length"))
+                                done = item is not None
+                            elif path == "/schedule/confirm":
+                                done = runner.agent.schedule.confirm(ident) is not None
+                            else:
+                                done = runner.agent.schedule.cancel(ident)
+                        except _d.Refused as why:
+                            return self._send(409, {"error": str(why),
+                                                    "refused": True})
+                    runner._write_status_file()
+                    self._send(200 if done else 404,
+                               {"changed": done,
+                                "schedule": runner.agent.schedule.state()})
                 elif path in ("/diary/add", "/diary/confirm", "/diary/drop",
                               "/diary/done"):
                     try:
@@ -997,6 +1048,17 @@ class HeadlessRunner:
         diary = getattr(self.agent, "diary", None)
         if diary is None:
             return
+        # Roll any finished repeat forward first, so the reminder the diary
+        # is about to look at belongs to the occurrence in front rather than
+        # to one that ended an hour ago.
+        calendar = getattr(self.agent, "schedule", None)
+        if calendar is not None:
+            try:
+                for rolled in calendar.tick().get("rolled", []):
+                    self.log.info("Calendar: %s now on %s", rolled["what"],
+                                  rolled["now_on"])
+            except Exception as e:
+                self.log.warning("calendar tick failed: %s", e)
         try:
             report = diary.tick()
         except Exception as e:                       # never stops the loop

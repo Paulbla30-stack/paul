@@ -235,6 +235,35 @@
   </section>
 
   <section id="diary">
+    <div class="card span-2" id="calClashCard" style="display:none">
+      <h2>Two things at once</h2>
+      <ul id="calClashes"></ul>
+      <p class="small muted" style="margin:8px 0 0">Said, not resolved. Both are still standing — which one gives way is yours.</p>
+    </div>
+
+    <div class="card span-2">
+      <h2>Your week</h2>
+      <p id="calNow" class="small" style="margin:0 0 8px"></p>
+      <ul id="calWeek"></ul>
+      <ul id="calAhead" style="margin-top:10px"></ul>
+      <div class="row wrap" style="margin-top:10px">
+        <input id="calWhat" placeholder="What it is" style="flex:2" />
+        <input id="calWhen" placeholder="friday 2pm for 1 hour at the dentist" style="flex:3" />
+        <button class="btn" onclick="addAppointment()">Book</button>
+      </div>
+      <p id="calMsg" class="small" style="margin:8px 0 0"></p>
+    </div>
+
+    <div class="card span-2">
+      <h2>Gaps</h2>
+      <div class="row wrap">
+        <input id="calFreeDay" placeholder="2026-09-24" style="flex:1" />
+        <button class="btn" onclick="showGaps()">Look</button>
+      </div>
+      <p id="calFree" class="small" style="margin:8px 0 0"></p>
+      <p class="small muted" style="margin:6px 0 0">Gaps in what is written down. Not the same as being free — anything you have not told him about is invisible here.</p>
+    </div>
+
     <div class="card span-2">
       <h2>Coming up</h2>
       <ul id="diaryStanding"></ul>
@@ -368,7 +397,7 @@
 
 <div class="composer" id="composer">
   <div class="inner">
-    <textarea id="chatInput" rows="1" placeholder="Ask the agent… (/goal text, /think)"></textarea>
+    <textarea id="chatInput" rows="1" placeholder="Ask the agent… (/goal, /remind, /book, /think)"></textarea>
     <button class="btn" id="sendBtn" onclick="sendChat()">Send</button>
   </div>
 </div>
@@ -474,6 +503,25 @@
           body: JSON.stringify({ what: rest.slice(0, cut).trim(), when: rest.slice(cut + 1).trim() }) });
         const c = r.commitment;
         pushTurn("system", "In the diary: " + c.what + " — " + c.reads_as + ", " + c.when + (c.note ? "\n" + c.note : ""));
+        loadDiary();
+      } catch (e) { pushTurn("system", e.message); }
+      return;
+    }
+    if (text.startsWith("/book")) {
+      pushTurn("user", text);
+      const rest = text.slice(5).trim();
+      const cut = rest.lastIndexOf("@");
+      if (cut < 1) { pushTurn("system", "Say it as /book <what> @ <when>, for example: /book dentist @ friday 2pm for 30 minutes"); return; }
+      try {
+        const r = await api("/schedule/add", { method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ what: rest.slice(0, cut).trim(), when: rest.slice(cut + 1).trim() }) });
+        const a = r.appointment;
+        let line = "In the calendar: " + a.what + " — " + a.reads_as + (a.where ? ", " + a.where : "");
+        if (a.reminder) line += "\nHe will say something " + a.reminder + " before.";
+        if (a.note) line += "\n" + a.note;
+        const clash = (r.schedule.clashes || []).filter(c => c.this.id === a.id || c.and.id === a.id);
+        for (const c of clash) line += "\n⚠️ " + c.reads_as;
+        pushTurn("system", line);
         loadDiary();
       } catch (e) { pushTurn("system", e.message); }
       return;
@@ -597,11 +645,74 @@
     b.onclick = async () => { try { await api(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id }) }); } catch (e) { alert(e.message); } loadDiary(); };
     return b;
   }
+  async function loadSchedule() {
+    let s; try { s = await api("/schedule"); } catch (e) { return; }
+    $("calNow").textContent = s.in_something_now
+      ? ("In " + s.in_something_now.what + " until " + s.in_something_now.end_local.slice(11))
+      : (s.next ? ("Next: " + s.next.what + " — " + s.next.reads_as + ", " + s.next.when)
+                : "Nothing at a set time coming up.");
+    const week = $("calWeek"); week.innerHTML = "";
+    for (const line of s.week) {
+      const li = document.createElement("li");
+      li.className = "small" + (/nothing written down/.test(line) ? " muted" : "");
+      li.textContent = line; week.appendChild(li);
+    }
+    const ahead = $("calAhead"); ahead.innerHTML = "";
+    for (const a of s.ahead) {
+      const li = document.createElement("li"); li.className = "row";
+      const bits = [a.reads_as];
+      if (a.where) bits.push(a.where);
+      bits.push(a.when);
+      if (a.repeat !== "once") bits.push("every " + a.repeat.replace("ly", ""));
+      bits.push(a.reminder ? ("he says something " + a.reminder + " before") : "no reminder");
+      li.innerHTML = '<span style="flex:1">' + (a.running ? "▶ " : "⬜ ") + escapeHtml(a.what) +
+        '<br><span class="small muted">' + escapeHtml(bits.join(" · ")) + '</span>' +
+        (a.note ? '<br><span class="small" style="color:var(--warn)">' + escapeHtml(a.note) + '</span>' : '') + '</span>';
+      li.appendChild(diaryButton("Cancel", "/schedule/cancel", a.id));
+      ahead.appendChild(li);
+    }
+    $("calClashCard").style.display = s.clashes.length ? "" : "none";
+    const cl = $("calClashes"); cl.innerHTML = "";
+    for (const c of s.clashes) {
+      const li = document.createElement("li"); li.className = "row";
+      li.innerHTML = '<span style="flex:1">⚠️ ' + escapeHtml(c.reads_as) + '</span>';
+      li.appendChild(diaryButton("Cancel this", "/schedule/cancel", c.this.id));
+      li.appendChild(diaryButton("Cancel that", "/schedule/cancel", c.and.id));
+      cl.appendChild(li);
+    }
+  }
+  window.showGaps = async function () {
+    const day = $("calFreeDay").value.trim();
+    try {
+      const f = await api("/schedule/free" + (day ? "?day=" + encodeURIComponent(day) : ""));
+      $("calFree").textContent = f.gaps.length
+        ? (f.day + " " + f.between + ": " + f.gaps.map(g => g.from + "-" + g.to).join(", "))
+        : (f.day + ": nothing between " + f.between);
+    } catch (e) { $("calFree").textContent = e.message; }
+  };
+  window.addAppointment = async function () {
+    const what = $("calWhat").value.trim(), when = $("calWhen").value.trim();
+    const msg = $("calMsg"); msg.style.color = ""; msg.textContent = "";
+    if (!what || !when) { msg.textContent = "Both a thing and a time, please."; return; }
+    try {
+      const r = await api("/schedule/add", { method: "POST", headers: { "Content-Type": "application/json" },
+                                             body: JSON.stringify({ what, when }) });
+      $("calWhat").value = ""; $("calWhen").value = "";
+      msg.textContent = r.appointment.reads_as + (r.appointment.note ? " · " + r.appointment.note : "");
+      loadDiary();
+    } catch (e) { msg.style.color = "var(--bad)"; msg.textContent = e.message; }
+  };
+
   async function loadDiary() {
+    await loadSchedule();
     let d; try { d = await api("/diary"); } catch (e) { return; }
     const standing = $("diaryStanding"); standing.innerHTML = "";
-    if (!d.standing.length) standing.innerHTML = '<li class="muted small">Nothing in the diary.</li>';
-    for (const c of d.standing) { const li = commitmentLine(c);
+    // An appointment's reminder belongs to the appointment, which is shown
+    // above with its own Cancel. Listing it here too reads as two things,
+    // and dropping it would leave the appointment booked and silent.
+    const own = d.standing.filter(c => c.from !== "calendar");
+    if (!own.length) standing.innerHTML = '<li class="muted small">Nothing in the diary.</li>';
+    for (const c of own) { const li = commitmentLine(c);
       li.appendChild(diaryButton("Done", "/diary/done", c.id));
       li.appendChild(diaryButton("Drop", "/diary/drop", c.id));
       standing.appendChild(li); }

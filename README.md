@@ -54,6 +54,12 @@ jarvis/
   authority. A held message is not a delivered one, a moment missed while
   nothing was running says so, and a month of downtime is one message and a
   count rather than thirty. See `jarvis/agent/diary.py`
+- **The Calendar**: the diary holds moments, this holds spans -- which is what
+  makes a clash and a gap expressible at all. A collision is reported and
+  never resolved; a gap is never called free time, because an empty calendar
+  is a calendar with nothing in it and not a free day. It does not learn to
+  speak: an appointment registers a commitment and the diary says it. See
+  `jarvis/agent/schedule.py`
 
 ## Building the ISO
 
@@ -183,8 +189,8 @@ an agent panel with goals, recent tasks and a "Think now" button, and file
 uploads that land in `cloud.ui.upload_dir` and are handed to the brain as
 `uploaded_files`, and a diary of what is coming. Login is the runner token.
 The API behind it: `POST /chat` (multi-turn), `POST /upload` (raw body +
-`X-Filename`), `GET /uploads`, `GET /diary` and its four `POST` companions,
-plus everything the loopback status server offers.
+`X-Filename`), `GET /uploads`, `GET /diary` and `GET /schedule` with their
+`POST` companions, plus everything the loopback status server offers.
 
 ## Behaviour lab
 
@@ -402,6 +408,68 @@ certainly mistyped, a repeat the register does not hold.
 The commitments live in the memory database rather than a file of their own,
 because that database is the one thing copied off the box. A diary that is
 not backed up loses the appointment nobody wrote down.
+
+## The calendar: spans, clashes, and the lie about free time
+
+The diary holds points. An appointment is not a point -- it starts, it lasts,
+it ends, and while it runs he is not available for anything else. Three things
+follow from that and none of them are expressible as a moment:
+
+    two of them can collide, and something has to say so
+    between them there are gaps, which is what "when am I free" means
+    while one is running, he is in it
+
+`schedule.py` holds the spans. **There is one firing path in this codebase and
+it is the diary's.** An appointment does not learn to speak: it registers a
+commitment, the diary says it, and cancelling the appointment drops the
+commitment. Everything about held messages, missed moments, catching up and
+lateness was solved once and is not solved again here.
+
+**An empty calendar is not a free day.** It is a calendar with nothing in it.
+Every assistant that has said *"you're free Thursday"* from an empty Thursday
+was guessing about a person's life from a record it knows is incomplete -- and
+unlike a wrong reminder, that mistake is invisible until he has already said
+yes to something. So `free()` never returns bare slots. Every answer carries
+what it is actually a statement about: *"these are the gaps in what is written
+down, which is not the same as being free. Anything not in here is invisible
+to him."* The same sentence goes to the model, which is the thing in the
+system most likely to say it.
+
+**A clash is reported, never resolved.** Two things at once is a fact about
+his life, not a data-integrity problem for the agent to tidy up. It names
+both, says how much they overlap, and leaves them both standing. Quietly
+moving one, or refusing the second, is how an appointment goes missing.
+
+**An all-day entry is a banner, not a blocker.** "Dentist on Thursday" with no
+time means he does not know when yet. Blocking the whole day would make every
+other Thursday entry a clash, so it marks the day and gets out of the way --
+and it arms no reminder, because half an hour before midnight is not a warning
+about anything.
+
+**Quiet hours are a guess at when he is unavailable; the calendar is a
+statement of it.** The channel now holds the agent's own notices while he is
+sitting in something, and the hold says what he is in and until when. It never
+holds the diary's -- and the split is the contract, not the content: a
+reminder he asked for arrives when he asked for it, an observation the agent
+chose to raise can wait twenty minutes.
+
+**It reports the reminder it has, not the one configured.** An appointment
+carries a default warning of half an hour, and two kinds of appointment arm
+nothing: an all-day banner, and one entered after its own warning has already
+gone by. Both used to report *"he says something 30 minutes before"*. Both
+were wrong. Configured is not proven, one register further along.
+
+Book one from the Diary tab, or in chat:
+
+```
+/book dentist @ friday 2pm for 30 minutes at Queen Street
+```
+
+It reads "for 1 hour", "to 4pm", "14:00-16:30", a bare time (an hour is
+assumed, and it says so) and a bare day (all day, and it says so). `GET
+/schedule` returns the week, the clashes and what he is in now; `GET
+/schedule/free?day=` the gaps; `POST /schedule/add`, `/confirm`, `/cancel` and
+`/move` are the rest. Moving one takes its reminder with it.
 
 ## Questions: its side of the conversation
 

@@ -199,6 +199,20 @@ class AgentCore:
         # See diary.py.
         from jarvis.agent import diary as _diary
         self.diary = _diary.build_diary(self, config)
+        # The shape of his day, as spans rather than moments: things that can
+        # collide, that leave gaps between them, and that he is *in* while
+        # they run. It does not learn to speak -- an appointment registers a
+        # commitment and the diary says it, so there is one firing path in
+        # this codebase and not two. See schedule.py.
+        from jarvis.agent import schedule as _schedule
+        self.schedule = _schedule.build_schedule(self, config)
+        # Quiet hours are a guess at when he is unavailable; the calendar is
+        # a statement of it. The channel holds the agent's own notices while
+        # he is sitting in something, and never the diary's.
+        try:
+            self.notifier.busy_check = self.busy_now
+        except AttributeError:                   # a stub notifier in a test
+            pass
         # Set by main.py when a bucket is configured. None means the memory
         # lives on exactly one volume.
         self.memory_backup = None
@@ -694,6 +708,21 @@ class AgentCore:
         })
 
         return result
+
+    def busy_now(self) -> Optional[dict]:
+        """What he is sitting in right now, for the channel to be civil about.
+
+        Deliberately the smallest thing that answers the question: the
+        notifier has no business knowing what an appointment is, and a
+        calendar that went missing must not be able to silence the channel.
+        """
+        try:
+            running = self.schedule.running()
+        except Exception:
+            return None
+        if running is None:
+            return None
+        return {"what": running.what, "until": running.end_local()[11:]}
 
     def _notice_dates(self, task: Task, result: dict):
         """A date on a page that looks like something expected of him.
@@ -1227,6 +1256,7 @@ class AgentCore:
             "lab_open": self.lab.is_open(),
             # Whether what the agent remembers exists anywhere but here.
             "diary": self.diary.summary(),
+            "schedule": self.schedule.summary(),
             "memory_backup": (self.memory_backup.status()
                               if getattr(self, "memory_backup", None) else
                               {"enabled": False, "reason": "not configured"}),

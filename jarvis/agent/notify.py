@@ -132,6 +132,10 @@ class Notifier:
         self._recent_keys: dict = {}
         self._backend = backend
         self.stats = {"sent": 0, "held": 0, "failed": 0}
+        # Set by the agent when it has a calendar: a callable returning what
+        # he is sitting in right now, or None. Optional on purpose -- the
+        # channel works without one and must not depend on it.
+        self.busy_check = None
         self.last_error: Optional[str] = None
         self.last_sent_at: Optional[float] = None
         # Whether this channel has ever delivered anything, across restarts.
@@ -240,7 +244,8 @@ class Notifier:
             return start <= hour < end
         return hour >= start or hour < end   # the window crosses midnight
 
-    def hold_reason(self, severity: str, key: Optional[str]) -> Optional[str]:
+    def hold_reason(self, severity: str, key: Optional[str],
+                    time_critical: bool = False) -> Optional[str]:
         """Why this message must not go out, or None if it may."""
         if not self.enabled:
             return "notifications disabled"
@@ -266,6 +271,22 @@ class Notifier:
         # An alert is exactly the thing quiet hours should not swallow.
         if severity != "alert" and self._in_quiet_hours():
             return f"quiet hours {self.quiet_hours[0]}:00-{self.quiet_hours[1]}:00 {self.timezone}"
+        # Quiet hours are a guess at when he is unavailable. The calendar is
+        # a statement of it, and buzzing him about a disk while he is sitting
+        # in something is the other half of the same courtesy.
+        #
+        # The split is the contract, not the content: a reminder he asked for
+        # arrives when he asked for it, because that is what he asked for. An
+        # observation the agent chose to raise can wait twenty minutes. So
+        # this holds the agent's own notices and never the diary's.
+        if severity != "alert" and not time_critical and self.busy_check:
+            try:
+                busy = self.busy_check()
+            except Exception:
+                busy = None
+            if busy:
+                return (f"he is in '{busy.get('what')}' until "
+                        f"{busy.get('until')}")
         return None
 
     # ---- sending --------------------------------------------------------
@@ -283,14 +304,14 @@ class Notifier:
         return text
 
     def send(self, subject: str, body: str = "", severity: str = "notice",
-             key: Optional[str] = None) -> dict:
+             key: Optional[str] = None, time_critical: bool = False) -> dict:
         """Try to reach the operator. Returns a verdict, never raises.
 
         The verdict is the point: a held message is a normal outcome, with a
         reason the agent can record and the operator can read later.
         """
         key = key or (subject or "").strip().lower()[:80]
-        held = self.hold_reason(severity, key)
+        held = self.hold_reason(severity, key, time_critical)
         if held:
             self.stats["held"] += 1
             self.log.info("Notification held (%s): %s", held, subject)

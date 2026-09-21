@@ -33,6 +33,17 @@ agent:
     give_up_after_s: 259200   # a reminder the channel never took, said as unsaid
     blind_gap_s: 600          # a longer gap between looks means it was not looking
 
+  # The shape of his day: things that occupy a span rather than mark a moment,
+  # which is what makes a clash and a gap expressible at all. An appointment
+  # does not learn to speak -- it registers a commitment and the diary says
+  # it, so there is one firing path here and not two. `hours` is the window a
+  # "when am I free" question is actually about; nobody means 3am. Timezone is
+  # absent for the same reason as the diary's: derived from notify.timezone.
+  schedule:
+    max_appointments: 120
+    remind_before_s: 1800     # half an hour, the default warning for one
+    hours: [9, 18]
+
 
 hardware:
   # EC2 instances have no framebuffer or physical input devices.

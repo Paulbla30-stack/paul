@@ -761,6 +761,16 @@ class BaseBrain:
             coming = None
         if coming:
             context["his_diary"] = coming
+        # The shape of his week. Separate from the diary because it answers a
+        # different question -- not "what should be said and when" but "what
+        # is he in the middle of" -- and carrying the one caveat the model is
+        # most likely to break: an empty calendar is not a free day.
+        try:
+            shape = agent.schedule.context(now)
+        except Exception:
+            shape = None
+        if shape:
+            context["his_week"] = shape
         knower = getattr(agent, "self_knowledge", None)
         if knower is not None:
             try:
