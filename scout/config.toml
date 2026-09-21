@@ -108,6 +108,42 @@ bedrock_region = "us-west-2"
 # inverts, the prompt has drifted towards drafting for its own sake.
 max_drafts_per_run = 3
 
+[citations]
+# The only DOIs a draft may cite as Paul's own work.
+#
+# This list is not documentation, it is a check. On the first real drafting
+# run the model cited "10.5281/zenodo.14263451" and captioned it "This is
+# the author's own paper". That DOI is not his — and it RESOLVES, to a
+# real Zenodo record belonging to someone else. A dead link is obviously
+# broken; a live link to a stranger's work, presented as his own, is a
+# false attribution that looks entirely legitimate and would sit on a
+# permanent public record under his name.
+#
+# A draft citing any DOI not on this list is dropped. Add a record here
+# when one is published; nothing else needs changing.
+own_dois = [
+  "10.5281/zenodo.21243118",  # The 24-Hour Team
+  "10.5281/zenodo.21249771",  # The Character Pathway
+  "10.5281/zenodo.21245205",  # The Long Handover
+  "10.5281/zenodo.21245130",  # The Mixed Shift
+  "10.5281/zenodo.21260388",  # Same Monsters, New Casings
+  "10.5281/zenodo.21264935",  # The Endless Shift
+  "10.5281/zenodo.21279944",  # The Overseer's Bible
+  "10.5281/zenodo.21282804",  # The Second Signature
+  "10.5281/zenodo.21340572",  # The Second Pair Of Hands
+  "10.5281/zenodo.21357450",  # The AI Interaction Risk Screen
+  "10.5281/zenodo.21443120",  # The Cultural Safety Case
+  "10.5281/zenodo.21445040",  # Before the Machine
+  "10.5281/zenodo.21445071",  # The Floor Test
+  "10.5281/zenodo.21455540",  # The Damping Audit
+  "10.5281/zenodo.21515861",  # The Glass Ledger
+  "10.5281/zenodo.21515932",  # After the Machine (AIOP)
+  "10.5281/zenodo.21516401",  # Reading Map
+  "10.5281/zenodo.22045477",  # The Instrument Deck
+  "10.5281/zenodo.22164015",  # The Tenant's Record
+  "10.5281/zenodo.22771015",  # What the Signature Certifies
+]
+
 [email]
 # Where the digest goes.
 #

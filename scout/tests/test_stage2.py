@@ -64,6 +64,67 @@ def test_a_plain_on_topic_reply_passes():
         "Agreed - the discretion layer is where most of this lands on a ward.").ok
 
 
+# ------------------------------------------------------------- citations
+def test_a_fabricated_doi_is_dropped():
+    """The worst thing a draft can contain, found on the first real run.
+
+    Qwen cited 10.5281/zenodo.14263451 and captioned it "This is the
+    author's own paper". That DOI is not Paul's — and it RESOLVES, to a
+    real Zenodo record belonging to someone else. A dead link is obviously
+    broken. A live link to a stranger's work, presented as his own, reads
+    as a genuine citation for as long as the post exists.
+    """
+    r = voice.check("The Heartbeat Framework covers this. This is the author's "
+                    "own paper: https://doi.org/10.5281/zenodo.14263451")
+    assert not r.ok
+    assert any("not one of Paul's records" in f for f in r.failures)
+
+
+def test_a_real_doi_passes():
+    r = voice.check("The Cultural Safety Case argues deployment risk is capability "
+                    "times culture. This is the author's own paper: "
+                    "https://doi.org/10.5281/zenodo.21443120")
+    assert r.ok, r.failures
+
+
+def test_every_real_record_is_accepted():
+    import tomllib
+    cfg = tomllib.load(open(os.path.join(ROOT, "config.toml"), "rb"))
+    dois = cfg["citations"]["own_dois"]
+    assert len(dois) == 20, f"expected 20 records, config has {len(dois)}"
+    for d in dois:
+        r = voice.check(f"Worth reading. This is the author's own paper: "
+                        f"https://doi.org/{d}")
+        assert r.ok, (d, r.failures)
+
+
+def test_a_doi_from_another_publisher_is_also_dropped():
+    # Not just Zenodo — any DOI that is not one of his.
+    r = voice.check("See this. This is the author's own paper: "
+                    "https://doi.org/10.1136/bmjinnov-2025-001544")
+    assert not r.ok
+
+
+def test_it_refuses_rather_than_guesses_when_the_list_is_unreadable():
+    r = voice.check("This is the author's own paper: "
+                    "https://doi.org/10.5281/zenodo.21443120",
+                    known_dois=set())
+    assert not r.ok
+    assert any("refusing rather than guessing" in f for f in r.failures)
+
+
+def test_the_authors_own_paper_counts_as_disclosure():
+    """A false negative in my own check, found the same run.
+
+    The draft did disclose authorship — "This is the author's own paper" —
+    and the rule dropped it anyway, because the patterns only knew "his"
+    and "Paul's". The draft deserved dropping, but for the DOI, not this.
+    """
+    r = voice.check("Relevant here. This is the author's own paper: "
+                    "https://doi.org/10.5281/zenodo.21443120")
+    assert r.ok, r.failures
+
+
 # --------------------------------------------------------------- challenge
 def test_solves_the_documented_example():
     # Straight from Moltbook's own skill.md.
