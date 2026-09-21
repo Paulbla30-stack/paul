@@ -55,6 +55,19 @@ MAX_TOKENS = 4000
 # "us.anthropic.claude-opus-5", not "anthropic.claude-opus-5".
 PROVIDER_ANTHROPIC = "anthropic"
 PROVIDER_BEDROCK = "bedrock"
+# Any Bedrock model, through the provider-agnostic Converse API. Structured
+# output comes from a forced tool call rather than output_config, which is
+# Anthropic-specific. Confirmed 21 Sep 2026 to return the full schema on
+# Qwen3-235B, Llama 3.3 70B and Nova Pro; Mistral Magistral returns prose
+# instead and is not usable here.
+#
+# This exists because being one approval queue away from your own system
+# working is a design flaw, not bad luck. Anthropic models on Bedrock need
+# a manual authorisation that has taken weeks in this account before.
+PROVIDER_CONVERSE = "converse"
+
+# Models that reject toolChoice:{tool:...} and need it left to auto.
+_NO_FORCED_TOOL = ("meta.llama",)
 
 # Stable, so it caches. Nothing volatile (no timestamps, no ids) may go in
 # here or the prefix changes every call and the cache never hits.
@@ -199,8 +212,49 @@ class Drafter:
                 self._client = anthropic.Anthropic()
         return self._client
 
+    def _draft_via_converse(self, item: dict) -> dict:
+        """Bedrock Converse. Works with any tool-capable model on Bedrock."""
+        import boto3
+        from botocore.exceptions import ClientError
+
+        rt = self._client or boto3.client("bedrock-runtime", region_name=self.region)
+        tools = [{"toolSpec": {"name": "reply",
+                               "description": "Return the drafting decision.",
+                               "inputSchema": {"json": SCHEMA}}}]
+        cfg = {"tools": tools}
+        if not any(m in self.model for m in _NO_FORCED_TOOL):
+            cfg["toolChoice"] = {"tool": {"name": "reply"}}
+        try:
+            r = rt.converse(
+                modelId=self.model,
+                system=[{"text": SYSTEM}],
+                messages=[{"role": "user",
+                           "content": [{"text": _untrusted_block(item)}]}],
+                inferenceConfig={"maxTokens": MAX_TOKENS},
+                toolConfig=cfg)
+        except ClientError as e:
+            code = e.response.get("Error", {}).get("Code", "")
+            return _declined(f"bedrock error ({code})")
+        except Exception as e:                              # noqa: BLE001
+            return _declined(f"bedrock call failed ({type(e).__name__})")
+
+        blocks = r["output"]["message"]["content"]
+        tu = next((b["toolUse"]["input"] for b in blocks if "toolUse" in b), None)
+        if tu is None:
+            return _declined("model returned prose instead of the schema")
+        out = dict(tu)
+        u = r.get("usage", {})
+        out["usage"] = {"input": u.get("inputTokens"), "output": u.get("outputTokens"),
+                        "cache_read": 0, "cache_write": 0}
+        return out
+
     def draft(self, item: dict) -> dict:
         """Return a decision dict. Never raises on a refusal or a bad draft."""
+        if self.provider == PROVIDER_CONVERSE:
+            out = self._draft_via_converse(item)
+            out.setdefault("model", self.model)
+            out["provider"] = self.provider
+            return self._vet(out)
         import anthropic
 
         try:
@@ -240,11 +294,18 @@ class Drafter:
         out["model"] = self.model
         out["provider"] = self.provider
 
+        return self._vet(out)
+
+    def _vet(self, out: dict) -> dict:
+        """The prompt asks for the voice rules; this decides.
+
+        Runs whatever the provider, so a weaker or unfamiliar model cannot
+        lower the floor. What varies between models is the judgement of when
+        NOT to post; the hard rules do not vary at all.
+        """
         if not out.get("worth_posting"):
             out["draft"] = ""
             return out
-
-        # The prompt asks; this decides.
         result = voice.check(out.get("draft", ""))
         out["voice_ok"] = result.ok
         out["voice_failures"] = result.failures

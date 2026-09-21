@@ -470,6 +470,28 @@ def test_the_chain_stores_the_exact_bytes_it_hashed():
     assert entry_hash(1, "0" * 64, "T", naive) != direct
 
 
+def test_the_stored_record_keeps_the_body_for_the_drafter():
+    """Stage 2 reads what Stage 1 stored, so Stage 1 must store the substance.
+
+    The first drafting check passed the scoring explanation as the body,
+    because that was all the record held, and the model duly declined every
+    item for having nothing to engage with.
+    """
+    from datetime import datetime, timezone
+    from store import record_from
+    from scoring import Scorer
+    now = datetime(2026, 9, 21, tzinfo=timezone.utc)
+    item = type("I", (), {
+        "source": "arxiv", "external_id": "x", "url": "https://x",
+        "title": "Healthcare AI governance", "author": "a",
+        "published": now, "body": "The full abstract, which the drafter needs.",
+        "extra": {}})()
+    sc = Scorer(CFG).score(title=item.title, body=item.body,
+                           source_weight=1.0, published=now, now=now)
+    rec = record_from(item, sc, now)
+    assert rec["body"] == "The full abstract, which the drafter needs."
+
+
 if __name__ == "__main__":
     fns = [(n, f) for n, f in sorted(globals().items()) if n.startswith("test_")]
     bad = 0

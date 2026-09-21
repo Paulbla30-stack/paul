@@ -80,6 +80,11 @@ def record_from(item, score, now=None) -> dict:
         "url": item.url,
         "title": item.title,
         "author": item.author,
+        # The drafter needs the substance, not just the metadata. Without
+        # this it judges a paper by its title and the scoring explanation,
+        # which is exactly as thin as it sounds — the first drafting check
+        # declined all five items for lack of anything to engage with.
+        "body": item.body,
         "published": item.published.isoformat(),
         "first_seen": now.isoformat(),
         "matched_keywords": score.matched_keywords,
