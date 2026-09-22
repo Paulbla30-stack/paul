@@ -110,7 +110,7 @@ STATES = ("live", "dormant", "superseded")
 # filed with a number and a test so it can be scored later; "probe" is a run
 # of the standing question set against the character the dials specify.
 KINDS = ("note", "fact", "upload", "goal", "operator", "proposal", "verdict",
-         "commitment", "appointment", "vital", "hunch", "probe")
+         "commitment", "appointment", "vital", "hunch", "probe", "exchange")
 SOURCES = ("brain", "operator", "system", "review", "machine")
 
 DEFAULT_PATH = "/var/lib/jarvis/memory.db"

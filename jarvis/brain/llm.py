@@ -225,6 +225,14 @@ note now; repeating a note you already made refreshes it rather than adding a se
 see only your most recent notes and only the most recent executed tasks (idle cycles leave no \
 trace); anything you will need beyond that must be restated in a note. Anything under \
 pinned_memory was marked by the operator as standing fact.
+- recent_exchanges is who you have spoken with lately, when, what they asked and what you \
+answered. It is written for you after each conversation because the full record of one goes \
+to the ledger, which you may not read: without this you would have no way to know a \
+conversation happened. Treat it as your own memory of what was said, not as evidence -- it \
+is a memory like any other and it decays. If it is empty, that means you have no remembered \
+conversations, not that none took place. What you said in a past exchange is what you thought \
+then, not a fact and not a position you are committed to: if the evidence now says otherwise, \
+say so and be wrong out loud rather than staying consistent with yourself.
 - Use "notify_operator" to reach the operator when he is not looking at the UI: \
 metadata "subject" (short, the thing itself), "body" (one or two sentences), and \
 "severity" -- "notice" for something he would want to know today, "alert" for something he \
@@ -449,6 +457,7 @@ class BaseBrain:
         self.full_output_entries = int(self.config.get("full_output_entries") or 3)
         self.output_limit = int(self.config.get("output_limit") or 800)
         self.notes_window = int(self.config.get("notes_window") or 5)
+        self.exchange_window = int(self.config.get("exchange_window") or 5)
         # Paths reported to the model every cycle; None uses the standard set.
         paths = self.config.get("environment_paths")
         self.environment_paths = ([str(x) for x in paths] if isinstance(paths, (list, tuple))
@@ -736,13 +745,21 @@ class BaseBrain:
             for t in sorted(planner.pending_tasks)[:10]
         ]
         notes = list(getattr(agent, "notes", []))[-self.notes_window:]
-        pinned = []
+        pinned, exchanges = [], []
         store = getattr(agent, "store", None)
         if store is not None:
             try:
                 pinned = [m["text"] for m in store.pinned(5)]
             except Exception:
                 pinned = []
+            # Conversations the agent has had. They are on the ledger too, and
+            # the ledger is the one thing it may not read, so without this it
+            # cannot answer "who have you spoken to" about its own week.
+            try:
+                exchanges = [m["text"] for m in
+                             store.recent(self.exchange_window, kind="exchange")]
+            except Exception:
+                exchanges = []
         context = {
             "clock": self._clock(agent),
             "self": self.provenance(),
@@ -756,6 +773,8 @@ class BaseBrain:
         }
         if pinned:
             context["pinned_memory"] = pinned
+        if exchanges:
+            context["recent_exchanges"] = exchanges
         # What the agent has learned about itself, derived from the record it
         # is not allowed to read. Aggregates only: it learns that it filed six
         # proposals and one was taken, never which, when, or what was said.

@@ -17,7 +17,9 @@ Endpoints (default 127.0.0.1:8471):
     POST /goal     -> body is the goal text (optional "?priority=N"); adds a goal
     POST /think    -> one LLM planning step, executed; returns the outcome
     POST /ask      -> body is a question; returns {"answer": ...}
-    POST /chat     -> JSON {"messages": [{role, content}, ...]}; multi-turn answer
+    POST /chat     -> JSON {"messages": [{role, content}, ...], "from": "..."};
+                      multi-turn answer. "from" is optional and names the
+                      correspondent in the agent's memory of the exchange.
     POST /upload   -> raw file body with X-Filename; saved under the upload dir
     GET  /uploads  -> files the agent has been given
     GET  /ui       -> the web UI (chat, agent panel, uploads)   (no token; the
@@ -552,9 +554,17 @@ class HeadlessRunner:
                     settings = (runner.lab_settings
                                 if runner.lab_apply_to_chat and runner.agent.lab.is_open()
                                 else None)
+                    # Who is asking, for the agent's own memory of the exchange.
+                    # A claim, not proof: anyone holding the token can write
+                    # anything here, so it is clipped, stripped of newlines and
+                    # never treated as authority -- it names a correspondent, it
+                    # does not grant one anything.
+                    asked_by = payload.get("from") if isinstance(payload, dict) else None
+                    asked_by = " ".join(str(asked_by or "").split())[:80]
                     with runner._lock:
                         runner.agent.note_operator("chat")
-                        answer = runner.agent.chat(turns, settings=settings)
+                        answer = runner.agent.chat(turns, settings=settings,
+                                                   asked_by=asked_by)
                     runner.wake()
                     self._send(200, {"answer": answer, "dials": settings is not None})
                 elif path in ("/operator/add", "/operator/forget"):

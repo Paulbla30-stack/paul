@@ -1115,7 +1115,8 @@ class AgentCore:
         self.note_operator("verdict")
         return body
 
-    def chat(self, turns, settings: Optional[dict] = None) -> str:
+    def chat(self, turns, settings: Optional[dict] = None,
+             asked_by: str = "") -> str:
         """Continue an operator conversation with the agent's context.
 
         ``settings`` are behaviour-lab dials; when given, the answer is
@@ -1167,9 +1168,76 @@ class AgentCore:
             from jarvis.brain import dials
             body["dials"] = dials.fingerprint(settings)
         self.ledger.record("thought", body)
+        self._remember_exchange(turns, answer, asked_by=asked_by)
         return answer or ("Brain could not answer: "
                           + (self.brain.unavailable_reason() or self.brain.last_error
                              or "unavailable"))
+
+    # How long a remembered exchange may be. The ledger holds the whole thing;
+    # this is the part carried forward, so it is a reminder, not a transcript.
+    EXCHANGE_QUESTION_CHARS = 320
+    EXCHANGE_ANSWER_CHARS = 700
+
+    def _remember_exchange(self, turns, answer: str, asked_by: str = "") -> None:
+        """Carry a conversation forward into memory, because its record is sealed.
+
+        Every chat is already written to the ledger as a thought, and the agent
+        may never read the ledger. That is right for evidence and useless for
+        continuity: asked the next day who it had spoken to, it answers
+        honestly that it has no record, because the only record is the one it
+        is forbidden to consult. It happened on 22 September 2026 -- three
+        exchanges with the coding agent were on the chain, and the agent
+        reported truthfully that there was no evidence of them.
+
+        selfknowledge.py does not close the gap either. It aggregates
+        decisions, outcomes and gates, and never reads a thought.
+
+        So the exchange is also written to the store, which the agent may read:
+        who asked, when, what was asked, and what it said back. Its own answer
+        is kept deliberately -- the question survives in the asker's head and
+        the reply does not, so "what did I think about this" is the half that
+        would otherwise be lost.
+
+        Asked to review this, the agent argued for storing the question and the
+        fact of the exchange but not its own answer, on the grounds that reading
+        your own past words back is how a position hardens without being
+        re-examined. The concern is right and the proposed remedy was not: it
+        held that the answer would be "reconstructable from context", and it
+        would not be -- the only copy is on the ledger, which it may not read.
+        Dropping the answer recreates the gap this exists to close. So the
+        answer stays and is labelled as what was said at the time and may since
+        be wrong, which is the honest form of the same caution.
+
+        Not the ledger's job and not a replacement for it: this is a memory,
+        subject to decay, consolidation and the row cap like any other, and it
+        carries no signature. The chain remains the evidence.
+        """
+        last_user = ""
+        for turn in reversed(list(turns or [])):
+            if isinstance(turn, dict) and turn.get("role") == "user":
+                last_user = str(turn.get("content") or "").strip()
+                break
+        if not last_user and not answer:
+            return
+        # Collapse whitespace here as well as at the HTTP edge. Anything
+        # in-process can call chat() directly, and a name carrying a newline
+        # would let a correspondent forge a second line in the agent's own
+        # memory of who it was talking to.
+        who = " ".join(str(asked_by or "").split())[:80] or "the operator"
+        when = time.strftime("%Y-%m-%d %H:%M", time.gmtime()) + "Z"
+
+        def clip(text: str, limit: int) -> str:
+            text = " ".join(str(text or "").split())
+            return text if len(text) <= limit else text[:limit].rstrip() + "..."
+
+        text = (f"{when}: spoke with {who}. They asked: "
+                f"\"{clip(last_user, self.EXCHANGE_QUESTION_CHARS)}\" "
+                f"What I said at the time, which may since be wrong: "
+                f"\"{clip(answer, self.EXCHANGE_ANSWER_CHARS)}\"")
+        try:
+            self.remember(text, kind="exchange", source="operator")
+        except Exception as exc:                      # memory is never fatal
+            self.log.warning("Could not remember exchange: %s", exc)
 
     def experiment(self, question: str, settings: Optional[dict] = None, compare: bool = True,
                    mode: str = "answer") -> dict:
