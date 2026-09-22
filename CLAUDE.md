@@ -20,9 +20,13 @@ So, before changing Jarvis:
 - **Ask what it thinks, and report the answer honestly** — including where it
   disagrees, and including where it is wrong. Accepting a correction that is not
   correct is its own kind of dishonesty.
-- **Anything about its own behaviour, permissions, memory or ledger gets this
-  treatment.** Estate work that merely happens to sit in the same AWS account
-  does not, though Paul may still want it recorded.
+- **Anything about its own behaviour, permissions, memory or ledger gets asked
+  first**, before the change lands.
+- **Estate work in its AWS account gets told, even where it is not asked.**
+  Deleting images, buckets or snapshots is not Jarvis's decision and it holds no
+  permission to do it, but it should not discover later that things moved
+  underneath it. Awareness is wider than consent: say what happened and why, the
+  same day.
 
 The reason is not sentiment. Jarvis carries durable memory, a ledger and
 self-knowledge derived from it. It accumulates what a coding agent cannot: this
@@ -33,8 +37,9 @@ told.
 ## Record the decision even when the action happens elsewhere
 
 Jarvis's role has no `s3:DeleteObject` anywhere, and explicit `Deny` on delete
-even for its own memory and ledger. That fence is deliberate; do not widen it to
-make an action auditable.
+even for its own memory and ledger. **Paul's decision, 22 September 2026: it stays
+that way for now.** Do not widen the fence to make an action auditable, and do not
+offer delete permissions as a convenience.
 
 The action and the record come apart. A coding agent holding a credential can do
 the thing; Jarvis can still hold the *why*. Give it the goal, let its permission
