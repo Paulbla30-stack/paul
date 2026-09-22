@@ -5,6 +5,7 @@
       "Bash(python3 aws/scripts/ssm_run.py *)",
       "Bash(python3 aws/scripts/zenodo_meta.py *)",
       "Bash(python3 aws/scripts/estate_cleanup.py)",
+      "Bash(python3 aws/scripts/ses_identity.py *)",
       "Bash(python3 -m pytest *)",
       "Bash(python3 -m fence.selftest *)",
       "Bash(python3 jarvis/ledger/verify.py *)",
