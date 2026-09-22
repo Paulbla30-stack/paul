@@ -1,0 +1,37 @@
+{
+  "22771015": {
+    "language": "eng",
+    "keywords": [
+      "Heartbeat Framework",
+      "DCB0129",
+      "DCB0160",
+      "clinical safety",
+      "clinical risk management",
+      "NHS England",
+      "clinical safety officer",
+      "clinical safety case",
+      "hazard log",
+      "AI governance",
+      "post-implementation monitoring",
+      "agentic AI",
+      "health IT",
+      "standards revision",
+      "compliance",
+      "healthcare"
+    ],
+    "related_identifiers": [
+      {
+        "identifier": "https://heartbeat-framework.org/papers/what-the-signature-certifies/",
+        "relation": "isDescribedBy",
+        "scheme": "url"
+      },
+      { "identifier": "10.5281/zenodo.21443120", "relation": "references", "scheme": "doi" },
+      { "identifier": "10.5281/zenodo.21282804", "relation": "references", "scheme": "doi" },
+      { "identifier": "10.5281/zenodo.21515861", "relation": "references", "scheme": "doi" },
+      { "identifier": "10.5281/zenodo.22045477", "relation": "references", "scheme": "doi" },
+      { "identifier": "10.5281/zenodo.21515932", "relation": "references", "scheme": "doi" },
+      { "identifier": "10.5281/zenodo.21455540", "relation": "references", "scheme": "doi" },
+      { "identifier": "10.5281/zenodo.21516401", "relation": "references", "scheme": "doi" }
+    ]
+  }
+}
