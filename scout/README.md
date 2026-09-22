@@ -330,14 +330,38 @@ of machinery. Do not cite it as an implementation of the Glass Ledger.
 SES on this account is **in sandbox** (`ProductionAccessEnabled: false`),
 which means both sender and recipient must be verified identities.
 
-As of 21 September 2026 the only verified identity is
-`Paulbla30@hotmail.com`. **`paulblatherwick@heartbeat-framework.org` is not
-verified**, so the digest cannot reach it yet. A verification email has been
-requested for that address; it routes through Cloudflare Email Routing into
-Paul's Gmail. Click the link, and the digest goes to the right place.
+The only verified identity is `Paulbla30@hotmail.com`, and the digest goes
+there. Both `to` and `sender` name it, and `fallback_enabled = false`.
 
-Until then `fallback_enabled = true` sends to the hotmail address instead,
-and marks the subject line `[fallback address]` so it is never silent.
+**`paulblatherwick@heartbeat-framework.org` is not coming back.** It was
+configured for both ends, and SES reports it `verification_status=FAILED` --
+failed, not pending, which means the confirmation mail never reached a
+mailbox anyone opened and the link expired. An earlier draft of this file
+asserted that the address "routes through Cloudflare Email Routing into
+Paul's Gmail"; that was assumed rather than checked, and the evidence is
+against it. Requesting verification again would fail the same way.
+
+### Making the sender correct
+
+The recipient is solved; the sender is not. SES is sending as a hotmail.com
+address, and hotmail.com's SPF does not list Amazon SES. It is arriving
+because consumer DMARC is permissive, not because it is right, and it is one
+policy change away from being junked.
+
+The fix is a domain SES can sign for:
+
+1. SES console (us-west-2) → Identities → Create identity → **Domain** →
+   `heartbeat-framework.org`, Easy DKIM, RSA 2048.
+2. Add the three CNAMEs it returns to Cloudflare, **DNS only, not proxied**.
+3. Change the SPF TXT record to
+   `v=spf1 include:_spf.mx.cloudflare.net include:amazonses.com ~all`.
+4. Set `sender = "scout@heartbeat-framework.org"` in `config.toml`. Leave
+   `to` as the hotmail address: it is a verified identity in its own right,
+   so it keeps satisfying the sandbox at the recipient end, and it is the
+   mailbox actually read.
+
+`SesMailer._accepted` already treats a verified domain as covering every
+address on it, so no code change is needed when the domain verifies.
 Set `fallback_enabled = false` once verification is done, so a broken
 recipient fails loudly rather than quietly going somewhere else.
 

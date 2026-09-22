@@ -154,15 +154,32 @@ records = [
 # SES is in sandbox mode on this account, which means BOTH the sender and
 # the recipient must be verified identities. As of 21 Sep 2026 the only
 # verified identity is Paulbla30@hotmail.com. See README "SES sandbox".
-to      = "paulblatherwick@heartbeat-framework.org"
-sender  = "paulblatherwick@heartbeat-framework.org"
+# paulblatherwick@heartbeat-framework.org was configured for both ends and
+# SES now reports it verification_status=FAILED, not pending: the
+# confirmation mail never reached a mailbox anyone could open, so the link
+# expired. Aiming at it again would fail the same way, so both ends point at
+# the address that demonstrably works, and the fallback is off -- there is
+# nothing left for it to mask.
+#
+# Sender and recipient are different problems and want different answers:
+#
+#   recipient  just has to be a mailbox Paul reads. Hotmail qualifies.
+#   sender     wants a domain he controls the DNS for, so SES mail can be
+#              signed (DKIM) and authorised (SPF). Sending as a hotmail.com
+#              address via SES is spoofing a domain that does not list SES;
+#              it is arriving today because consumer DMARC is permissive,
+#              not because it is correct.
+#
+# So when heartbeat-framework.org is verified as a DOMAIN identity with Easy
+# DKIM, change `sender` to scout@heartbeat-framework.org and leave `to` here.
+# That needs three CNAMEs in Cloudflare and amazonses.com added to the SPF
+# record; the domain's SPF currently authorises Cloudflare alone.
+to      = "Paulbla30@hotmail.com"
+sender  = "Paulbla30@hotmail.com"
 
-# Used only while the address above is unverified. Set fallback_enabled
-# to false once verification is done, so a silent fallback can never hide
-# a broken recipient.
 fallback_to       = "Paulbla30@hotmail.com"
 fallback_sender   = "Paulbla30@hotmail.com"
-fallback_enabled  = true
+fallback_enabled  = false
 
 subject_prefix = "JARVIS scout"
 
