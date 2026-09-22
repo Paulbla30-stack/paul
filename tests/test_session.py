@@ -90,14 +90,42 @@ class TestCookies(unittest.TestCase):
 
     def test_the_cookie_is_httponly_samesite_and_secure_over_tls(self):
         header = session.cookie_header("value", 30, secure=True)
-        for flag in ("HttpOnly", "SameSite=Strict", "Secure", "Path=/"):
+        for flag in ("HttpOnly", "SameSite=Lax", "Secure", "Path=/"):
             self.assertIn(flag, header)
+
+    def test_the_default_is_lax_so_a_link_from_another_app_stays_logged_in(self):
+        # Strict withholds the cookie on a navigation arriving from an email,
+        # a note or a message. That looked like being logged out, and meant
+        # re-entering the token on every visit.
+        self.assertEqual(session.DEFAULT_SAMESITE, "Lax")
+        self.assertIn("SameSite=Lax", session.cookie_header("value", 30))
+        self.assertNotIn("SameSite=Strict", session.cookie_header("value", 30))
+
+    def test_strict_is_still_available_for_anyone_who_wants_the_friction(self):
+        self.assertIn("SameSite=Strict",
+                      session.cookie_header("value", 30, samesite="Strict"))
+
+    def test_a_nonsense_samesite_falls_back_to_the_default(self):
+        for bad in ("", None, "lax", "Whatever", "None; Path=/evil"):
+            header = session.cookie_header("value", 30, samesite=bad)
+            self.assertIn(f"SameSite={session.DEFAULT_SAMESITE}", header)
+            self.assertEqual(header.count("SameSite="), 1, bad)
 
     def test_plain_http_does_not_claim_secure(self):
         self.assertNotIn("Secure", session.cookie_header("value", 30, secure=False))
 
     def test_clearing_expires_the_cookie(self):
         self.assertIn("Max-Age=0", session.clear_header())
+
+    def test_clearing_matches_the_attributes_the_cookie_was_set_with(self):
+        # A browser keeps the old cookie when the attributes differ, so a
+        # logout that does not match silently does nothing.
+        for samesite in ("Lax", "Strict"):
+            set_header = session.cookie_header("value", 30, secure=True, samesite=samesite)
+            clear = session.clear_header(secure=True, samesite=samesite)
+            for flag in (f"SameSite={samesite}", "Path=/", "HttpOnly", "Secure"):
+                self.assertIn(flag, set_header)
+                self.assertIn(flag, clear)
 
     def test_the_value_is_found_among_other_cookies(self):
         value = "v1.1.2.abc"
@@ -148,6 +176,20 @@ class TestRunnerCredentials(unittest.TestCase):
         runner = self.runner(temp("token"), temp("session.key"))
         self.assertFalse(runner.session_valid(None))
         self.assertFalse(runner.session_valid("jarvis_session=rubbish"))
+
+    def test_the_runner_issues_a_lax_cookie_by_default(self):
+        runner = self.runner(temp("token"), temp("session.key"))
+        self.assertEqual(runner.session_samesite, "Lax")
+        self.assertIn("SameSite=Lax", runner.new_session_cookie())
+        self.assertIn("SameSite=Lax", runner.clear_session_cookie())
+
+    def test_the_runner_honours_a_configured_samesite(self):
+        runner = HeadlessRunner(self.agent(), LOG, token_file=None,
+                                token_persist_file=temp("token"),
+                                session_key_file=temp("session.key"),
+                                ui={"session_samesite": "Strict"})
+        self.assertIn("SameSite=Strict", runner.new_session_cookie())
+        self.assertIn("SameSite=Strict", runner.clear_session_cookie())
 
     def test_sessions_degrade_off_when_the_key_cannot_be_written(self):
         runner = self.runner(temp("token"), "/proc/nowhere/session.key")

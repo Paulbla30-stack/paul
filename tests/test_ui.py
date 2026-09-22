@@ -1,5 +1,6 @@
 """Tests for the web UI listener: chat, uploads, page, TLS."""
 
+import http.client
 import json
 import logging
 import os
@@ -75,7 +76,7 @@ class TestUiListener(unittest.TestCase):
             runner, port = self._runner(make_agent(), tmp)
             base = f"http://127.0.0.1:{port}"
             try:
-                for path in ("/status", "/", "/goals", "/brain", "/memory"):
+                for path in ("/status", "/goals", "/brain", "/memory"):
                     with self.assertRaises(urllib.error.HTTPError, msg=path) as cm:
                         call(base, path)
                     self.assertEqual(cm.exception.code, 401, path)
@@ -86,6 +87,33 @@ class TestUiListener(unittest.TestCase):
                 # Liveness stays open, and says nothing but that it is alive.
                 health, status = call(base, "/health")
                 self.assertEqual((status, health), (200, {"ok": True}))
+            finally:
+                runner.stop_status_server()
+
+    def test_the_bare_address_goes_to_the_login_page(self):
+        """Typing the domain used to answer "token required".
+
+        The root of the UI port is not an API path and never was: it required
+        a token, so the bare address looked like a broken login rather than a
+        missing /ui. It now redirects to the page, which was already open and
+        leaks nothing the page did not.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            runner, port = self._runner(make_agent(), tmp)
+            base = f"http://127.0.0.1:{port}"
+            try:
+                # http.client does not follow redirects, so the 302 is visible.
+                conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+                conn.request("GET", "/")
+                raw = conn.getresponse()
+                raw.read()
+                conn.close()
+                self.assertEqual(raw.status, 302)
+                self.assertEqual(raw.getheader("Location"), "/ui")
+                # And following it lands on the page, not a 401.
+                html, status = call(base, "/")
+                self.assertEqual(status, 200)
+                self.assertIn("<title>Jarvis</title>", html)
             finally:
                 runner.stop_status_server()
 
@@ -103,6 +131,10 @@ class TestUiListener(unittest.TestCase):
                 self.assertEqual(snapshot["name"], "ui-test")
                 health, _ = call(base, "/health")
                 self.assertEqual(health["agent"], "ui-test")
+                # The loopback root is a probe, not a front door: no redirect.
+                root, status = call(base, "/")
+                self.assertEqual(status, 200)
+                self.assertEqual(root["agent"], "ui-test")
             finally:
                 runner.stop_status_server()
 

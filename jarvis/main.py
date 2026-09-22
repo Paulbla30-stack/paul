@@ -153,6 +153,11 @@ def load_config(path, extra_paths=()):
                 "upload_dir": "/var/lib/jarvis/uploads",
                 "max_upload_mb": 50,
                 "session_days": 30,       # how long a browser login lasts
+                # Lax, not Strict: Strict withholds the cookie when the UI is
+                # reached by tapping a link from another app, which looks like
+                # being logged out and is the whole reason re-entering the
+                # token felt endless. Set "Strict" here to go back.
+                "session_samesite": "Lax",
             },
         },
         "goals": [],

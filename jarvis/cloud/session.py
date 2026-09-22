@@ -101,18 +101,42 @@ def verify(key: Optional[str], value: Optional[str], now: Optional[float] = None
     return hmac.compare_digest(expected, signature)
 
 
-def cookie_header(value: str, days: int = DEFAULT_DAYS, secure: bool = True) -> str:
+# Lax, not Strict, and the difference is the whole reason logging in felt
+# like it never stuck.
+#
+# Under Strict a browser withholds the cookie on any navigation that arrives
+# from somewhere else — a link in an email, a note, a message, a share
+# sheet. Paul opens Jarvis from a link on his phone, so the session was
+# withheld on the first hop every time, the page looked logged out, and he
+# re-entered the token. The session was valid throughout; it was simply
+# never sent.
+#
+# Lax sends it on top-level GET navigations, which is exactly that case, and
+# still withholds it on cross-site POSTs, sub-resources and iframes, which is
+# where CSRF lives. Strict is the right default for a bank, where the
+# friction is the point. It is the wrong default for something its owner
+# reaches by tapping a link.
+DEFAULT_SAMESITE = "Lax"
+
+
+def cookie_header(value: str, days: int = DEFAULT_DAYS, secure: bool = True,
+                  samesite: str = DEFAULT_SAMESITE) -> str:
     """The Set-Cookie header for a freshly issued session."""
     days = max(1, min(int(days), MAX_DAYS))
+    samesite = samesite if samesite in ("Lax", "Strict", "None") else DEFAULT_SAMESITE
     parts = [f"{COOKIE_NAME}={value}", "Path=/", f"Max-Age={days * 86400}",
-             "HttpOnly", "SameSite=Strict"]
+             "HttpOnly", f"SameSite={samesite}"]
     if secure:
         parts.append("Secure")
     return "; ".join(parts)
 
 
-def clear_header(secure: bool = True) -> str:
-    parts = [f"{COOKIE_NAME}=", "Path=/", "Max-Age=0", "HttpOnly", "SameSite=Strict"]
+def clear_header(secure: bool = True, samesite: str = DEFAULT_SAMESITE) -> str:
+    # Must match the attributes the cookie was set with, or the browser keeps
+    # the old one and a logout silently does nothing.
+    samesite = samesite if samesite in ("Lax", "Strict", "None") else DEFAULT_SAMESITE
+    parts = [f"{COOKIE_NAME}=", "Path=/", "Max-Age=0", "HttpOnly",
+             f"SameSite={samesite}"]
     if secure:
         parts.append("Secure")
     return "; ".join(parts)

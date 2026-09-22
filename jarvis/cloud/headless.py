@@ -154,6 +154,7 @@ class HeadlessRunner:
         # token is rotated. No key means no sessions, never an ephemeral one.
         from jarvis.cloud import session as _session
         self.session_days = max(1, min(int(session_days or 30), _session.MAX_DAYS))
+        self.session_samesite = (ui or {}).get("session_samesite") or _session.DEFAULT_SAMESITE
         self.session_key_file = session_key_file or _session.DEFAULT_KEY_FILE
         self.session_key = _session.load_or_create_key(self.session_key_file, self.log)
         ui = dict(ui or {})
@@ -321,6 +322,13 @@ class HeadlessRunner:
                 self._deny()
                 return False
 
+            def _redirect(self, location: str):
+                self.send_response(302)
+                self.send_header("Location", location)
+                self.send_header("Content-Length", "0")
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+
             def _send_html(self, html: str):
                 body = html.encode()
                 self.send_response(200)
@@ -337,6 +345,14 @@ class HeadlessRunner:
                 path = raw_path.rstrip("/") or "/"
                 if path == "/ui":
                     return self._send_html(runner.ui_html())
+                # The bare domain is the address you actually type or tap, and
+                # on the public server it answered "token required" — which
+                # reads as a broken login rather than a wrong path. The login
+                # page lives at /ui, so send people there. The loopback API
+                # keeps its root as a health probe; nothing scripted is
+                # pointed at the root of the UI port.
+                if path == "/" and not loopback_only:
+                    return self._redirect("/ui")
                 if not self._require_token(path):
                     return
                 if path == "/uploads":
@@ -929,11 +945,13 @@ class HeadlessRunner:
         from jarvis.cloud import session as _session
         return _session.cookie_header(
             _session.issue(self.session_key, self.session_days),
-            self.session_days, secure=self.ui_tls)
+            self.session_days, secure=self.ui_tls,
+            samesite=self.session_samesite)
 
     def clear_session_cookie(self) -> str:
         from jarvis.cloud import session as _session
-        return _session.clear_header(secure=self.ui_tls)
+        return _session.clear_header(secure=self.ui_tls,
+                                     samesite=self.session_samesite)
 
     def auth_locked(self, client: str) -> bool:
         now = time.time()
