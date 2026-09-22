@@ -192,16 +192,35 @@ class SesMailer:
         """
         ok = self._verified()
         to, sender = self.cfg["to"], self.cfg["sender"]
-        if to.lower() in ok and sender.lower() in ok:
+        if self._accepted(to, ok) and self._accepted(sender, ok):
             return to, sender, False
+        missing = sorted({a for a in (to, sender) if not self._accepted(a, ok)})
         if self.cfg.get("fallback_enabled"):
+            # Name the addresses that are actually missing. The old message
+            # said "X and/or Y" even when X and Y were the same address, which
+            # tells a reader neither which end failed nor how to fix it.
             log.warning(
-                "SES: %s and/or %s not verified; falling back to %s. "
-                "Verify the real address to stop this.",
-                to, sender, self.cfg["fallback_to"])
+                "SES: not a verified identity: %s. Falling back to %s. "
+                "Verify the address, or verify the whole domain (Easy DKIM), "
+                "which covers every address on it.",
+                ", ".join(missing), self.cfg["fallback_to"])
             return self.cfg["fallback_to"], self.cfg["fallback_sender"], True
         raise RuntimeError(
-            f"SES sandbox: {to} / {sender} not verified and fallback disabled")
+            "SES sandbox: not a verified identity: " + ", ".join(missing)
+            + "; fallback disabled")
+
+    @staticmethod
+    def _accepted(address: str, verified: set) -> bool:
+        """True when SES will accept this address.
+
+        A verified DOMAIN identity covers every address on it, so checking
+        only for the exact address reports a working setup as broken.
+        """
+        address = (address or "").lower()
+        if address in verified:
+            return True
+        _, _, domain = address.partition("@")
+        return bool(domain) and domain in verified
 
     def send(self, subject: str, text: str, html_body: str) -> bool:
         to, sender, fell_back = self.resolve()
