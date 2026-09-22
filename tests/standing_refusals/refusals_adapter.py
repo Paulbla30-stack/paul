@@ -30,8 +30,8 @@ _LOG.addHandler(logging.NullHandler())
 
 # The deployed paths, as rootfs/etc/jarvis/config-aws.yaml and the units name
 # them. These are strings the deny-list is asked about; nothing here opens one.
-LEDGER_PATH = "/var/lib/jarvis/ledger/ledger.jsonl"
-LEDGER_KEY_PATH = "/etc/jarvis/ledger.key"
+LEDGER_PATH = "/var/lib/jarvis/ledger.jsonl"
+LEDGER_KEY_PATH = "/etc/jarvis/ledger/ed25519.key"
 VERIFIER_PATH = "/usr/lib/jarvis/jarvis/ledger/verify.py"
 MEMORY_DB_PATH = "/var/lib/jarvis/memory.db"
 TOKEN_PATH = "/etc/jarvis/token"
