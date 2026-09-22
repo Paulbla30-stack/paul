@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "permissions": {
+    "allow": [
+      "Bash(python3 aws/scripts/ssm_run.py *)",
+      "Bash(python3 aws/scripts/zenodo_meta.py *)",
+      "Bash(python3 aws/scripts/estate_cleanup.py)",
+      "Bash(python3 -m pytest *)",
+      "Bash(python3 -m fence.selftest *)",
+      "Bash(python3 jarvis/ledger/verify.py *)",
+      "Bash(git status*)",
+      "Bash(git diff*)",
+      "Bash(git log*)",
+      "Bash(git show*)"
+    ],
+    "ask": [
+      "Bash(python3 aws/scripts/estate_cleanup.py --apply*)"
+    ]
+  }
+}
