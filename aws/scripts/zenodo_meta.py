@@ -40,7 +40,9 @@ SHADOWING = ("AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN")
 
 # Only these may be written. Anything else in a plan entry is refused, so a
 # stray key cannot quietly rewrite a title, a licence or an author list.
-WRITABLE = {"keywords", "related_identifiers", "language", "subjects"}
+# `version` is here because one record carries a whole sentence where the
+# other nineteen carry a version string, and aggregators read that field.
+WRITABLE = {"keywords", "related_identifiers", "language", "subjects", "version"}
 
 
 def read_token() -> str:
@@ -64,10 +66,14 @@ def api(token, url, method="GET", payload=None):
 
 
 def describe(md: dict) -> str:
+    ver = str(md.get("version") or "")
+    if len(ver) > 18:
+        ver = ver[:15] + "..."
     return (f"keywords={len(md.get('keywords') or [])} "
             f"related={len(md.get('related_identifiers') or [])} "
             f"subjects={len(md.get('subjects') or [])} "
-            f"language={md.get('language')!r}")
+            f"language={md.get('language')!r} "
+            f"version={ver!r}")
 
 
 def apply_one(token, record_id: str, changes: dict, apply: bool) -> bool:
