@@ -330,40 +330,73 @@ of machinery. Do not cite it as an implementation of the Glass Ledger.
 SES on this account is **in sandbox** (`ProductionAccessEnabled: false`),
 which means both sender and recipient must be verified identities.
 
-The only verified identity is `Paulbla30@hotmail.com`, and the digest goes
-there. Both `to` and `sender` name it, and `fallback_enabled = false`.
+As of 23 Sep 2026 both ends are on the operator's own domain:
 
-**`paulblatherwick@heartbeat-framework.org` is not coming back.** It was
-configured for both ends, and SES reports it `verification_status=FAILED` --
-failed, not pending, which means the confirmation mail never reached a
-mailbox anyone opened and the link expired. An earlier draft of this file
-asserted that the address "routes through Cloudflare Email Routing into
-Paul's Gmail"; that was assumed rather than checked, and the evidence is
-against it. Requesting verification again would fail the same way.
+```
+to      = "paulblatherwick@heartbeat-framework.org"
+sender  = "scout@heartbeat-framework.org"
+```
 
-### Making the sender correct
+**`paulblatherwick@heartbeat-framework.org` is still a FAILED address
+identity, and it stopped mattering.** It was tried as an ADDRESS identity;
+SES reports `verification_status=FAILED` -- failed, not pending, meaning the
+confirmation mail never reached a mailbox anyone opened and the link expired.
+Earlier drafts of this file said the address "is not coming back" and that
+"requesting verification again would fail the same way". Both were true of an
+address identity and neither is true of a domain one: **verifying the DOMAIN
+covers every address on it**, for sending, and in sandbox for receiving too.
+The stale address identity is redundant rather than blocking.
 
-The recipient is solved; the sender is not. SES is sending as a hotmail.com
-address, and hotmail.com's SPF does not list Amazon SES. It is arriving
-because consumer DMARC is permissive, not because it is right, and it is one
-policy change away from being junked.
+(An older draft also asserted the address "routes through Cloudflare Email
+Routing into Paul's Gmail". That was assumed rather than checked. What is
+checked: the domain's MX is Cloudflare Email Routing, and mail sent to this
+address is accepted rather than rejected -- see below.)
 
-The fix is a domain SES can sign for:
+### What is set up, and how it was checked
 
-1. SES console (us-west-2) → Identities → Create identity → **Domain** →
-   `heartbeat-framework.org`, Easy DKIM, RSA 2048.
-2. Add the three CNAMEs it returns to Cloudflare, **DNS only, not proxied**.
-3. Change the SPF TXT record to
-   `v=spf1 include:_spf.mx.cloudflare.net include:amazonses.com ~all`.
-4. Set `sender = "scout@heartbeat-framework.org"` in `config.toml`. Leave
-   `to` as the hotmail address: it is a verified identity in its own right,
-   so it keeps satisfying the sandbox at the recipient end, and it is the
-   mailbox actually read.
+| | |
+|---|---|
+| Domain identity | `heartbeat-framework.org`, verified for sending |
+| Easy DKIM | `SUCCESS`; all three selectors resolve to `*.dkim.amazonses.com` |
+| SPF | `v=spf1 include:amazonses.com ~all` on the apex, exactly one record |
+| DMARC | `v=DMARC1; p=none; rua=mailto:rua@dmarc.brevo.com` |
+| MX | Cloudflare Email Routing |
 
-`SesMailer._accepted` already treats a verified domain as covering every
-address on it, so no code change is needed when the domain verifies.
-Set `fallback_enabled = false` once verification is done, so a broken
-recipient fails loudly rather than quietly going somewhere else.
+Every row was read back from two independent resolvers rather than from the
+dashboard that wrote it.
+
+An earlier version of this section told you to publish
+`v=spf1 include:_spf.mx.cloudflare.net include:amazonses.com ~all`. The
+Cloudflare include is not needed: Email Routing receives and forwards for
+this domain, it does not send as it. What is published is the shorter record,
+it uses one of SPF's ten lookups, and `include:amazonses.com` resolves.
+
+**DKIM is the load-bearing half, not SPF.** The digest arrives by Cloudflare
+forwarding it to another mailbox, and a forwarded message reaches its final
+destination from Cloudflare's IPs rather than Amazon's, so SPF contributes
+nothing to DMARC on that hop. DKIM survives forwarding intact and aligns with
+`d=heartbeat-framework.org`. SPF earns its place for mail delivered directly.
+
+### What is still not proved
+
+That the mail reaches a mailbox the operator opens. Three messages have been
+sent to the address -- one by hand, one to watch for a bounce, one through
+`SesMailer.send()` itself. SES accepted all three, and 140 seconds of polling
+after the second showed no hard bounce and nothing added to the account
+suppression list, which means Cloudflare's MX **accepted** the recipient
+rather than rejecting an unknown address (it rejects at SMTP time when no
+rule and no catch-all matches).
+
+A routing rule can still forward somewhere nobody reads, and that failure is
+silent from this end. Only the operator can close it, by saying a message
+arrived.
+
+`fallback_enabled = true`, and the comment in `config.toml` says exactly what
+that covers: it fires when an address stops being a verified SES identity. It
+does **not** fire when a Cloudflare routing rule disappears, because SES
+accepts that mail and it vanishes afterwards. The hotmail address stays as
+the fallback because it is the one destination anybody has watched a message
+land in.
 
 Sandbox is sufficient here: 200 emails/day against a need of one.
 

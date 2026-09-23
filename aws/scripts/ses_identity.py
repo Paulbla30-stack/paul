@@ -39,30 +39,55 @@ def records(domain: str, tokens) -> list:
 
 
 def report(domain: str, identity: dict, spf: str) -> None:
+    """Say what is outstanding, and say plainly when nothing is.
+
+    This used to print the full list of records to add every time, beside a
+    DKIM status of SUCCESS and a parenthetical saying it would stay PENDING
+    until they resolved. Both halves were already true and the instruction was
+    already done. A tool that reports finished work as outstanding is a tool
+    people learn to skim, and then it is no use on the day something really is
+    missing.
+    """
     dk = identity.get("DkimAttributes") or {}
+    dkim_status = dk.get("Status")
     print(f"\n{domain}")
     print(f"  verified for sending : {identity.get('VerifiedForSendingStatus')}")
     print(f"  verification status  : {identity.get('VerificationStatus')}")
-    print(f"  dkim status          : {dk.get('Status')}  (PENDING until the CNAMEs resolve)")
+    print(f"  dkim status          : {dkim_status}"
+          + ("" if dkim_status == "SUCCESS" else "  (PENDING until the CNAMEs resolve)"))
 
     rows = records(domain, dk.get("Tokens") or [])
     if not rows:
         print("\n  no DKIM tokens yet — nothing to add")
         return
-    print("\n  Add these in Cloudflare as CNAME, DNS only (grey cloud, NOT proxied):\n")
-    for name, target in rows:
-        print(f"    {name}")
-        print(f"      -> {target}\n")
-    print("  And change the SPF TXT record on the apex to authorise SES:\n")
-    print(f"    current : {spf or '(none found)'}")
-    if spf and "amazonses.com" not in spf:
-        print(f"    becomes : {spf.replace(' ~all', ' include:amazonses.com ~all')}")
-    elif not spf:
-        print("    becomes : v=spf1 include:amazonses.com ~all")
+
+    spf_done = bool(spf) and "amazonses.com" in spf
+    if dkim_status == "SUCCESS":
+        print("\n  DKIM: done. SES is signing for this domain; the three CNAMEs")
+        print("        resolve, or it would not say SUCCESS.")
     else:
-        print("    becomes : (already lists amazonses.com — leave it)")
-    print("\n  Verification completes on its own once those resolve, usually minutes.")
-    print("  Then set sender in scout/config.toml to an address on this domain.")
+        print("\n  Add these in Cloudflare as CNAME, DNS only (grey cloud, NOT proxied):\n")
+        for name, target in rows:
+            print(f"    {name}")
+            print(f"      -> {target}\n")
+
+    if spf_done:
+        print(f"\n  SPF : done. {spf}")
+    else:
+        print("\n  SPF : the apex TXT record does not authorise SES.\n")
+        print(f"    current : {spf or '(none found)'}")
+        print(f"    becomes : {spf.replace(' ~all', ' include:amazonses.com ~all')}"
+              if spf else "    becomes : v=spf1 include:amazonses.com ~all")
+
+    if dkim_status == "SUCCESS" and spf_done:
+        # Named rather than implied: DKIM and SPF being right is not the same
+        # as a message arriving, and only a person looking in a mailbox can
+        # say that.
+        print("\n  Nothing outstanding in DNS. What DNS cannot tell you is whether")
+        print("  mail reaches a mailbox anyone opens — send one and look.")
+    else:
+        print("\n  Verification completes on its own once those resolve, usually minutes.")
+        print("  Then set sender in scout/config.toml to an address on this domain.")
 
 
 def current_spf(domain: str) -> str:

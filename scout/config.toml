@@ -179,20 +179,23 @@ records = [
 # assumed -- all three selectors resolve to *.dkim.amazonses.com at two
 # independent resolvers.
 #
-# There is still NO SPF record on the apex. The line above used to say the
-# domain's SPF "authorises Cloudflare alone", which was wrong: a TXT query
-# returns NOERROR with a brevo-code and a google-site-verification and no
-# v=spf1 at all. Mail from here will still pass DMARC, because DMARC passes on
-# SPF *or* DKIM alignment and Easy DKIM signs with d=heartbeat-framework.org.
-# So this is correct today and SPF is the belt to the DKIM braces, not a
-# blocker.
+# SPF followed the same day: "v=spf1 include:amazonses.com ~all" on the apex,
+# exactly one v=spf1 record, include resolving, one of SPF's ten lookups used.
+# An earlier version of this comment claimed the domain's SPF "authorises
+# Cloudflare alone"; there was no SPF record at all, and the claim had never
+# been checked.
 #
-# When the SPF record is added, it has to authorise everything that sends for
-# this domain, not just SES: there is a brevo-code TXT on the apex and the
-# DMARC rua points at dmarc.brevo.com, so Brevo has at least been set up here.
-# Publishing "v=spf1 include:amazonses.com ~all" on its own would put every
-# Brevo message out of policy. Check Brevo's own current include before
-# writing the record.
+# The Brevo caution that replaced it is also discharged. Every Brevo DKIM
+# selector on this domain is NXDOMAIN, so Brevo is not in a working sending
+# configuration here -- what is left is a brevo-code TXT and a DMARC rua
+# pointing at Brevo, the shape of a setup started and not finished. An
+# SES-only record takes nothing away that was working.
+#
+# DKIM, not SPF, is the load-bearing half for this digest. It arrives by
+# Cloudflare forwarding it on, and a forwarded message reaches its final
+# destination from Cloudflare's IPs rather than Amazon's, so SPF contributes
+# nothing to DMARC on that hop. DKIM survives forwarding and aligns. SPF earns
+# its place for anything delivered directly.
 # Both ends now on the domain. Proved rather than configured: one message was
 # sent to this address through SES, accepted, and 140 seconds of polling showed
 # no hard bounce and nothing added to the account suppression list. That is two
