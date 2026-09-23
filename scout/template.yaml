@@ -138,6 +138,21 @@ Resources:
               # Deliberately absent: DeleteItem and UpdateItem. The scout
               # appends; it has no reason to be able to rewrite or remove a
               # chain entry, so it is not given the ability.
+        - PolicyName: draft-with-one-model-only
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              # Stage 2 writes drafts, which means a model call, which the
+              # role could not make at all: it had no bedrock permission of
+              # any kind. Granted for one model id and nothing else, so a
+              # config edit cannot quietly move the drafting to a model
+              # nobody chose.
+              - Effect: Allow
+                Action:
+                  - bedrock:InvokeModel
+                Resource:
+                  - !Sub 'arn:aws:bedrock:${AWS::Region}::foundation-model/qwen.qwen3-235b-a22b-2507-v1:0'
+                  - !Sub 'arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/qwen.qwen3-235b-a22b-2507-v1:0'
         - PolicyName: send-digest-only
           PolicyDocument:
             Version: '2012-10-17'
@@ -148,7 +163,14 @@ Resources:
                 Condition:
                   StringEquals:
                     ses:FromAddress:
+                      # Every address config.toml may put in `sender` has to
+                      # be here, or the digest dies with AccessDenied on the
+                      # first day something clears the threshold. Changing
+                      # the sender in config alone is not enough, and testing
+                      # it with an operator's own credentials proves the
+                      # wrong thing: the Lambda sends as this role.
                       - paulblatherwick@heartbeat-framework.org
+                      - scout@heartbeat-framework.org
                       - Paulbla30@hotmail.com
               - Effect: Allow
                 Action: ses:ListEmailIdentities

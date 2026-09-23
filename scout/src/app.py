@@ -24,6 +24,7 @@ from chain import Chain, DynamoChainStore, LocalChainStore          # noqa: E402
 from scoring import Scorer                                          # noqa: E402
 from store import DynamoHitStore, LocalHitStore, record_from        # noqa: E402
 import sources                                                      # noqa: E402
+from proposals import Proposal                                       # noqa: E402
 from sources import arxiv, hackernews, lesswrong, medrxiv, moltbook  # noqa: E402
 import digest                                                       # noqa: E402
 
@@ -94,8 +95,121 @@ def collect(cfg: dict, now: datetime) -> tuple[list, list[str], list[str], list[
     return items, ok, failed, truncated
 
 
+def _subject(title: str) -> str:
+    """A crude key for "this is the same paper again".
+
+    arXiv revisions arrive as separate ids with the same title, and the live
+    table already holds one paper twice. Drafting it twice is two model calls
+    and two near-identical posts for one piece of work.
+    """
+    return " ".join("".join(c for c in (title or "").lower()
+                            if c.isalnum() or c.isspace()).split())[:90]
+
+
+def propose(cfg: dict, records: list[dict], *, drafter, store,
+            now: datetime | None = None, dry_run: bool = False) -> dict:
+    """Draft the few items worth a public post, and file them for approval.
+
+    Separate from the digest and held to a higher bar. The digest threshold
+    answers "worth reading"; this answers "worth saying something about in
+    public, under Paul's name", which is a different and rarer question. On
+    the first 41 stored hits: 17 cleared the digest's 3.0, six cleared 6.0 and
+    three cleared 7.0.
+
+    Two caps, for two different reasons. The threshold is about quality; the
+    per-run limit is about cost and attention -- every draft is a model call,
+    and every proposal competes with the others for the one operator who has
+    to read them. A flood of mediocre drafts buries a good one.
+
+    Nothing here sends anything. It files proposals; the approve app is the
+    only thing that can move one to sent.
+    """
+    now = now or datetime.now(timezone.utc)
+    draft_cfg = cfg.get("drafting") or {}
+    threshold = float(draft_cfg.get("post_threshold", 6.0))
+    cap = int(draft_cfg.get("max_drafts_per_run", 3))
+    network = str(draft_cfg.get("network", "moltbook")).strip().lower()
+    purpose = str(draft_cfg.get("purpose", "news")).strip().lower()
+
+    stats = {"considered": 0, "drafted": 0, "proposed": 0, "declined": [],
+             "skipped_duplicate": 0, "ids": [], "threshold": threshold,
+             "cap": cap, "network": network}
+    if drafter is None or store is None:
+        stats["skipped"] = "no drafter or proposal store configured"
+        return stats
+    if cap <= 0:
+        stats["skipped"] = "max_drafts_per_run is 0"
+        return stats
+
+    eligible = sorted((r for r in records if float(r.get("score") or 0) >= threshold),
+                      key=lambda r: -float(r["score"]))
+    stats["considered"] = len(eligible)
+    if not eligible:
+        return stats
+
+    # Do not propose the same paper twice. Checked against what is already
+    # waiting as well as within this batch: a proposal sitting unread for
+    # three days is exactly when the next run would offer it again.
+    seen_subjects = set()
+    try:
+        for p in store.pending(limit=100):
+            seen_subjects.add(_subject(p.target_title))
+    except Exception as exc:                      # noqa: BLE001
+        log.warning("could not read pending proposals; duplicate guard is "
+                    "this run only: %s", exc)
+
+    for rec in eligible:
+        if stats["drafted"] >= cap:
+            break
+        subject = _subject(rec.get("title"))
+        if subject in seen_subjects:
+            stats["skipped_duplicate"] += 1
+            log.info("already proposed, not drafting again: %s",
+                     str(rec.get("title"))[:70])
+            continue
+        seen_subjects.add(subject)
+
+        item = {"source": rec.get("source"), "title": rec.get("title"),
+                "author": rec.get("author") or "", "url": rec.get("url"),
+                "body": rec.get("body") or rec.get("summary") or ""}
+        stats["drafted"] += 1
+        try:
+            out = drafter.draft(item)
+        except Exception as exc:                  # noqa: BLE001 - a bad draft
+            log.warning("drafting failed for %s: %s: %s",
+                        str(rec.get("title"))[:60], type(exc).__name__, exc)
+            stats["declined"].append({"title": str(rec.get("title"))[:120],
+                                      "reason": f"{type(exc).__name__}: {exc}"[:200]})
+            continue
+
+        if not out.get("worth_posting"):
+            # Recorded with its reason rather than dropped silently, so a
+            # pipeline that has quietly narrowed to nothing is visible.
+            stats["declined"].append({"title": str(rec.get("title"))[:120],
+                                      "reason": str(out.get("reason") or "declined")[:200]})
+            continue
+
+        proposal = Proposal.new(
+            kind="post", network=network,
+            target_url=str(rec.get("url") or ""),
+            target_title=str(rec.get("title") or "")[:300],
+            draft=out.get("draft", ""),
+            rationale=str(out.get("rationale") or "")[:600],
+            discloses=list(out.get("disclosures") or []),
+            source_item={k: rec.get(k) for k in
+                         ("source", "external_id", "url", "score", "chain_seq")},
+            now=now, purpose=purpose)
+        if not dry_run:
+            store.put(proposal)
+        stats["proposed"] += 1
+        stats["ids"].append(proposal.id)
+        log.info("proposal %s filed for %s (%s, expires %s)", proposal.id,
+                 network, purpose, proposal.expires_at)
+    return stats
+
+
 def run(cfg: dict, *, hit_store, chain_store, mailer, now: datetime | None = None,
-        dry_run: bool = False) -> dict:
+        dry_run: bool = False, drafter=None, proposal_store=None) -> dict:
     now = now or datetime.now(timezone.utc)
     scorer = Scorer(cfg)
     chain = Chain(chain_store)
@@ -157,6 +271,12 @@ def run(cfg: dict, *, hit_store, chain_store, mailer, now: datetime | None = Non
                    key=lambda r: r["score"], reverse=True)
     capped = above[: int(cfg["run"]["digest_max_items"])]
 
+    # Drafting runs on what is new this run, not on the digest's selection:
+    # the digest is capped for readability and this is capped for cost, and
+    # conflating them would let a long digest decide how much gets written.
+    stats_propose = propose(cfg, new_records, drafter=drafter,
+                            store=proposal_store, now=now, dry_run=dry_run)
+
     stats = {
         "first_run": first_run,
         "lookback_days": int(cfg["run"]["lookback_days"]),
@@ -168,6 +288,9 @@ def run(cfg: dict, *, hit_store, chain_store, mailer, now: datetime | None = Non
         "sources_failed": failed,
         "sources_truncated": truncated,
         "threshold": threshold,
+        "proposed": stats_propose["proposed"],
+        "drafted": stats_propose["drafted"],
+        "declined": len(stats_propose["declined"]),
     }
     try:
         stats["chain_entries"] = chain.verify().get("entries", "?")
@@ -259,15 +382,54 @@ class SesMailer:
         return True
 
 
+def stage_two(cfg: dict, table: str, region: str):
+    """Build the drafter and the proposal store, or explain why not.
+
+    Returns (None, None) rather than raising. Stage 2 is the half that writes
+    drafts for Paul to approve; the half that reads, scores, chains and emails
+    has run every day since 21 September and must not stop because the model
+    is unreachable or the config turned drafting off.
+    """
+    draft_cfg = cfg.get("drafting") or {}
+    if int(draft_cfg.get("max_drafts_per_run", 0)) <= 0:
+        log.info("drafting off (max_drafts_per_run is 0)")
+        return None, None
+    try:
+        from drafting import Drafter
+        from proposals import ProposalStore
+        provider = str(draft_cfg.get("provider") or "converse").strip().lower()
+        # Each provider names its model in its own key, because the ids are
+        # not interchangeable and a single "model" would silently send an
+        # Anthropic id to Converse the day the provider changed.
+        model = {"converse": draft_cfg.get("converse_model"),
+                 "bedrock": draft_cfg.get("bedrock_model")}.get(
+                     provider, draft_cfg.get("model"))
+        drafter = Drafter(model=model, provider=provider,
+                          region=str(draft_cfg.get("bedrock_region") or region),
+                          effort=str(draft_cfg.get("effort") or "high"))
+        log.info("drafting enabled: %s via %s, at or above %.1f, %d per run",
+                 drafter.model, provider,
+                 float(draft_cfg.get("post_threshold", 6.0)),
+                 int(draft_cfg.get("max_drafts_per_run", 3)))
+        return drafter, ProposalStore(table)
+    except Exception as exc:                      # noqa: BLE001
+        log.error("drafting unavailable, the rest of the run continues: %s: %s",
+                  type(exc).__name__, exc)
+        return None, None
+
+
 def handler(event, context):
     """Lambda entry point."""
     cfg = load_config()
     table = os.environ["SCOUT_TABLE"]
     region = os.environ.get("AWS_REGION", "us-west-2")
+    drafter, proposal_store = stage_two(cfg, table, region)
     result = run(
         cfg,
         hit_store=DynamoHitStore(table),
         chain_store=DynamoChainStore(table),
         mailer=SesMailer(cfg, region),
+        drafter=drafter,
+        proposal_store=proposal_store,
     )
     return {"ok": True, **result["stats"]}

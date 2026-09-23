@@ -45,6 +45,11 @@ max_items_per_source = 200
 # of error this project keeps having to undo.
 source_budget_s = 90.0
 
+# The cap on how many drafts a run may write lives in [drafting], which
+# already had one. Two settings of the same name in two sections is how a
+# limit gets raised in the wrong place and nothing changes.
+#
+# ---------------------------------------------------------------------------
 # Items scoring at or above this go in the digest. Nothing above it means
 # no email is sent at all.
 #
@@ -109,10 +114,33 @@ digest_max_items = 25
 #   2. Model access for claude-opus-5 specifically. It returned 403 "not
 #      available for this account" while opus-4-5, sonnet-4-6 and haiku-4-5
 #      were already granted.
-provider = "anthropic"
+# 23 Sep 2026: set to "converse" so drafting can actually run.
+#
+# Checked on the live function rather than assumed. jarvis-scout has NO
+# Anthropic API key in its environment, so "anthropic" would fail on the
+# first call of every run. It also had no bedrock:InvokeModel on its role at
+# all, so "bedrock" would have failed too -- the template now grants it, for
+# exactly one model id and nothing else.
+#
+# Converse reaches a model that is already granted on this account and needs
+# no secret: IAM authenticates it and it bills where the $50 monthly alarm is
+# already watching. The Anthropic models remain blocked behind the use-case
+# form and the opus-5 grant, which is Paul's to unblock and takes weeks.
+#
+# What this trades: the judgement of when NOT to post, which the config above
+# is right to call the hard part. Drafter._vet() runs the voice rules
+# whatever the provider, so the hard floor does not move -- what a weaker
+# model costs is more declines that should have been drafts, and more drafts
+# that should have been declines reaching the gate for Paul to reject.
+# Watch the first week and say so if it is writing rubbish.
+provider = "converse"
 
 model = "claude-opus-5"
 effort = "high"
+
+# Used when provider = "converse". Already granted on this account and
+# already what the agent itself plans with.
+converse_model = "qwen.qwen3-235b-a22b-2507-v1:0"
 
 # Used when provider = "bedrock". Bedrock serves these through a
 # cross-region inference profile, so the id needs the "us." prefix — the
@@ -122,7 +150,36 @@ bedrock_region = "us-west-2"
 
 # Most candidates should produce no draft at all. If this ratio ever
 # inverts, the prompt has drifted towards drafting for its own sake.
+#
+# This is the money and the attention, not the quality: every draft is a
+# model call, and every proposal competes for the one person who has to read
+# them all. A flood of mediocre drafts buries a good one. Set to 0 to stop
+# drafting entirely without unwiring anything.
 max_drafts_per_run = 3
+
+# The score at which an item is worth saying something about IN PUBLIC. A
+# different and rarer question from "worth reading", so a different number
+# from digest_threshold, and chosen from the real distribution rather than
+# picked: of the first 41 stored hits, 17 cleared the digest's 3.0, ten
+# cleared 4.0, six cleared 6.0 and three cleared 7.0. At 6.0 that is roughly
+# two a day, which is about as many public posts as anyone wants to make and
+# as many as one person will read properly before approving.
+#
+# Lower it only after watching a week of scores in the digest. The cost of
+# too low is not the money: it is drafts nobody reads carefully, which is how
+# an approval gate becomes a rubber stamp.
+post_threshold = 6.0
+
+# Where a draft is proposed for. Moltbook is agent-only, so an agent posting
+# there is the native act and every reader knows what they are reading.
+# Facebook is permitted and has no write path yet, so a proposal filed for it
+# is refused at the gate with an honest reason rather than posted to the
+# wrong place. See proposals.PERMITTED and proposals.SENDERS.
+network = "moltbook"
+
+# Sets how long a proposal stays open before it lapses: reply 2 days, news 4,
+# release 14, evergreen 30. A paper somebody else just published is news.
+purpose = "news"
 
 [citations]
 # The estate, as the drafter is allowed to cite it.
