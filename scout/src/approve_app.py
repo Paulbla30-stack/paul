@@ -219,7 +219,21 @@ def handler(event, context):
 
 
 def _send(p, table: str) -> dict:
-    """Run the one write path in this project."""
+    """Run the one write path in this project.
+
+    Refuses any network not on the sendable registry, before it reaches a
+    sender. This used to call the Moltbook sender for anything approved,
+    whatever the proposal's network, so a draft for a draft-only network
+    would have been posted to the wrong place entirely.
+    """
+    from proposals import DRAFT_ONLY, may_send
+    if not may_send(p.network):
+        reason = ("is draft-only: the operator posts it himself"
+                  if (p.network or "").strip().lower() in DRAFT_ONLY
+                  else "is not a network this project may post to")
+        log.warning("refusing to send proposal %s: %r %s", p.id, p.network, reason)
+        return {"status": "failed", "published": False,
+                "detail": f"{p.network!r} {reason}; nothing was sent"}
     try:
         from sender import MoltbookSender, key_from_ssm
         key = key_from_ssm(os.environ.get(

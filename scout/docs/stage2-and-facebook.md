@@ -86,7 +86,42 @@ Decisions, not much code:
    reason recorded is the current design, and is right. Worth confirming the
    reason reaches the digest so a silently narrow pipeline is visible.
 
-## Facebook, once Stage 2 runs
+## The decision: post to Moltbook, draft for Facebook
+
+Paul, 23 September 2026. Two networks, two different permissions, for a
+reason that is about the audience rather than the technology.
+
+**Moltbook, the agent may post.** It is an agent-only network: agents post,
+humans observe. An agent posting there is the native act rather than an
+imposition, and every reader already knows what they are reading. Through
+the approval gate as before.
+
+**Facebook, the agent drafts and Paul posts.** It is his own page, under his
+own name, read by patients and colleagues. There is no machine write path to
+it and there is not meant to be one.
+
+That second decision removes the entire Meta integration: no Facebook app,
+no page access token, no `pages_manage_posts`, no permission bundle, no
+App Review question, and no token refresh cycle to maintain. It also settles
+the media argument without needing the argument — a draft he pastes himself
+is one he has necessarily read.
+
+### Encoded as a registry, not a convention
+
+`proposals.py` now carries `SENDABLE = {"moltbook"}` and
+`DRAFT_ONLY = {"facebook"}`, and `_send()` refuses anything not sendable
+before it reaches a sender.
+
+This closed a real defect rather than only recording a preference. `_send()`
+called the Moltbook sender for **any** approved proposal, whatever its
+network. The moment a second network existed, approving a Facebook draft
+would have posted it to Moltbook: the right text to the wrong audience,
+published, verified, and reported as a success.
+
+A network on neither list is refused. A new destination has to be classified
+deliberately, and the failure mode of forgetting is a refusal to send.
+
+## Facebook, as a draft-only destination
 
 The gate machinery needs no change. `proposals.py` already anticipates a
 second network (`network: str  # "moltbook" | …`).
@@ -99,38 +134,39 @@ own name on a professional register. The open sources the scout already
 reads — arXiv, medRxiv, LessWrong, Hacker News, Moltbook — are where the
 subject is actually argued.
 
-**Posting to a Page you administer needs Standard Access, not full App
-Review.** App Review (Advanced Access) is the requirement for managing
-*clients'* Pages. `pages_manage_posts` cannot be requested alone; it pulls
-in `pages_read_engagement` and `pages_show_list`. Token lifecycle —
-short-lived → long-lived user token → Page token — is the fiddly part and
-should be confirmed against current Meta docs at build time, not from
-memory.
+**None of the Meta API work is needed.** Posting to a Page you administer
+would have needed Standard Access, a `pages_manage_posts` bundle and a token
+refresh cycle. Drafting for a page needs none of it: the draft goes in the
+digest and Paul posts it. That is the whole integration.
 
 ### Two positions taken
 
-**Posting only. Not replies.** Posting publishes fixed text approved
-verbatim. Replying to comments is an unbounded real-time conversation with
-the public in Paul's name, on a register where he is personally accountable.
-Comments into the digest; replies by hand.
+**Replies by hand, like posts.** Draft-only settles this for Facebook: a
+reply is an unbounded real-time conversation with the public in Paul's name,
+and nothing machine-sent reaches that page anyway.
 
 **A higher bar on Facebook than Moltbook.** From the agent's review, and
 correct: "public perception is not version-controlled". A Moltbook error is
 corrected in-thread by peers; a Facebook error is screenshotted and
 attributed to him.
 
-### Media: not yet
+### Media: still not yet, for a smaller reason
 
-The gate works because approving is cheap — a draft read in ten seconds and
-judged. An image needs looking at; audio needs listening to in real time.
-Put both in every proposal and approval becomes a three-minute job, at which
-point it gets rubber-stamped — and a rubber-stamped approval is worse than
-no gate, because the chain then records that he approved it.
+Draft-only removes the rubber-stamping risk on Facebook — he cannot paste a
+post without handling it. What remains is the first argument: AI-generated
+illustration on a clinical safety page reads as content-marketing filler,
+and anything implying a clinical scene misleads. A deterministic template
+stays the right answer when visuals are wanted.
 
-When visuals are wanted, the answer is a **deterministic template** — the
-paper's own designation, its title, one figure from the PDF, in the site's
-palette — not a generative model. Nothing is invented and approval stays a
-glance. That is a layout problem.
+The original argument still holds in full for Moltbook, where the machine
+does the posting: the gate works because approving is cheap. An image needs
+looking at, audio needs listening to in real time, and once approval is a
+three-minute job it gets rubber-stamped — which is worse than no gate,
+because the chain then records that he approved it.
+
+The deterministic template, for either network: the paper's own designation,
+its title, one figure from the PDF, in the site's palette. Nothing invented,
+approval stays a glance. A layout problem, not a model.
 
 ## Not on any chain
 

@@ -28,6 +28,31 @@ from datetime import datetime, timedelta, timezone
 PENDING, APPROVED, REJECTED, EXPIRED, SENT, FAILED = (
     "pending", "approved", "rejected", "expired", "sent", "failed")
 
+# Which networks the machine may post to, and which it may only draft for.
+#
+# Paul's decision, 23 September 2026. Moltbook is an agent-only network: only
+# agents post and humans observe. An agent posting there is the native act
+# rather than an imposition, and every reader knows what they are reading.
+#
+# Facebook is his own page, under his own name, read by patients, colleagues
+# and anyone else. So the agent drafts and HE posts. There is no machine
+# write path to it and there is not meant to be one -- which also means no
+# Facebook app, no page access token, no pages_manage_posts, and no token
+# refresh cycle to maintain.
+#
+# This is a registry, not a convention, because _send() used to call the
+# Moltbook sender for any approved proposal whatever its network. The moment
+# a second network existed, approving a Facebook draft would have posted it
+# to Moltbook. A network absent from both sets is refused: a new destination
+# has to be classified deliberately, and the failure is a refusal to send.
+SENDABLE = frozenset({"moltbook"})
+DRAFT_ONLY = frozenset({"facebook"})
+
+
+def may_send(network: str) -> bool:
+    """True only for a network this project is allowed to post to itself."""
+    return (network or "").strip().lower() in SENDABLE
+
 TERMINAL = (REJECTED, EXPIRED, SENT, FAILED)
 DEFAULT_TTL_DAYS = 7
 
