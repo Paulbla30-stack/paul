@@ -152,23 +152,26 @@ records = [
 # Where the digest goes.
 #
 # SES is in sandbox mode on this account, which means BOTH the sender and
-# the recipient must be verified identities. As of 21 Sep 2026 the only
-# verified identity is Paulbla30@hotmail.com. See README "SES sandbox".
-# paulblatherwick@heartbeat-framework.org was configured for both ends and
-# SES now reports it verification_status=FAILED, not pending: the
-# confirmation mail never reached a mailbox anyone could open, so the link
-# expired. Aiming at it again would fail the same way, so both ends point at
-# the address that demonstrably works, and the fallback is off -- there is
-# nothing left for it to mask.
+# the recipient must be verified identities. See README "SES sandbox".
 #
 # Sender and recipient are different problems and want different answers:
 #
-#   recipient  just has to be a mailbox Paul reads. Hotmail qualifies.
+#   recipient  has to be a mailbox Paul actually reads.
 #   sender     wants a domain he controls the DNS for, so SES mail can be
 #              signed (DKIM) and authorised (SPF). Sending as a hotmail.com
 #              address via SES is spoofing a domain that does not list SES;
-#              it is arriving today because consumer DMARC is permissive,
-#              not because it is correct.
+#              it was arriving because consumer DMARC is permissive, not
+#              because it was correct.
+#
+# Until 23 Sep both ends were Paulbla30@hotmail.com, because
+# paulblatherwick@heartbeat-framework.org had been tried as an ADDRESS
+# identity and SES reported verification_status=FAILED -- the confirmation
+# mail never reached a mailbox anyone could open, so the link expired.
+#
+# That address identity is still FAILED and it no longer matters. Verifying
+# the DOMAIN covers every address on it, for sending and, in sandbox, for
+# receiving too. The stale address identity is redundant rather than
+# blocking; SES answers from the domain.
 #
 # 23 Sep 2026: the operator added the three DKIM CNAMEs and SES now reports
 # heartbeat-framework.org verified for sending with DkimAttributes.Status
@@ -190,12 +193,27 @@ records = [
 # Publishing "v=spf1 include:amazonses.com ~all" on its own would put every
 # Brevo message out of policy. Check Brevo's own current include before
 # writing the record.
-to      = "Paulbla30@hotmail.com"
+# Both ends now on the domain. Proved rather than configured: one message was
+# sent to this address through SES, accepted, and 140 seconds of polling showed
+# no hard bounce and nothing added to the account suppression list. That is two
+# facts -- SES accepted the recipient, and Cloudflare's MX accepted it too
+# rather than rejecting an unknown address, which it does at SMTP time when no
+# rule and no catch-all match.
+#
+# It is not proof the mail reached a mailbox Paul opens. A routing rule can
+# forward somewhere nobody reads, and that failure is silent from this end.
+# Only he can close that, by saying the message arrived.
+to      = "paulblatherwick@heartbeat-framework.org"
 sender  = "scout@heartbeat-framework.org"
 
+# On, and honest about what it covers. resolve() falls back when an address is
+# not a verified SES identity -- so this catches the domain identity lapsing,
+# and it does NOT catch a Cloudflare routing rule being removed, because SES
+# accepts that mail and it disappears afterwards. The hotmail address is the
+# one destination with a delivery anybody has actually seen.
 fallback_to       = "Paulbla30@hotmail.com"
 fallback_sender   = "Paulbla30@hotmail.com"
-fallback_enabled  = false
+fallback_enabled  = true
 
 subject_prefix = "JARVIS scout"
 
