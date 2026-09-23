@@ -344,51 +344,99 @@ repository, so treat the details as mine to re-confirm rather than as a record:
 
 ---
 
-## 10. The browser is live, and one decision in it is yours
+## 10. The browser: full control, inside a real sandbox
 
-Added this afternoon, after you asked for it. It is on the **Browser** tab in
-the UI on port 8443.
+You asked for full admin control and then, unprompted, asked whether it could
+be sandboxed. That second question is why this is safe to have given you.
 
-Type an address and it goes; type words and it searches; the links are listed
-underneath and clicking one follows it; **View** takes a picture of the page
-when the text is not enough. Jarvis drives the same browser, so what you see
-there is what it sees.
+### What Jarvis can now do
 
-**The decision that is yours: nothing is logged in.** The profile is thrown
-away every session — no cookies, no saved passwords, nothing carried over.
-Jarvis and I landed on this independently and its framing is the better one:
-you do not want it *being* you online, you want it helping you look things up.
-A browser holding your sessions is a browser that can act as you, and then
-every instruction injected into every page carries your authority.
+Click, type, choose from dropdowns, press keys, submit forms — as actions, not
+as cards you approve. Plus back, forward, reload, scroll, and downloads into
+one fixed directory.
 
-The cost is real and you should weigh it rather than inherit it: **nothing
-behind a login can be read.** Not your email, not your bank, not your energy
-account. If you want that, say so and it becomes a deliberate, per-site
-change rather than a cookie jar quietly filling up. I have not built it.
+I did **not** do that by setting `rung: actor`. That would also have opened
+shell and the machine, as the price of being able to press a button on a web
+page. Instead there is a grant naming one capability. Measured, not asserted:
 
-What it will never do, at any rung and whoever asks: type into a password or
-card field, or submit a form on a page that has one. Those are decided by the
-page's own declared input types, not guessed from labels.
+```
+asked for : ['shell_command', 'maintenance', 'user_command', 'browse_act']
+granted   : ['browse_act']
+```
 
-Reading and following links happen at Jarvis's normal rung — no approval, no
-friction, because a search is just an address with your question in it.
-Clicking, typing and submitting are a change, so they arrive as a card you
-approve.
+`GRANTABLE` is a frozen list in reviewed code; the YAML only says whether an
+already-agreed grant is on. Remove one line from the config and every click
+becomes a proposal again.
 
-Verified live rather than assumed: example.com read and its link followed
-through a redirect; Hacker News read with 200 links; a 1280x900 screenshot.
-And the fences, each refusing with its own reason — the cloud metadata
-service, loopback, 10.0.0.0/8, and `file://` — refused for you through the UI
-as well as for Jarvis, because those are properties of a browser running
-unsandboxed on your box and they do not stop being true because a person
-asked.
+### The sandbox, and how I know it is on
 
-**Estate, since it is your account:** I made a `jarvis-browser` system user,
-installed pip and the Chromium runtime libraries with dnf, and put Chromium in
-`/opt/jarvis-browsers`. Root filesystem went **26% → 40%**. The browser has
-its own systemd unit with `MemoryMax=900M` and an OOM score of +900 against
-Jarvis's −500, so on this t3.small a heavy page kills the browser and never
-the agent. Told Jarvis the same, the same day.
+I told you it was on once before and I was wrong. What I had checked was that
+`--no-sandbox` was absent from my own argument list — a statement about a
+config file. When I read `/proc/<pid>/ns/user` for a live renderer, every
+Chromium process was sitting in the same user namespace as PID 1. Nothing was
+sandboxed at all.
+
+Three causes. systemd's syscall filter stopped Chromium starting a renderer;
+an earlier comparison I drew a conclusion from was confounded by that filter
+still being on; and the real one — **Playwright adds `--no-sandbox` itself**,
+so the flag was on the command line no matter what my code left out.
+
+Now, on your box:
+
+```
+init userns = user:[4026531837]
+
+PID     TYPE              SECCOMP  USER_NS
+250330  --type=renderer   2        user:[4026532205]
+250339  --type=renderer   2        user:[4026532205]
+250340  --type=renderer   2        user:[4026532205]
+
+--no-sandbox on the renderer command line: 0
+```
+
+Every renderer — the process that actually parses hostile HTML and JavaScript
+— in its own kernel-enforced namespace under a seccomp filter. The browser
+process stays in init's, correctly: it is the trusted broker.
+
+### The control Jarvis designed
+
+I asked it what it would want structurally, given you had decided. It did not
+ask for the decision back. It asked for per-origin trust, and it was a better
+answer than mine:
+
+> *track which origins the browser has active sessions on ... require
+> explicit, one-time operator approval the first time any action is attempted
+> from a new origin ... trust per origin, not blanket trust.*
+
+So: with nothing signed in, acting is free — a click by the agent is a click by
+a stranger. **The moment you turn logins on, every site needs approving once.**
+Widening one capability re-narrows the other automatically, rather than by
+anyone remembering.
+
+### Two switches still off, both yours
+
+- **`browser.persistent`** — keeps logins between sessions. Off. Turning it on
+  is what makes "do everything" include your accounts, and it is also what
+  makes an injected instruction on any page able to act as you on any site you
+  are signed into. That risk is real and cannot be fixed with text handling;
+  the per-origin rule above is the answer to it, and it only starts working
+  once this is on.
+- **`browser.allow_secrets`** — lets it type into password and card fields.
+  Off. The better path is that you sign in yourself in the Browser tab once and
+  it rides the session, never touching the secret.
+
+Say the word on either and it is a config line.
+
+### One thing I was wrong about, which Jarvis caught
+
+I told it the spine refuses shell. It asked me to show that rather than say it.
+It does not refuse shell as a category — a read-only shell command is allowed
+at its rung by design, with or without any grant, and I had tested one
+destructive command and generalised. The grant is not responsible: asking for
+`shell_command` in the grant list moves nothing. Its own summary of where that
+leaves things is the right one — namespaces and seccomp are *boundaries*
+because they are observable; `GRANTABLE` and the shell policy are *policies*,
+effective now, changeable by an edit.
 
 ---
 
