@@ -85,6 +85,47 @@ DISCLOSURE = [
     r"\bthis is (?:his|Paul(?:'s)?) (?:own )?(?:paper|work)\b",
 ]
 
+# Causal and efficacy claims. The rule came from the agent, reviewing this
+# design: "no modality may introduce causal claims not explicitly in the
+# source". One rule covering text, image and audio is better than a separate
+# judgement per medium, and it is the failure mode that matters most on a
+# public page read by patients rather than researchers.
+#
+# What this check can and cannot do, stated plainly because the module's own
+# doctrine is that a rule which only mostly holds invites trusting the output:
+#
+#   IT CANNOT verify a claim against the source. No regex can. That comparison
+#   needs the paper in hand, and it is the operator's job at the approval gate.
+#   IT CAN require that a claim about clinical effect be ATTRIBUTED. "This
+#   could change how we treat depression" asserts efficacy in Paul's own
+#   voice; "the authors propose a model for depression treatment" reports
+#   what a paper says. The second is defensible on the register he posts
+#   under; the first is an endorsement he is not making.
+#
+# So: an efficacy or practice-change phrase with no attribution anywhere in
+# the draft fails. Attributed, it passes and the truth of it is Paul's call.
+EFFICACY = [
+    r"\b(?:could|will|would|should|may)\s+(?:change|transform|revolutionise|revolutionize)\s+(?:how|the way)\b",
+    r"\bclinicians?\s+should\b", r"\bnurses?\s+should\b", r"\bdoctors?\s+should\b",
+    r"\bshould\s+be\s+(?:used|adopted|deployed|implemented|prescribed)\b",
+    r"\b(?:proves|demonstrates|shows)\s+that\b",
+    r"\bis\s+(?:effective|safe|safer|superior|better)\s+(?:for|at|than|in)\b",
+    r"\b(?:reduces|prevents|cures|eliminates|improves)\s+(?:risk|harm|mortality|outcomes|symptoms)\b",
+    r"\brecommended\s+for\b",
+    r"\bevidence\s+shows\b",
+]
+
+# What turns an assertion into a report of one. Deliberately broad: the point
+# is to catch the draft speaking in Paul's own voice, not to police citation
+# style.
+ATTRIBUTION = [
+    r"\bthe\s+(?:authors?|paper|study|trial|review|preprint|article)\b",
+    r"\bthey\s+(?:report|propose|find|found|argue|suggest|conclude)\b",
+    r"\baccording\s+to\b", r"\breports?\s+that\b", r"\bproposes?\s+(?:a|an|that)\b",
+    r"\bfinds?\s+that\b", r"\bargues?\s+that\b", r"\bsuggests?\s+that\b",
+    r"\bconcludes?\s+that\b", r"\bclaims?\s+that\b",
+]
+
 MAX_DRAFT_CHARS = 2000
 
 # Any DOI that looks like a Zenodo record.
@@ -144,6 +185,16 @@ def check(draft: str, *, links_own_work: bool | None = None,
         found = _hits(pats, text)
         if found:
             failures.append(f"{label}: {', '.join(repr(f) for f in found)}")
+
+    # An efficacy claim in Paul's own voice, with nothing attributing it.
+    efficacy = _hits(EFFICACY, text)
+    if efficacy and not _hits(ATTRIBUTION, text):
+        failures.append(
+            "asserts clinical effect or practice change in Paul's own voice, "
+            "unattributed: " + ", ".join(repr(f) for f in efficacy))
+    elif efficacy:
+        notes.append("makes an attributed claim about effect; "
+                     "whether the source supports it is the operator's check")
 
     # Disclosure is required whenever the draft points at Paul's own work.
     cites_own = bool(_hits(OWN_WORK, text)) if links_own_work is None else links_own_work
