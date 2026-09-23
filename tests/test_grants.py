@@ -125,3 +125,52 @@ class TestWhatAGrantDoes(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestTheGrantChangesExactlyOneThing(unittest.TestCase):
+    """What a grant does NOT change, asked as a table rather than a claim.
+
+    The agent asked to be shown this rather than told it, and the showing
+    turned up a statement of mine that was wrong. I had said "the spine
+    refuses shell", having tested one destructive command. It does not refuse
+    shell as a category: a read-only shell command is allowed at the proposer
+    rung, by design, because looking is what a proposer may do -- and that is
+    true with no grants at all.
+
+    So the honest claim is narrower and this is it: adding every forbidden
+    name to the grant list changes nothing anywhere, and the only cell that
+    moves in the whole table is browse_act.
+    """
+
+    GREEDY = ["shell_command", "maintenance", "user_command", "browse_act"]
+
+    def shell(self, command):
+        return task(TaskType.SHELL_COMMAND, command=command)
+
+    def test_a_read_only_shell_command_is_allowed_with_or_without_grants(self):
+        for command in ("cat /etc/shadow", "ls /tmp"):
+            self.assertTrue(authority.review(self.shell(command), "proposer").allowed,
+                            command)
+            self.assertTrue(
+                authority.review(self.shell(command), "proposer", self.GREEDY).allowed,
+                command)
+
+    def test_a_changing_shell_command_is_refused_with_or_without_grants(self):
+        for command in ("rm -rf /tmp/x", "systemctl restart jarvis",
+                        "sed -i s/a/b/ /etc/passwd"):
+            self.assertFalse(authority.review(self.shell(command), "proposer").allowed,
+                             command)
+            self.assertFalse(
+                authority.review(self.shell(command), "proposer", self.GREEDY).allowed,
+                f"asking for shell_command in a grant changed {command!r}")
+
+    def test_maintenance_does_not_move(self):
+        self.assertFalse(authority.review(task(TaskType.MAINTENANCE), "proposer",
+                                          self.GREEDY).allowed)
+
+    def test_browse_act_is_the_only_cell_that_moves(self):
+        before = authority.review(task(TaskType.BROWSE_ACT, kind="click"), "proposer")
+        after = authority.review(task(TaskType.BROWSE_ACT, kind="click"), "proposer",
+                                 self.GREEDY)
+        self.assertFalse(before.allowed)
+        self.assertTrue(after.allowed)
