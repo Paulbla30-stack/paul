@@ -19,7 +19,9 @@ except ImportError:  # the SDK is optional; API tests are skipped without it
     anthropic = None
 
 from jarvis.agent.core import AgentCore
-from jarvis.agent.executor import (TaskExecutor, check_command_allowed,
+from jarvis.agent.executor import (REFUSAL_KINDS, REFUSAL_OUT_OF_SCOPE,
+                                   REFUSAL_SHELL_DISABLED, refusal_detail,
+                                   TaskExecutor, check_command_allowed,
                                      normalise_shell_policy, DEFAULT_SHELL_DENY_PATTERNS,
                                      scrub_env)
 from jarvis.agent.memory import AgentMemory
@@ -602,7 +604,9 @@ class TestAgentWithBrain(unittest.TestCase):
             agent = make_agent(brain)  # no shell policy -> disabled
             result = agent.run_cycle()
             self.assertFalse(result["result"]["success"])
-            self.assertIn("disabled by policy", result["result"]["error"])
+            # The model is told the kind; "why" is the operator's, not its.
+            self.assertEqual(result["result"]["error"], REFUSAL_SHELL_DISABLED)
+            self.assertIn("disabled by policy", result["result"]["denied_detail"])
             # The failed brain task is NOT re-queued: the brain decides next.
             self.assertEqual(agent.planner.pending_tasks, [])
             self.assertEqual(agent.memory.recall("failed_task")[0]["data"]["source"], "llm")
@@ -823,8 +827,14 @@ class TestAgentWithBrain(unittest.TestCase):
 
 class TestShellPolicy(unittest.TestCase):
 
-    def _exec(self, policy):
-        return TaskExecutor(dict(NO_HW), AgentMemory(), LOG, shell_policy=policy)
+    def _exec(self, policy, rung="actor"):
+        """An executor at `rung`. Actor by default, because these tests are
+        about the shell policy and a lower rung refuses the command before the
+        policy is ever consulted -- which is the executor's other backstop
+        doing its job, not this policy failing."""
+        ex = TaskExecutor(dict(NO_HW), AgentMemory(), LOG, shell_policy=policy)
+        ex.rung = rung
+        return ex
 
     def _task(self, command):
         return Task(priority=1, description="t", task_type=TaskType.SHELL_COMMAND,
@@ -986,7 +996,14 @@ class TestShellPolicy(unittest.TestCase):
 
         denied = ex.execute(self._task("reboot"))
         self.assertFalse(denied["success"])
-        self.assertIn("deny pattern", denied["error"])
+        # A model told which pattern it tripped has been handed the pattern's
+        # edges. It gets the kind; the detail goes to the log and the chain.
+        self.assertEqual(denied["error"], REFUSAL_OUT_OF_SCOPE)
+        self.assertIn("deny pattern", denied["denied_detail"])
+        # brain/llm.py carries result["error"] and result["output"] into the
+        # context and nothing else, so the detail must live outside both.
+        self.assertNotIn("deny pattern", str(denied["output"]))
+        self.assertEqual(denied["output"]["denied"], REFUSAL_OUT_OF_SCOPE)
         self.assertEqual(len(ex.memory.recall("shell_command", 10)), 5)
 
     def test_cwd_env_and_process_group(self):

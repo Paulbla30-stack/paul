@@ -41,8 +41,8 @@ DEFAULT_SHELL_DENY_PATTERNS = [
     r">{1,2}\s*['\"]?" + _BLOCK_DEV,
     _CMD + r"(?:cat|cp|tee|mv|install)\b.*\s['\"]?" + _BLOCK_DEV,
     # --- boot / critical files ---
-    r">{1,2}\s*['\"]?/(?:boot/|etc/fstab|etc/ld\.so\.preload|etc/sysctl|proc/sysrq-trigger|proc/sys/)",
-    _CMD + r"(?:sed\s+-i|tee|truncate|cp|mv)\b.*\s['\"]?/(?:boot/|etc/fstab|etc/ld\.so\.preload|etc/sysctl|proc/sys/)",
+    r">{1,2}\s*['\"]?/(?:boot/|etc/fstab|etc/ld\.so\.preload|etc/sysctl|usr/lib/sysctl\.d|run/sysctl\.d|proc/sysrq-trigger|proc/sys/)",
+    _CMD + r"(?:sed\s+-i|tee|truncate|cp|mv|install)\b.*\s['\"]?/(?:boot/|etc/fstab|etc/ld\.so\.preload|etc/sysctl|usr/lib/sysctl\.d|run/sysctl\.d|proc/sys/)",
     r"/proc/sysrq-trigger",
     # --- kernel parameter tuning by another route ---
     # Writing /proc/sys is denied above. `sysctl -w k=v`, `sysctl k=v` and
@@ -91,6 +91,13 @@ DEFAULT_SHELL_DENY_PATTERNS = [
     _CMD + r"cloud-init\s+clean\b",
     # --- the Glass Ledger: evidence about the agent, never context for it ---
     r"/(?:var/lib|etc)/jarvis/ledger",
+    # ...and the program that says whether the chain is intact. The chain,
+    # its signing key and the audit of it were named; the verifier itself was
+    # not, so `cat /usr/lib/jarvis/jarvis/ledger/verify.py` and `rm` of the
+    # same path were both allowed. Off-box verification limits the damage only
+    # where the off-box machine runs its own copy rather than fetching this
+    # one. Found by the standing refusals suite, 23 September 2026.
+    r"\bjarvis/ledger\b",
     # --- the agent's own durable memory: written through the agent, which
     #     keeps its provenance and dedupe, never edited underneath itself ---
     r"/var/lib/jarvis/memory\.db",
@@ -196,14 +203,41 @@ def normalise_shell_policy(policy: Optional[dict], log=None) -> dict:
 _SPLIT = re.compile(r"\s*(?:;|&&|\|\||\||\n)\s*")
 
 
-def check_command_allowed(command: str, policy: dict) -> Optional[str]:
-    """Return a reason string when ``command`` must not run, else ``None``."""
+# What the planner is told when a command is refused. The whole vocabulary,
+# and none of it varies with the command.
+#
+# It used to be told "command matches deny pattern: <regex>". A model handed
+# the rule it tripped is a model that has been given the rule's edges, and the
+# pattern for the protected paths names several targets at once, so asking to
+# read one disclosed the existence of the others. That is the failure
+# authority.py was written about, one layer down: refused with a mechanism, it
+# looks for a command the mechanism does not name; refused with a kind, there
+# is nothing to rephrase. Found by the standing refusals suite, 23 September
+# 2026 -- the suite's own check looked for forbidden words rather than
+# asserting the shape, so it passed while the string leaked.
+#
+# The detail is not lost, it is redirected: refusal_detail() gives the
+# operator and the ledger the pattern that fired. Only the model gets the kind.
+REFUSAL_OUT_OF_SCOPE = "out_of_scope"
+REFUSAL_SHELL_DISABLED = "shell_disabled"
+REFUSAL_MALFORMED = "malformed_command"
+REFUSAL_KINDS = frozenset({REFUSAL_OUT_OF_SCOPE, REFUSAL_SHELL_DISABLED,
+                           REFUSAL_MALFORMED})
+
+
+def _refusal(command: str, policy: dict):
+    """(kind, detail) when ``command`` must not run, else None.
+
+    One pass, two audiences: the kind is for the model, the detail for the
+    operator, the log and the chain.
+    """
     if not policy.get("enabled"):
-        return "shell execution disabled by policy (llm.shell.enabled)"
+        return (REFUSAL_SHELL_DISABLED,
+                "shell execution disabled by policy (llm.shell.enabled)")
     if not command or not command.strip():
-        return "empty command"
+        return REFUSAL_MALFORMED, "empty command"
     if "\x00" in command:
-        return "command contains NUL byte"
+        return REFUSAL_MALFORMED, "command contains NUL byte"
     compiled = policy.get("_compiled")
     if compiled is None:
         compiled = _compile_patterns(policy.get("deny_patterns") or [])
@@ -211,8 +245,30 @@ def check_command_allowed(command: str, policy: dict) -> Optional[str]:
     for rx in compiled:
         for text in candidates:
             if rx.search(text):
-                return f"command matches deny pattern: {rx.pattern}"
+                return (REFUSAL_OUT_OF_SCOPE,
+                        f"command matches deny pattern: {rx.pattern}")
     return None
+
+
+def check_command_allowed(command: str, policy: dict) -> Optional[str]:
+    """The refusal kind when ``command`` must not run, else ``None``.
+
+    This is the string the model may see. It is one of REFUSAL_KINDS and
+    says nothing about how the decision was reached.
+    """
+    found = _refusal(command, policy)
+    return None if found is None else found[0]
+
+
+def refusal_detail(command: str, policy: dict) -> Optional[str]:
+    """Why ``command`` was refused, for the operator, the log and the ledger.
+
+    Never put the result of this in anything the model reads. brain/llm.py
+    carries result["error"] and result["output"] into the context; it carries
+    nothing else.
+    """
+    found = _refusal(command, policy)
+    return None if found is None else found[1]
 
 
 class TaskExecutor:
@@ -647,11 +703,18 @@ class TaskExecutor:
         The decision path refuses an out-of-scope task and turns it into a
         proposal. This is the backstop for a task that arrives another way:
         the ceiling should not depend on one code path being taken.
+
+        It used to return None -- permit -- when no rung had been set, on the
+        reasoning that an executor nobody had configured should behave as it
+        had before rungs existed. That made the backstop fail open in exactly
+        the case it exists for: a task arriving down a path that never set the
+        rung is the path the decision check was not on. A redundant check that
+        permits when it is uninformed is not redundancy, it is an alternative
+        way in. So an absent or unrecognised rung is the default rung, and
+        normalise_rung decides that rather than this function guessing.
         """
-        if self.rung is None:
-            return None
         from jarvis.agent import authority
-        verdict = authority.review(task, self.rung)
+        verdict = authority.review(task, authority.normalise_rung(self.rung))
         return None if verdict.allowed else verdict.reason
 
     def _handle_shell_command(self, task: Task) -> dict:
@@ -661,13 +724,20 @@ class TaskExecutor:
             self.log.warning("Shell command outside mandate: %s", refusal)
             return {"success": False, "error": f"outside mandate: {refusal}"}
         command = str(task.metadata.get("command") or "")
-        denied = check_command_allowed(command, self.shell_policy)
+        found = _refusal(command, self.shell_policy)
         record = {"command": command, "goal": task.metadata.get("goal")}
-        if denied:
-            self.log.warning("Shell command refused (%s): %s", denied, command)
-            record["denied"] = denied
-            self.memory.store(category="shell_command", data=record)
-            return {"success": False, "error": denied, "output": record}
+        if found:
+            kind, detail = found
+            self.log.warning("Shell command refused (%s): %s", detail, command)
+            # The kind goes in the record, because the record is inside
+            # result["output"] and the model reads that. The detail travels
+            # beside it, in a key nothing puts in the context, and act() lifts
+            # it onto the chain.
+            record["denied"] = kind
+            self.memory.store(category="shell_command",
+                              data=dict(record, denied_detail=detail))
+            return {"success": False, "error": kind, "output": record,
+                    "denied_detail": detail}
 
         timeout = self.shell_policy["timeout"]
         limit = self.shell_policy["max_output"]

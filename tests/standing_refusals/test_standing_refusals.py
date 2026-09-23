@@ -178,19 +178,37 @@ def test_executor_fails_closed_on_a_garbage_rung():
 
 # ── The planner is told the kind, not the command ───────────────────────────
 
+def test_the_refusal_vocabulary_is_fixed_and_says_nothing_to_route_around():
+    """Asserted on the vocabulary, not on the words a sample happens to avoid.
+
+    The first version of this test looked for forbidden words in each refusal.
+    It passed while the deny-list was answering "command matches deny pattern:
+    <regex>", because no entry in MECHANISM_WORDS appears in a regex. Checking
+    for known-bad strings can only find the leaks somebody thought of; asserting
+    the shape finds the ones nobody did.
+    """
+    allowed = A.refusal_messages()
+    assert allowed, "no refusal vocabulary declared"
+    assert len(allowed) <= 8, f"a vocabulary this large is not fixed: {sorted(allowed)}"
+    for message in allowed:
+        assert isinstance(message, str) and message.strip(), f"empty refusal: {message!r}"
+        paths = re.findall(r"/[\w.\-]+(?:/[\w.\-]*)+", message)
+        assert not paths, f"refusal names a path: {message!r} -> {paths}"
+        lowered = message.lower()
+        named = [w for w in C.MECHANISM_WORDS if w in lowered]
+        assert not named, f"refusal names the mechanism {named}: {message!r}"
+
+
 def test_planner_told_the_kind_not_the_command():
+    allowed = A.refusal_messages()
     samples = C.KERNEL_TUNING_DOCUMENTED[:10] + [cmd for _, cmd in _target_commands(True)][:10]
     leaks = []
     for cmd in samples:
         text = A.planner_refusal_text(cmd)
         if not isinstance(text, str) or not text.strip():
             leaks.append(f"{cmd}: empty refusal text")
-            continue
-        lowered = text.lower()
-        if cmd in text:
-            leaks.append(f"{cmd}: echoes the command")
-        leaks += [f"{cmd}: echoes {p}" for p in re.findall(r"/[\w.\-]+(?:/[\w.\-]*)*", cmd) if p in text]
-        leaks += [f"{cmd}: names the mechanism ({w})" for w in C.MECHANISM_WORDS if w in lowered]
+        elif text not in allowed:
+            leaks.append(f"{cmd}: refusal is not one of the fixed kinds -> {text!r}")
     assert not leaks, "a refusal the planner can rephrase is not a refusal:\n  " + "\n  ".join(leaks)
 
 
@@ -206,17 +224,25 @@ def test_a_different_task_is_not_skipped():
     assert not A.is_repeat_skipped(prev, A.make_task("list listening ports"))
 
 
-def test_rule_planner_backoff_doubles():
+def test_rule_planner_backoff_doubles_then_holds():
+    """1, 2, 4, 8, 16, then a cap.
+
+    This is the one failure in the suite that was the suite's fault. The first
+    version demanded that every step either double exactly or repeat the
+    previous value, which makes a cap that is not a power of two — here 20 —
+    read as a broken sequence. The planner is right and the test was wrong.
+    It matters more than the arithmetic: a gate that refuses correct behaviour
+    teaches the operator to switch the gate off, and then it is protecting
+    nothing.
+    """
     seq = [A.backoff_cycles(n) for n in range(1, 9)]
     assert seq[:3] == [1, 2, 4], f"backoff is {seq}, expected 1, 2, 4..."
-    capped = False
+    cap = max(seq)
+    assert cap > seq[0], f"backoff never grows: {seq}"
+    assert seq[-1] == cap, f"backoff had not reached its cap after 8 repeats: {seq}"
     for a, b in zip(seq, seq[1:]):
-        if capped:
-            assert b == a, f"backoff fell after reaching its cap: {seq}"
-        elif b == a:
-            capped = True
-        else:
-            assert b == 2 * a, f"backoff does not double: {seq}"
+        assert b == min(2 * a, cap), \
+            f"backoff is {seq}; expected each step to double up to a cap of {cap}"
 
 
 # ── Nothing in memory is destroyed; depth capped at one ─────────────────────

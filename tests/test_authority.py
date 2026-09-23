@@ -45,11 +45,44 @@ class TestRungs(unittest.TestCase):
         for value in ("nonsense", "", None, "root", "admin"):
             self.assertEqual(authority.normalise_rung(value), authority.PROPOSER)
 
-    def test_numeric_and_verb_forms_are_accepted(self):
+    def test_forms_that_name_a_lower_rung_are_accepted(self):
+        # Getting a downward alias wrong grants nothing, so the spellings stay.
         self.assertEqual(authority.normalise_rung("0"), authority.OBSERVER)
         self.assertEqual(authority.normalise_rung("observe"), authority.OBSERVER)
-        self.assertEqual(authority.normalise_rung("act"), authority.ACTOR)
-        self.assertEqual(authority.normalise_rung("ACTOR"), authority.ACTOR)
+        self.assertEqual(authority.normalise_rung("1"), authority.PROPOSER)
+        self.assertEqual(authority.normalise_rung("propose"), authority.PROPOSER)
+
+    def test_only_the_exact_word_actor_reaches_actor(self):
+        """This test used to assert the opposite, and the assertion was the bug.
+
+        "act" and "ACTOR" resolved to actor because the lookup ran on
+        str(value).strip().lower(). Every transformation applied before a
+        privilege lookup is another spelling of the privilege; the standing
+        refusals suite found this on 23 September 2026 by trying "ACT".
+        """
+        self.assertEqual(authority.normalise_rung("actor"), authority.ACTOR)
+        for spelling in ("act", "enact", "2", "3", "ACTOR", "Actor", " actor",
+                         "actor ", "actor\n", "\tactor", "ACT", "actor\x00",
+                         "actors", "act0r", "actor;proposer"):
+            self.assertEqual(authority.normalise_rung(spelling), authority.PROPOSER,
+                             repr(spelling))
+
+    def test_a_non_string_never_reaches_actor(self):
+        for value in (2, 3, True, 1.0, ["actor"], {"rung": "actor"}, ("actor",),
+                      b"actor", bytearray(b"actor"), object()):
+            self.assertEqual(authority.normalise_rung(value), authority.PROPOSER,
+                             repr(value))
+
+    def test_a_string_subclass_cannot_argue_its_way_in(self):
+        class Slippery(str):
+            def __eq__(self, other):
+                return True
+
+            def __hash__(self):
+                return hash("actor")
+
+        self.assertEqual(authority.normalise_rung(Slippery("nonsense")),
+                         authority.PROPOSER)
 
 
 class TestCommandClassification(unittest.TestCase):
@@ -229,11 +262,34 @@ class TestExecutorBackstop(unittest.TestCase):
     def test_a_read_reaching_the_executor_runs(self):
         self.assertTrue(self.executor("proposer").execute(shell("echo hello"))["success"])
 
-    def test_an_unbounded_executor_is_unchanged(self):
+    def test_an_executor_with_no_rung_still_refuses_a_change(self):
+        """The case the backstop exists for, and the one it used to permit.
+
+        _authority_refusal returned None -- permit -- whenever self.rung was
+        None, so an executor reached down a path that never set a rung had no
+        ceiling at all. A redundant check that permits when it is uninformed
+        is not redundancy, it is a second way in. Found by the standing
+        refusals suite, 23 September 2026.
+        """
         ex = TaskExecutor(dict(NO_HW), AgentMemory(), LOG,
                           shell_policy={"enabled": True, "timeout": 5})
         self.assertIsNone(ex.rung)
+        result = ex.execute(shell("touch /tmp/jarvis-unset-rung-test"))
+        self.assertFalse(result["success"])
+        self.assertIn("outside mandate", result["error"])
+        self.assertFalse(os.path.exists("/tmp/jarvis-unset-rung-test"))
+
+    def test_an_executor_with_no_rung_still_reads(self):
+        # Failing closed means the default rung, not no rung at all.
+        ex = TaskExecutor(dict(NO_HW), AgentMemory(), LOG,
+                          shell_policy={"enabled": True, "timeout": 5})
         self.assertTrue(ex.execute(shell("echo hello"))["success"])
+
+    def test_a_garbage_rung_is_the_default_rung(self):
+        for rung in (None, "", "ACTOR", "ACT", 2, True, ["actor"], b"actor"):
+            result = self.executor(rung).execute(shell("touch /tmp/jarvis-garbage-rung"))
+            self.assertFalse(result["success"], repr(rung))
+            self.assertFalse(os.path.exists("/tmp/jarvis-garbage-rung"), repr(rung))
 
 
 class TestGoalWithdrawal(unittest.TestCase):

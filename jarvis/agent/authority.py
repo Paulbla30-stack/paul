@@ -125,18 +125,39 @@ class Decision:
                 "reason": self.reason, "proposal": self.proposal}
 
 
+# Aliases, and the direction they are allowed to point. A spelling may name a
+# rung at or below the default; nothing may name a rung above it.
+#
+# "act" and "2" used to resolve to actor, and str().strip().lower() ran before
+# the lookup, so "ACTOR", " actor", "actor\n", "\tactor" and "ACT" all reached
+# actor as well. That is a privilege decision taken on a normalised string,
+# which is the classic way a permission check is talked past: the value the
+# code compares is not the value anyone wrote down. Found by the standing
+# refusals suite, 23 September 2026.
+#
+# Resolving downward needs no such care, because getting it wrong grants
+# nothing. So the aliases stay for observer and proposer and are gone for
+# actor: an actor rung is now spelled exactly "actor", or it is not one.
+DOWNWARD_ALIASES = {
+    "0": OBSERVER, "observe": OBSERVER, "observer": OBSERVER,
+    "1": PROPOSER, "propose": PROPOSER, "proposer": PROPOSER,
+}
+
+
 def normalise_rung(value) -> str:
-    """Any unrecognised rung is the safest one, not the most permissive."""
-    text = str(value or "").strip().lower()
-    if text in RUNGS:
-        return text
-    if text in ("0", "observe"):
-        return OBSERVER
-    if text in ("1", "propose"):
+    """The rung a value actually grants. Unrecognised is proposer, never actor.
+
+    Exact match, on a string, with no folding, trimming or normalisation
+    first: every transformation applied before a privilege lookup is a second
+    spelling of the privilege. Must not raise, whatever it is handed.
+    """
+    # type(), not isinstance(): a str subclass may define its own __eq__, and
+    # the whole point here is that the comparison cannot be argued with.
+    if type(value) is not str:
         return PROPOSER
-    if text in ("2", "3", "act", "enact"):
-        return ACTOR
-    return PROPOSER
+    if value in RUNGS:
+        return value
+    return DOWNWARD_ALIASES.get(value, PROPOSER)
 
 
 def _tokenise(text: str):

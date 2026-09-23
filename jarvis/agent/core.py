@@ -717,9 +717,13 @@ class AgentCore:
                                      "head": text[:200]}
             policy = (result.get("output") or {}).get("denied") if isinstance(result.get("output"), dict) else None
             if policy:
+                # The chain gets the reason in full -- which pattern fired --
+                # while the model got only the kind. Evidence and context are
+                # different audiences, and this is the line between them.
                 self.ledger.record("gate", {"cycle": self.cycle_count, "gate": "shell_policy",
                                             "command": action.get("command", "")[:1000],
-                                            "reason": str(policy)[:300]})
+                                            "kind": str(policy)[:60],
+                                            "reason": str(result.get("denied_detail") or policy)[:300]})
             self.ledger.record("outcome", outcome)
             # A message that left the machine is a different kind of event
             # from a command that ran on it, so it gets its own entry rather
@@ -1167,7 +1171,26 @@ class AgentCore:
         if settings is not None:
             from jarvis.brain import dials
             body["dials"] = dials.fingerprint(settings)
-        self.ledger.record("thought", body)
+        # No record, no answer -- and the check is on the write, not on the
+        # gate taken before the model was called. The gate above says the
+        # ledger was reachable when the question arrived; it cannot say the
+        # thought was written. Between the two sits the model call, which is
+        # the slowest thing the agent does and the most likely interval for
+        # ledgerd to go away. This path used to ignore what record() returned,
+        # so an answer produced while the chain was down reached the operator
+        # with nothing behind it, and the agent had no way to know later that
+        # it had said it. The act path has always gated on the write; this is
+        # the same rule on the other path. Found by the standing refusals
+        # suite, 23 September 2026.
+        recorded = self.ledger.record("thought", body)
+        if not recorded:
+            gate = self.ledger.gate()
+            if gate:
+                self.log.error("Answer withheld, not recorded: %s", gate)
+                # Nothing further: no exchange memory either. A memory of an
+                # answer the chain never saw is a record with no evidence
+                # under it, which is worse than no record at all.
+                return f"Not answering: {gate}"
         self._remember_exchange(turns, answer, asked_by=asked_by)
         return answer or ("Brain could not answer: "
                           + (self.brain.unavailable_reason() or self.brain.last_error

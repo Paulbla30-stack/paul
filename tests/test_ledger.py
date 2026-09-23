@@ -653,6 +653,64 @@ class TestAgentIntegration(unittest.TestCase):
         self.assertTrue(agent2.run_cycle()["result"]["success"])
         self.assertFalse(agent2.get_status()["ledger"]["available"])
 
+    def test_an_answer_the_chain_did_not_take_is_not_shown(self):
+        """The ledger goes down during the model call, not before it.
+
+        chat() gates on ledger.gate() before calling the model, and that gate
+        can only report what was true when the question arrived. The model
+        call is the slowest thing the agent does, so it is the likeliest
+        interval for ledgerd to go away -- and the write of the thought
+        afterwards had its return value thrown away. The answer went to the
+        operator, nothing went on the chain, and the agent had no way to know
+        later that it had ever said it.
+        """
+        sentinel = "SENTINEL-answer-2f81c4"
+
+        class _BrainThatBreaksTheLedger(FakeBrain):
+            def __init__(self, ledger):
+                super().__init__([])
+                self.ledger = ledger
+
+            def chat(self, agent, turns, observations=None, **extra):
+                self.chats += 1
+                # Down at the moment of writing, up when the question arrived.
+                self.ledger.writer.close()
+                self.ledger.writer._fd = -1
+                return sentinel
+
+        brain = _BrainThatBreaksTheLedger(self.led)
+        agent = self.agent(self.led, brain)
+        # A real store, or the "nothing further was written" assertion below
+        # passes against a NullStore that never writes anything anyway.
+        from jarvis.agent.store import MemoryStore
+        agent.store = MemoryStore(os.path.join(self.tmp.name, "chat-memory.db"), logger=LOG)
+        self.addCleanup(agent.store.close)
+        self.assertTrue(agent.store.available)
+        self.assertIsNone(agent.ledger.gate(), "precondition: the ledger is up")
+
+        out = agent.chat([{"role": "user", "content": "How full is the root volume?"}])
+
+        self.assertEqual(brain.chats, 1, "the model was never called; wrong path under test")
+        self.assertNotIn(sentinel, out)
+        self.assertIn("Not answering", out)
+        self.assertFalse(self.led.available)
+        # ...and nothing further: no exchange memory for an answer with no
+        # evidence under it.
+        self.assertEqual(agent.store.recent(10, kind="exchange"), [])
+
+    def test_an_answer_the_chain_did_take_is_shown(self):
+        # The control: without it the test above passes for a working ledger too.
+        agent = self.agent(self.led, FakeBrain([]))
+        from jarvis.agent.store import MemoryStore
+        agent.store = MemoryStore(os.path.join(self.tmp.name, "chat-memory-ok.db"), logger=LOG)
+        self.addCleanup(agent.store.close)
+        out = agent.chat([{"role": "user", "content": "How full is the root volume?"}])
+        self.assertIn("answer 1", out)
+        self.assertIn("thought", [kind for kind, _ in self.kinds()])
+        # ...and the exchange is remembered, which is what makes the other
+        # test's "nothing further" assertion say something.
+        self.assertEqual(len(agent.store.recent(10, kind="exchange")), 1)
+
     def test_null_ledger_when_not_configured(self):
         agent = self.agent(None, FakeBrain(self.decisions()))
         self.assertIsInstance(agent.ledger, NullLedger)

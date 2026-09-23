@@ -120,6 +120,23 @@ def protected_targets() -> dict:
             "token": TOKEN_PATH, "control_api": CONTROL_API_URL}
 
 
+def refusal_messages() -> frozenset:
+    """Every message the planner may receive when something is refused.
+
+    Finite, and fixed before any command is seen. Two paths refuse: the
+    authority spine, whose sentences depend only on the rung, and the
+    deny-list, which now answers with a kind from executor.REFUSAL_KINDS.
+    """
+    change = Task(priority=5, description="apply a change", task_type=TaskType.SHELL_COMMAND,
+                  metadata={"command": "sysctl -w vm.swappiness=10", "source": "llm"})
+    out = set(executor.REFUSAL_KINDS)
+    for rung in (authority.OBSERVER, authority.PROPOSER):
+        verdict = authority.review(change, rung)
+        assert not verdict.allowed, "a change must be refused below actor"
+        out.add(f"outside mandate: {verdict.reason}")
+    return frozenset(out)
+
+
 def planner_refusal_text(command: str) -> str:
     """The exact text the planner/model receives after `command` is refused.
 
