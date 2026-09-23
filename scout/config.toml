@@ -170,12 +170,28 @@ records = [
 #              it is arriving today because consumer DMARC is permissive,
 #              not because it is correct.
 #
-# So when heartbeat-framework.org is verified as a DOMAIN identity with Easy
-# DKIM, change `sender` to scout@heartbeat-framework.org and leave `to` here.
-# That needs three CNAMEs in Cloudflare and amazonses.com added to the SPF
-# record; the domain's SPF currently authorises Cloudflare alone.
+# 23 Sep 2026: the operator added the three DKIM CNAMEs and SES now reports
+# heartbeat-framework.org verified for sending with DkimAttributes.Status
+# SUCCESS, so the sender moves to the domain he controls. Checked rather than
+# assumed -- all three selectors resolve to *.dkim.amazonses.com at two
+# independent resolvers.
+#
+# There is still NO SPF record on the apex. The line above used to say the
+# domain's SPF "authorises Cloudflare alone", which was wrong: a TXT query
+# returns NOERROR with a brevo-code and a google-site-verification and no
+# v=spf1 at all. Mail from here will still pass DMARC, because DMARC passes on
+# SPF *or* DKIM alignment and Easy DKIM signs with d=heartbeat-framework.org.
+# So this is correct today and SPF is the belt to the DKIM braces, not a
+# blocker.
+#
+# When the SPF record is added, it has to authorise everything that sends for
+# this domain, not just SES: there is a brevo-code TXT on the apex and the
+# DMARC rua points at dmarc.brevo.com, so Brevo has at least been set up here.
+# Publishing "v=spf1 include:amazonses.com ~all" on its own would put every
+# Brevo message out of policy. Check Brevo's own current include before
+# writing the record.
 to      = "Paulbla30@hotmail.com"
-sender  = "Paulbla30@hotmail.com"
+sender  = "scout@heartbeat-framework.org"
 
 fallback_to       = "Paulbla30@hotmail.com"
 fallback_sender   = "Paulbla30@hotmail.com"
