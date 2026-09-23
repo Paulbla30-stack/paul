@@ -9,6 +9,8 @@ import time
 import hashlib
 import json
 import logging
+import os
+import re
 from collections import deque
 from typing import Any, Optional
 
@@ -458,6 +460,7 @@ class AgentCore:
             self.log.debug("Could not restore goals: %s", exc)
             return
         restored = 0
+        kept_paths = []
         for row in reversed(rows):
             if str(row.get("state") or "live") != "live":
                 continue                       # completed or withdrawn
@@ -472,9 +475,84 @@ class AgentCore:
             except (TypeError, ValueError):
                 priority = 5
             self.planner.add_goal(text, max(0, min(priority, 10)))
+            kept_paths.append((text, max(0, min(priority, 10))))
             restored += 1
         if restored:
             self.log.info("Restored %d operator goal(s) from durable memory", restored)
+        self._check_goal_paths(kept_paths)
+
+    # A path in a goal looks like a path: absolute, and made of the characters
+    # a filename is made of. Deliberately narrow. A goal saying "keep / under
+    # 80%" names the root and the root always exists, so it never fires; a
+    # goal saying "read /var/lib/jarvis/uploads/british-gas.txt" names a file
+    # and that is the case this is for.
+    _PATH_IN_GOAL = re.compile(r"(?<![\w/])(/[\w.+-]+(?:/[\w.+-]+)+)")
+
+    @staticmethod
+    def _paths_named(text: str) -> list:
+        """Absolute paths a goal names, with trailing punctuation stripped."""
+        out = []
+        for hit in AgentCore._PATH_IN_GOAL.findall(text or ""):
+            hit = hit.rstrip(".,;:)\"'")
+            if len(hit) > 1 and hit not in out:
+                out.append(hit)
+        return out
+
+    def _check_goal_paths(self, goals: list):
+        """Say so, at boot, when a restored goal names a file that is gone.
+
+        Goals are durable and uploads are not. `memory_backup` carries
+        memory.db to a rebuilt box, so an operator instruction survives; it
+        does not carry /var/lib/jarvis/uploads, so the document the
+        instruction is about does not. The agent then wakes with three
+        priority-5 goals about files that have never existed on this machine,
+        retries the reads, gets nothing, and has no way to tell "not there"
+        from "not there yet".
+
+        That happened. On 23 September 2026 this agent was carrying goals
+        naming british-gas.txt and octopus.txt across a rebuild from
+        i-091c77c6079228ca2, and it worked out on its own that the reads were
+        futile -- after spending its top-priority attention on them first.
+
+        **This does not retire anything.** Asked what the rule should be, the
+        agent argued for exactly that: a goal naming a missing path should
+        raise a proposal, not disappear, because "absence today is not absence
+        forever, and unilaterally discarding operator intent risks eroding
+        trust". That is right, and it is the operator's call either way. The
+        gap was never that the goal survived. It was that nothing said the
+        file had not.
+
+        Backing the uploads up instead was considered and declined by both of
+        us: it costs storage, widens what leaves the box, and buys an illusion
+        of continuity. Truth is cheaper than storage.
+        """
+        missing = []
+        for text, priority in goals:
+            for path in self._paths_named(text):
+                try:
+                    there = os.path.exists(path)
+                except OSError:
+                    continue            # unreadable is not the same as absent
+                if not there:
+                    missing.append((text, priority, path))
+        for text, priority, path in missing:
+            self.log.warning(
+                "Goal names a path that is not on this machine: %s (goal: %s)",
+                path, text[:120])
+        if not missing:
+            return
+        # One note, not one per goal: the operator reads the notes deque every
+        # cycle and three lines saying the same thing is three lines he skims.
+        paths = sorted({m[2] for m in missing})
+        try:
+            self.remember(
+                "Goals restored at start name {} path(s) that are not on this "
+                "machine: {}. They may be left over from an earlier instance -- "
+                "memory survives a rebuild, uploads do not. Retiring them is "
+                "his call, not mine.".format(len(paths), ", ".join(paths[:5])),
+                kind="note", source="system")
+        except Exception as exc:        # noqa: BLE001
+            self.log.debug("could not note the missing goal paths: %s", exc)
 
     def _forget_goal(self, description: str, why: str):
         """A goal that is done or withdrawn must not come back on the next boot.
