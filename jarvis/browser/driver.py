@@ -38,6 +38,12 @@ from jarvis.browser import guard, trust
 from jarvis.browser.page import EXTRACT_JS, Page
 
 DEFAULT_TIMEOUT_MS = 20000
+# The full Chrome build, not Playwright's headless shell. See the note on
+# CHROMIUM_ARGS: only this one actually sandboxes its renderers.
+CHANNEL = "chromium"
+# Passed to launch(). Playwright's default is False, which means it puts
+# --no-sandbox on the command line for you.
+SANDBOX = True
 DEFAULT_PROFILE_DIR = "/var/lib/jarvis-browser/profile"
 # Downloads land in one directory, fixed here rather than chosen per request,
 # for the same reason composed documents do: a caller that could choose the
@@ -66,10 +72,31 @@ SHOT_MAX_BYTES = 4 * 1024 * 1024
 # files, reach the network or see other processes. That is a kernel-enforced
 # boundary around the untrusted work, which is the thing a uid cannot give you.
 #
-# It needs unprivileged user namespaces. Checked on the box rather than
-# assumed: user.max_user_namespaces is 7368 and `unshare --user` succeeds as
-# the jarvis-browser user. NoNewPrivileges=yes in the unit does not conflict --
-# that blocks the old setuid helper, not the namespace sandbox.
+# Three things had to be true, and finding the third is why this note is long.
+#
+# 1. The flag must not be in CHROMIUM_ARGS. Necessary, and nowhere near
+#    sufficient -- which cost an hour and a false claim in a commit message.
+# 2. The unit must not carry SystemCallFilter=@system-service. Bisecting the
+#    unit one property at a time, on the box, showed Chromium could not start
+#    a renderer at all under it, and naming the missing syscalls back
+#    individually did not recover it.
+# 3. **Playwright adds --no-sandbox itself.** `chromium_sandbox` defaults to
+#    False, so the flag went back on the command line no matter what this file
+#    left out of its own args list. Found by reading /proc/<pid>/cmdline of a
+#    live renderer, which is the only place the truth was written down:
+#
+#      chrome --type=renderer ... --no-sandbox --disable-dev-shm-usage ...
+#
+#    Every earlier check had asked the config whether the sandbox was on. The
+#    config was not the thing adding the flag.
+#
+# So SANDBOX=True is passed explicitly at launch. The measure of success is
+# not a flag or a setting; it is that a live renderer sits in its own user
+# namespace rather than init's, and that is what the standing refusal and the
+# deploy check both look at.
+#
+# user.max_user_namespaces is 7368 on this box. NoNewPrivileges=yes does not
+# conflict: it blocks the old setuid helper, not the namespace sandbox.
 CHROMIUM_ARGS = (
     "--disable-dev-shm-usage",        # /dev/shm is tiny here; use /tmp instead
     "--disable-gpu",
@@ -163,15 +190,16 @@ class Driver:
                 # identity in the browser to borrow.
                 os.makedirs(self.profile_dir, mode=0o700, exist_ok=True)
                 self._context = self._pw.chromium.launch_persistent_context(
-                    self.profile_dir, headless=self.headless,
-                    args=list(CHROMIUM_ARGS), downloads_path=self.download_dir,
-                    **shared)
+                    self.profile_dir, headless=self.headless, channel=CHANNEL,
+                    chromium_sandbox=SANDBOX, args=list(CHROMIUM_ARGS),
+                    downloads_path=self.download_dir, **shared)
                 self._browser = None
             else:
                 # A fresh context is a fresh profile: no storage state is
                 # passed in and none is written out.
                 self._browser = self._pw.chromium.launch(
-                    headless=self.headless, args=list(CHROMIUM_ARGS),
+                    headless=self.headless, channel=CHANNEL,
+                    chromium_sandbox=SANDBOX, args=list(CHROMIUM_ARGS),
                     downloads_path=self.download_dir)
                 self._context = self._browser.new_context(**shared)
         except Exception as exc:      # noqa: BLE001 - the message is the value
@@ -495,7 +523,13 @@ class Driver:
             out = {"up": up, "engine": "chromium", "blocked": self.blocked,
                    "profile": "persistent" if self.persistent else "clean per session",
                    "persistent": self.persistent,
-                   "sandbox": "--no-sandbox" not in CHROMIUM_ARGS,
+                   # What is configured. Whether the kernel agrees is a
+                   # different question and is answered by reading
+                   # /proc/<pid>/ns/user for a live renderer -- see the
+                   # standing refusals. Named "sandbox_requested" so nobody
+                   # reads this field as proof of anything.
+                   "sandbox_requested": SANDBOX and "--no-sandbox" not in CHROMIUM_ARGS,
+                   "channel": CHANNEL,
                    "allow_secrets": self.allow_secrets,
                    "downloads": list(self.downloads[-10:]),
                    "download_dir": self.download_dir,

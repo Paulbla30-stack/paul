@@ -141,10 +141,28 @@ AmbientCapabilities=
 # is worth verifying rather than reading.)
 RestrictNamespaces=user pid ipc net mnt
 SystemCallArchitectures=native
-# @sandbox is what lets seccomp-bpf be installed in the first place -- without
-# it the renderers cannot lock themselves down and Chromium refuses to start.
-SystemCallFilter=@system-service @sandbox
-SystemCallFilter=~@debug @module @mount @obsolete @raw-io @reboot @swap @cpu-emulation
+# SystemCallFilter is deliberately ABSENT, and this is a trade rather than an
+# omission. Measured on the box, bisecting one property at a time, watching
+# whether a live renderer got its own user namespace:
+#
+#   baseline                            renderer userns = user:[4026532205]
+#   + ProtectProc/ProcSubset            renderer userns = user:[4026532206]
+#   + RestrictNamespaces                renderer userns = user:[4026532205]
+#   + SystemCallFilter=@system-service  no renderer at all
+#
+# @system-service on systemd 252 stops Chromium before it can start a renderer.
+# Adding seccomp, clone3, unshare, userfaultfd, membarrier and the pidfd calls
+# back by name did not recover it, and guessing further is guessing.
+#
+# The two filters are not equivalent and it is worth being exact about which
+# was kept. systemd's would sit on the browser process. Chromium's sits on
+# each renderer -- the process that actually parses hostile HTML, CSS, images
+# and JavaScript -- in its own user namespace, and is written for that job. A
+# blanket filter that prevents the targeted one from being installed leaves
+# the untrusted work less protected, not more. So the targeted one wins.
+#
+# Everything else in this section stands: namespaces restricted, no
+# capabilities, /proc invisible, no new privileges.
 SystemCallErrorNumber=EPERM
 
 # Chromium needs a writable place for the profile, the downloads and its own

@@ -272,10 +272,20 @@ def test_chromium_runs_with_its_own_sandbox():
     asked for the sandbox in the same breath as asking for full control, and
     this is what he was asking for.
     """
-    from jarvis.browser.driver import CHROMIUM_ARGS
+    from jarvis.browser.driver import CHANNEL, CHROMIUM_ARGS, SANDBOX
     assert "--no-sandbox" not in CHROMIUM_ARGS
     assert "--disable-setuid-sandbox" not in CHROMIUM_ARGS
     assert not any("sandbox" in a and a.startswith("--disable") for a in CHROMIUM_ARGS)
+    # And the binary that honours it. Dropping the flag was not enough: with
+    # Playwright's default headless shell the renderers still shared the init
+    # user namespace, read out of /proc on the live service. Only the full
+    # Chrome build puts each renderer in its own. A commit message claimed the
+    # sandbox was on before this line existed, and it was not.
+    assert CHANNEL == "chromium"
+    # The one that was actually putting --no-sandbox on the command line.
+    # Playwright's chromium_sandbox defaults to False, so leaving the flag out
+    # of CHROMIUM_ARGS achieved nothing on its own.
+    assert SANDBOX is True
 
 
 def test_a_grant_can_never_name_something_that_changes_this_machine():
