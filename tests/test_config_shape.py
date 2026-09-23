@@ -103,3 +103,74 @@ class TestTheAgentReadsWhatTheFileSays(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestTheAgentIsHandedWhatItReads(unittest.TestCase):
+    """AgentCore gets the `agent:` block alone.
+
+    Anything it reads with config.get() has to be copied in by main.py, and
+    a section that is not copied is simply absent -- which looks exactly like
+    "switched off", with no error anywhere. document_ocr said `enabled: true`
+    in this file and had never once reached the executor.
+    """
+
+    def setUp(self):
+        import ast
+        import inspect
+        from jarvis.agent import core
+        self.core_src = inspect.getsource(core)
+        with open(os.path.join(ROOT, "jarvis", "main.py"), encoding="utf-8") as fh:
+            self.main_src = fh.read()
+        with open(CONFIG, encoding="utf-8") as fh:
+            self.cfg = yaml.safe_load(fh)
+        # Every key AgentCore.__init__ reads straight off its own config.
+        tree = ast.parse(self.core_src)
+        self.read = set()
+        for node in ast.walk(tree):
+            if (isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Attribute)
+                    and node.func.attr == "get"
+                    and isinstance(node.func.value, ast.Name)
+                    and node.func.value.id == "config"
+                    and node.args
+                    and isinstance(node.args[0], ast.Constant)):
+                self.read.add(node.args[0].value)
+
+    @staticmethod
+    def _keys_anywhere(node, out=None):
+        out = set() if out is None else out
+        if isinstance(node, dict):
+            for k, v in node.items():
+                out.add(k)
+                TestTheAgentIsHandedWhatItReads._keys_anywhere(v, out)
+        return out
+
+    def test_nothing_configured_in_the_file_fails_to_reach_the_agent(self):
+        """The bug class, stated exactly.
+
+        A key the agent reads, which somebody has configured somewhere in
+        this file, but which main.py never copies into the agent's own
+        block. It is present, it is set, and the agent cannot see it -- which
+        is indistinguishable from off. Keys that are simply not in the file
+        are not this: they fall back to their defaults on purpose.
+        """
+        in_file = self._keys_anywhere(self.cfg)
+        in_agent = set(self.cfg.get("agent") or {})
+        lost = [k for k in sorted(self.read)
+                if k in in_file and k not in in_agent
+                and f'"{k}"' not in self.main_src and f"'{k}'" not in self.main_src]
+        self.assertEqual(lost, [],
+                         f"configured but never handed to the agent: {lost}")
+
+    def test_the_three_that_were_wrong_are_handed_over(self):
+        # document_ocr lives at cloud.document_ocr and said enabled: true;
+        # it had never reached the executor. documents and marketing are new
+        # top-level sections with the same fault.
+        for key in ("document_ocr", "documents", "marketing"):
+            self.assertIn(f'"{key}"', self.main_src,
+                          f"main.py does not hand {key} to the agent")
+
+    def test_the_marketing_view_is_built_from_the_agents_own_config(self):
+        # core reads this one through build_view rather than config.get, so
+        # the check above cannot see it.
+        self.assertIn("build_view(config", self.core_src)

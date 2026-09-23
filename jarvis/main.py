@@ -443,6 +443,25 @@ class JarvisSystem:
                                          agent_cfg["diary"].get("timezone"))
         if not agent_cfg["schedule"].get("timezone"):
             agent_cfg["schedule"].pop("timezone", None)
+        # Sections the agent reads off its own config, which live elsewhere
+        # in the file. AgentCore is handed the `agent:` block alone, so
+        # anything it reads with config.get() has to be copied in here or it
+        # is simply absent -- and absent looks exactly like "off", with no
+        # error anywhere.
+        #
+        # That is not hypothetical. document_ocr sits at cloud.document_ocr
+        # and says `enabled: true`; it was never copied, so the executor has
+        # been running with OCR off since it was added, and nothing said so.
+        # Found 23 September while wiring the marketing view, which had the
+        # same fault for the same reason.
+        for dest, path in (("document_ocr", ("cloud", "document_ocr")),
+                           ("documents", ("documents",)),
+                           ("marketing", ("marketing",))):
+            node = self.config
+            for step in path:
+                node = (node or {}).get(step) if isinstance(node, dict) else None
+            if isinstance(node, dict):
+                agent_cfg[dest] = dict(node)
         self.agent = AgentCore(
             config=agent_cfg,
             hardware=hardware,
