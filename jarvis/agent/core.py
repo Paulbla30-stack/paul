@@ -178,6 +178,14 @@ class AgentCore:
         raw_ocr = config.get("document_ocr")
         self.executor.document_ocr = (dict(raw_ocr) if isinstance(raw_ocr, dict)
                                       else {"enabled": bool(raw_ocr)})
+        # Where documents it writes are put. From config at boot and never
+        # from a task, because a caller that can choose the directory can
+        # choose any directory.
+        from jarvis.agent import compose as _compose
+        docs = config.get("documents")
+        docs = docs if isinstance(docs, dict) else {}
+        self.document_dir = str(docs.get("dir") or _compose.DEFAULT_DIR)
+        self.executor.document_dir = self.document_dir
         # The behaviour lab's switch. Closed until an operator opens it, and
         # it cannot be opened without the agent being told: see lab.py. A lab
         # window fills the record with answers the agent did not choose, and
@@ -738,6 +746,21 @@ class AgentCore:
             # ledger is copied to an Object Lock bucket nobody can delete from
             # for thirty days, and the operator's phone number is not a thing
             # to publish there.
+            # A document the operator may send on to somebody else. The name
+            # and the hash go on the chain so "this is the file, and this was
+            # its hash on the day it was made" is answerable later. The
+            # contents do not: the file is on disk and the chain is copied to
+            # a bucket nobody can delete from for thirty days.
+            if task.task_type == TaskType.COMPOSE_DOCUMENT and result.get("success"):
+                written = result.get("output") or {}
+                self.ledger.record("action", {
+                    "cycle": self.cycle_count, "actor": "agent",
+                    "action": "compose_document",
+                    "name": str(written.get("name") or "")[:120],
+                    "format": written.get("format"),
+                    "title": str(written.get("title") or "")[:200],
+                    "bytes": written.get("bytes"),
+                    "sha256": written.get("sha256")})
             if task.task_type == TaskType.NOTIFY_OPERATOR:
                 verdict = result.get("output") or {}
                 self.ledger.record("notification", {
@@ -1022,6 +1045,32 @@ class AgentCore:
             self.reflect(task, result)
             out["result"] = result
         return out
+
+    def compose_document(self, content: str, title: str = "", fmt: str = "",
+                         name: str = "") -> dict:
+        """Write a document because the operator asked for one directly.
+
+        The planner reaches the same code through the compose_document task;
+        this is the other door, for "write me a letter" rather than a step in
+        a plan. Both end in the same fenced directory, and both put the name
+        and hash on the chain.
+        """
+        from jarvis.agent import compose as _compose
+        written = _compose.compose(content, title=title,
+                                   fmt=fmt or _compose.DEFAULT_FORMAT,
+                                   name=name, directory=self.document_dir)
+        self.remember(f"Wrote {written['name']} ({written['bytes']} bytes) "
+                      f"for the operator", kind="note", source="operator")
+        try:
+            self.ledger.record("action", {
+                "cycle": self.cycle_count, "actor": "operator",
+                "action": "compose_document",
+                "name": written["name"], "format": written["format"],
+                "title": written["title"][:200], "bytes": written["bytes"],
+                "sha256": written["sha256"]})
+        except Exception:
+            pass
+        return written
 
     TOLD_CHARS = 400
 

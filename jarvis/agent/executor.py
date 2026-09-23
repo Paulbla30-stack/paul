@@ -292,6 +292,10 @@ class TaskExecutor:
         self.notifier = notifier
         # Read-only view of spend and what the account is accumulating.
         self.estate = estate
+        # Where documents the agent writes are put. One directory, set from
+        # config at boot, never from the task: a caller that could choose the
+        # directory could choose any directory.
+        self.document_dir: str = ""
         # Whether a scan or a photograph may have its characters recognised.
         # Off unless the operator says otherwise: it sends a page image out to
         # a service and bills per page. Set by the agent from config.
@@ -310,6 +314,7 @@ class TaskExecutor:
             TaskType.SHELL_COMMAND: self._handle_shell_command,
             TaskType.INSPECT_PATH: self._handle_inspect_path,
             TaskType.READ_FILE: self._handle_read_file,
+            TaskType.COMPOSE_DOCUMENT: self._handle_compose_document,
             TaskType.READ_LOGS: self._handle_read_logs,
             TaskType.NOTIFY_OPERATOR: self._handle_notify_operator,
             TaskType.ESTATE_REPORT: self._handle_estate_report,
@@ -596,6 +601,51 @@ class TaskExecutor:
         # A file that cannot be read is an answer too, and a better one than a
         # description of what it probably contains.
         return {"success": True, "output": result}
+
+    def _handle_compose_document(self, task: Task) -> dict:
+        """Write a document the operator can open, and report what was written.
+
+        The other direction from read_file. The agent could read a statement
+        and could not produce a letter, so everything it composed lived in a
+        chat window -- which cannot be printed, attached, filed or signed.
+
+        Nothing about where it goes comes from the task. The directory is set
+        from config at boot, the extension is decided by the format, the name
+        is stripped to a basename and scrubbed, and the resolved path is
+        checked against the directory again, because a scrub is a claim and a
+        realpath is a fact. The task chooses the words; it does not choose the
+        destination.
+        """
+        from jarvis.agent import compose as _compose
+
+        content = str(task.metadata.get("content")
+                      or task.metadata.get("command") or "")
+        title = str(task.metadata.get("title") or task.description or "")
+        fmt = str(task.metadata.get("format") or _compose.DEFAULT_FORMAT)
+        name = str(task.metadata.get("name") or "")
+        if not content.strip():
+            # The description makes a serviceable title and is no use as a
+            # body, so a task with no content is a mistake rather than a
+            # request for a title page.
+            return {"success": False,
+                    "error": "compose_document needs content: the document body, "
+                             "as markdown, in 'content'"}
+        try:
+            written = _compose.compose(
+                content, title=title, fmt=fmt, name=name,
+                directory=self.document_dir or _compose.DEFAULT_DIR)
+        except _compose.ComposeError as why:
+            # A refusal with its reason: the model can pick another format or
+            # shorten the document, which it cannot do from "failed".
+            self.log.warning("compose_document refused: %s", why)
+            return {"success": False, "error": str(why)}
+        except OSError as exc:
+            self.log.warning("compose_document could not write: %s", exc)
+            return {"success": False, "error": f"could not write the document: {exc}"}
+        self.log.info("Wrote %s (%d bytes, sha256 %s)", written["path"],
+                      written["bytes"], written["sha256"][:12])
+        self.memory.store(category="compose_document", data=written)
+        return {"success": True, "output": written}
 
     def _handle_estate_report(self, task: Task) -> dict:
         """What the account is spending and what it is holding on to.

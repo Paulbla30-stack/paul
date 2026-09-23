@@ -323,6 +323,26 @@
       <h2>Files the agent has</h2>
       <ul id="uploads"></ul>
     </div>
+    <div class="card">
+      <h2>Documents the agent has written</h2>
+      <p class="small muted" style="margin:0 0 8px">PDF, Word, Markdown or plain
+      text, written into one folder the agent cannot choose. Each one is on the
+      ledger by name and hash. Ask for one in Chat &mdash; "write me a letter
+      about&nbsp;&hellip; as a PDF" &mdash; or use the box below.</p>
+      <div class="row" style="gap:6px;flex-wrap:wrap">
+        <input id="docTitle" placeholder="Title" style="flex:2 1 200px">
+        <select id="docFormat" style="flex:0 0 90px">
+          <option value="pdf">PDF</option>
+          <option value="docx">Word</option>
+          <option value="md">Markdown</option>
+          <option value="txt">Text</option>
+        </select>
+        <button id="docWrite" class="primary">Write it</button>
+      </div>
+      <textarea id="docBody" rows="6" placeholder="The document, as markdown: # headings, - bullets, blank lines between paragraphs." style="width:100%;margin-top:6px"></textarea>
+      <p id="docMsg" class="small" style="margin:6px 0 0"></p>
+      <ul id="documents"></ul>
+    </div>
   </section>
 
   <section id="ledger">
@@ -475,7 +495,7 @@
     $("composer").style.display = onChat ? "" : "none";
     document.body.classList.toggle("chat-open", onChat);
     if (b.dataset.tab === "diary") loadDiary();
-    if (b.dataset.tab === "files") loadUploads();
+    if (b.dataset.tab === "files") { loadUploads(); loadDocuments(); }
     if (b.dataset.tab === "ledger") loadLedger();
     if (b.dataset.tab === "lab") loadLab();
   }));
@@ -879,6 +899,42 @@
   async function loadUploads() { try { const list = await api("/uploads"); const ul = $("uploads"); ul.innerHTML = "";
     if (!list.length) ul.innerHTML = '<li class="muted small">No files yet.</li>';
     for (const u of list.slice().reverse()) { const li = document.createElement("li"); li.innerHTML = escapeHtml(u.name) + ' <span class="small muted">' + fmtSize(u.size) + ' · ' + fmtTime(u.uploaded_at) + (u.exists === false ? ' · missing' : '') + '</span><div class="small muted">' + escapeHtml(u.path) + '</div>'; ul.appendChild(li); } } catch (e) {} }
+  async function loadDocuments() {
+    try {
+      const got = await api("/documents"); const ul = $("documents"); ul.innerHTML = "";
+      if (!got.documents.length) { ul.innerHTML = '<li class="muted small">Nothing written yet.</li>'; return; }
+      for (const d of got.documents) {
+        const li = document.createElement("li");
+        // A plain link: the session cookie authorises the download, and the
+        // endpoint sends it as an attachment with nosniff, so nothing the
+        // agent wrote is ever rendered inside this page's own origin.
+        const a = document.createElement("a");
+        a.href = "/documents/" + encodeURIComponent(d.name);
+        a.setAttribute("download", d.name);
+        a.textContent = d.name;
+        li.appendChild(a);
+        const meta = document.createElement("span");
+        meta.className = "small muted";
+        meta.textContent = " " + fmtSize(d.bytes) + " · " + fmtTime(d.mtime);
+        li.appendChild(meta);
+        ul.appendChild(li);
+      }
+    } catch (e) {}
+  }
+  async function writeDocument() {
+    const body = $("docBody").value.trim();
+    if (!body) { $("docMsg").textContent = "Nothing to write."; return; }
+    $("docMsg").textContent = "Writing…";
+    try {
+      const got = await api("/compose", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: body, title: $("docTitle").value,
+                               format: $("docFormat").value }) });
+      $("docMsg").textContent = "Wrote " + got.name + " (" + fmtSize(got.bytes) + ", sha256 " + got.sha256.slice(0, 12) + "…)";
+      $("docBody").value = "";
+      loadDocuments();
+    } catch (e) { $("docMsg").textContent = "Refused: " + e.message; }
+  }
   function uploadFile(file) {
     return new Promise((resolve, reject) => {
       const xhr = new XMLHttpRequest(); xhr.open("POST", "/upload");
@@ -893,6 +949,7 @@
   }
   async function uploadAll(files) { for (const f of files) { $("uploadMsg").textContent = "Uploading " + f.name + "…"; try { const r = await uploadFile(f); $("uploadMsg").textContent = "Uploaded " + r.name + " → " + r.path; pushTurn("system", "Uploaded " + r.name + " (" + fmtSize(r.size) + "). The agent has been told."); } catch (e) { $("uploadMsg").textContent = "Failed: " + e.message; } } loadUploads(); }
   $("fileInput").addEventListener("change", e => uploadAll(Array.from(e.target.files)));
+  $("docWrite").addEventListener("click", writeDocument);
   const drop = $("drop");
   ["dragenter", "dragover"].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add("over"); }));
   ["dragleave", "drop"].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove("over"); }));

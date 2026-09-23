@@ -20,6 +20,10 @@ Endpoints (default 127.0.0.1:8471):
     POST /chat     -> JSON {"messages": [{role, content}, ...], "from": "..."};
                       multi-turn answer. "from" is optional and names the
                       correspondent in the agent's memory of the exchange.
+    GET  /documents        -> documents the agent has written, newest first
+    GET  /documents/<name> -> download one, as an attachment
+    POST /compose  -> {content, title, format, name} -> write one. content is
+                      markdown; format is pdf, docx, md or txt.
     POST /told     -> {text, by} -> the operator states a fact the agent cannot
                       yet see. Kept apart from what the agent itself said, and
                       promoted to standing only when a reading agrees with it.
@@ -73,6 +77,15 @@ from typing import Optional
 UI_HTML_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                             "ui", "web", "index.html")
 DEFAULT_UPLOAD_DIR = "/var/lib/jarvis/uploads"
+# Exactly the formats compose.py can write, and nothing that a browser would
+# execute. text/html is absent on purpose.
+DOCUMENT_TYPES = {
+    "pdf": "application/pdf",
+    "docx": ("application/vnd.openxmlformats-officedocument"
+             ".wordprocessingml.document"),
+    "md": "text/markdown; charset=utf-8",
+    "txt": "text/plain; charset=utf-8",
+}
 DEFAULT_TLS_DIR = "/etc/jarvis/tls"
 _SAFE_NAME = re.compile(r"[^A-Za-z0-9._-]+")
 
@@ -334,6 +347,30 @@ class HeadlessRunner:
                 self.send_header("Cache-Control", "no-store")
                 self.end_headers()
 
+            def _send_file(self, path: str, filename: str, content_type: str):
+                """Hand a document back. Attachment, never inline.
+
+                Content-Disposition: attachment and X-Content-Type-Options
+                together stop the browser deciding for itself what a file is
+                and rendering it in the page's own origin -- which for a
+                document the agent generated would put its text inside the
+                session that can drive the agent.
+                """
+                try:
+                    with open(path, "rb") as fh:
+                        body = fh.read()
+                except OSError as exc:
+                    return self._send(404, {"error": f"cannot read it: {exc}"})
+                self.send_response(200)
+                self.send_header("Content-Type", content_type)
+                self.send_header("Content-Length", str(len(body)))
+                self.send_header("Content-Disposition",
+                                 f'attachment; filename="{filename}"')
+                self.send_header("X-Content-Type-Options", "nosniff")
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+                self.wfile.write(body)
+
             def _send_html(self, html: str):
                 body = html.encode()
                 self.send_response(200)
@@ -362,6 +399,28 @@ class HeadlessRunner:
                     return
                 if path == "/uploads":
                     return self._send(200, runner.list_uploads())
+                if path == "/documents":
+                    from jarvis.agent import compose as _compose
+                    return self._send(200, {
+                        "dir": runner.agent.document_dir,
+                        "formats": list(_compose.FORMATS),
+                        "documents": _compose.listing(runner.agent.document_dir)})
+                if path.startswith("/documents/"):
+                    from jarvis.agent import compose as _compose
+                    # The name is taken apart and rebuilt rather than trusted:
+                    # basename first, then the scrub, then a realpath check
+                    # against the directory. Any one of those alone is a claim.
+                    asked = urllib.parse.unquote(path[len("/documents/"):])[:200]
+                    base = os.path.basename(asked)
+                    stem, _, ext = base.rpartition(".")
+                    if ext.lower() not in _compose.FORMATS or not stem:
+                        return self._send(404, {"error": "no such document"})
+                    wanted = f"{_compose.safe_name(stem)}.{ext.lower()}"
+                    root = os.path.realpath(runner.agent.document_dir)
+                    full = os.path.realpath(os.path.join(root, wanted))
+                    if os.path.dirname(full) != root or not os.path.isfile(full):
+                        return self._send(404, {"error": "no such document"})
+                    return self._send_file(full, wanted, DOCUMENT_TYPES[ext.lower()])
                 limit = 20
                 search = ""
                 day = None
@@ -570,6 +629,29 @@ class HeadlessRunner:
                                                    asked_by=asked_by)
                     runner.wake()
                     self._send(200, {"answer": answer, "dials": settings is not None})
+                elif path == "/compose":
+                    try:
+                        payload = json.loads(body or "{}")
+                    except ValueError:
+                        return self._send(400, {"error": "body must be JSON"})
+                    if not isinstance(payload, dict):
+                        return self._send(400, {"error": "JSON object required"})
+                    from jarvis.agent import compose as _compose
+                    with runner._lock:
+                        runner.agent.note_operator("compose")
+                        try:
+                            written = runner.agent.compose_document(
+                                str(payload.get("content") or ""),
+                                title=str(payload.get("title") or ""),
+                                fmt=str(payload.get("format")
+                                        or _compose.DEFAULT_FORMAT),
+                                name=str(payload.get("name") or ""))
+                        except _compose.ComposeError as why:
+                            return self._send(400, {"error": str(why)})
+                        except OSError as exc:
+                            return self._send(500, {"error": str(exc)})
+                    self._send(200, dict(written,
+                                         url=f"/documents/{written['name']}"))
                 elif path == "/told":
                     # Something the operator states as so. Not inferred from a
                     # chat turn: which sentences were assertions is a judgement,

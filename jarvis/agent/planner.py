@@ -34,6 +34,7 @@ class TaskType(Enum):
     READ_LOGS = "read_logs"
     NOTIFY_OPERATOR = "notify_operator"
     ESTATE_REPORT = "estate_report"
+    COMPOSE_DOCUMENT = "compose_document"
 
 
 # Boot-task profiles: what the agent should look at first depends on

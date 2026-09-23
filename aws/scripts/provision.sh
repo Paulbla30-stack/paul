@@ -146,8 +146,9 @@ install -m 0644 "$SRC/aws/systemd/jarvis-health.service" /etc/systemd/system/
 install -m 0644 "$SRC/aws/systemd/jarvis-health.timer" /etc/systemd/system/
 install -m 0644 "$SRC/aws/systemd/cloudflared.service" /etc/systemd/system/
 install -m 0644 "$SRC/aws/scripts/motd.sh" /etc/profile.d/jarvis.sh
-mkdir -p /var/log /var/lib/jarvis/uploads /etc/jarvis/tls /etc/jarvis/ledger
-chmod 750 /var/lib/jarvis /var/lib/jarvis/uploads
+mkdir -p /var/log /var/lib/jarvis/uploads /var/lib/jarvis/documents \
+         /etc/jarvis/tls /etc/jarvis/ledger
+chmod 750 /var/lib/jarvis /var/lib/jarvis/uploads /var/lib/jarvis/documents
 chmod 700 /etc/jarvis/tls /etc/jarvis/ledger
 touch /var/log/jarvis.log /var/log/jarvis-security.log
 

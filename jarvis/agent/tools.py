@@ -150,6 +150,34 @@ TOOLS = (
          arguments={**_DESC,
                     "severity": {"type": "string",
                                  "description": "info, notice or alert."}}),
+    # reporting=True, and the reasoning matters because it decides which rungs
+    # can use it. Writing a document does not change this machine: it puts a
+    # file the operator asked for into one directory that is fixed in code,
+    # with the extension decided by the format and the path re-checked after
+    # resolution. That is the same shape as notify_operator -- one destination,
+    # settled in advance, limits enforced below the model -- and an observer
+    # that may look and report but may not produce the report is not an
+    # observer. The alternative, classing it as a change, would mean the
+    # default rung could only ever *propose* a document, which is the
+    # capability not existing.
+    Tool("compose_document", "Write a document the operator can open: PDF, Word "
+                             "(.docx), Markdown or plain text. Put the body in "
+                             "'content' as plain markdown -- # headings, - "
+                             "bullets, blank lines between paragraphs. It is "
+                             "saved and its name and hash reported; it is not "
+                             "sent anywhere.",
+         reporting=True,
+         arguments={**_DESC,
+                    "content": {"type": "string",
+                                "description": "The document body, as markdown."},
+                    "title": {"type": "string",
+                              "description": "The document's title."},
+                    "format": {"type": "string",
+                               "description": "pdf, docx, md or txt. pdf by default."},
+                    "name": {"type": "string",
+                             "description": "Optional filename stem; the title is "
+                                            "used when it is missing."}},
+         required=("content",)),
     Tool("maintenance", "Perform routine upkeep of this machine.",
          effect=CHANGE, arguments=dict(_DESC)),
     Tool("shell_command", "Run one POSIX sh command. Subject to the deny-list, "
