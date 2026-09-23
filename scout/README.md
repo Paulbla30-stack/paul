@@ -377,26 +377,27 @@ destination from Cloudflare's IPs rather than Amazon's, so SPF contributes
 nothing to DMARC on that hop. DKIM survives forwarding intact and aligns with
 `d=heartbeat-framework.org`. SPF earns its place for mail delivered directly.
 
-### What is still not proved
+### How delivery was established
 
-That the mail reaches a mailbox the operator opens. Three messages have been
-sent to the address -- one by hand, one to watch for a bounce, one through
-`SesMailer.send()` itself. SES accepted all three, and 140 seconds of polling
-after the second showed no hard bounce and nothing added to the account
-suppression list, which means Cloudflare's MX **accepted** the recipient
-rather than rejecting an unknown address (it rejects at SMTP time when no
-rule and no catch-all matches).
+Three messages were sent to the address -- one by hand, one to watch for a
+bounce, one through `SesMailer.send()` itself. SES accepted all three, and 140
+seconds of polling after the second showed no hard bounce and nothing added to
+the account suppression list, which means Cloudflare's MX **accepted** the
+recipient rather than rejecting an unknown address (it rejects at SMTP time
+when no rule and no catch-all matches).
 
-A routing rule can still forward somewhere nobody reads, and that failure is
-silent from this end. Only the operator can close it, by saying a message
-arrived.
+None of that proved the mail reached a mailbox anyone opens: a routing rule
+can forward somewhere nobody reads, and that failure is silent from the
+sending end. **The operator confirmed on 23 Sep 2026 that the messages
+arrived.** That is the only kind of evidence there is for the last hop, and it
+is recorded here because the next person to read this file will otherwise
+reach the same dead end and have to send three more.
 
 `fallback_enabled = true`, and the comment in `config.toml` says exactly what
 that covers: it fires when an address stops being a verified SES identity. It
 does **not** fire when a Cloudflare routing rule disappears, because SES
-accepts that mail and it vanishes afterwards. The hotmail address stays as
-the fallback because it is the one destination anybody has watched a message
-land in.
+accepts that mail and it vanishes afterwards -- so if the digest ever stops
+arriving with no error anywhere, that is the first thing to look at.
 
 Sandbox is sufficient here: 200 emails/day against a need of one.
 

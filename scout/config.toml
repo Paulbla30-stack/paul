@@ -203,17 +203,18 @@ records = [
 # rather than rejecting an unknown address, which it does at SMTP time when no
 # rule and no catch-all match.
 #
-# It is not proof the mail reached a mailbox Paul opens. A routing rule can
-# forward somewhere nobody reads, and that failure is silent from this end.
-# Only he can close that, by saying the message arrived.
+# Neither of those was proof the mail reached a mailbox Paul opens -- a
+# routing rule can forward somewhere nobody reads, and that failure is silent
+# from this end. He confirmed on 23 Sep 2026 that the messages arrived, which
+# is the only evidence that hop admits.
 to      = "paulblatherwick@heartbeat-framework.org"
 sender  = "scout@heartbeat-framework.org"
 
 # On, and honest about what it covers. resolve() falls back when an address is
 # not a verified SES identity -- so this catches the domain identity lapsing,
 # and it does NOT catch a Cloudflare routing rule being removed, because SES
-# accepts that mail and it disappears afterwards. The hotmail address is the
-# one destination with a delivery anybody has actually seen.
+# accepts that mail and it disappears afterwards. If the digest ever stops
+# arriving with no error anywhere, look at the routing rule first.
 fallback_to       = "Paulbla30@hotmail.com"
 fallback_sender   = "Paulbla30@hotmail.com"
 fallback_enabled  = true
