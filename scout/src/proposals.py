@@ -92,6 +92,18 @@ TERMINAL = (REJECTED, EXPIRED, SENT, FAILED)
 DEFAULT_TTL_DAYS = 7
 
 
+# Whose behalf a proposal is made on. Paul is the first tenant and for now
+# the only one; others are intended.
+#
+# This field is on the record from the beginning, before a single proposal
+# exists, because it cannot be added later in any useful way. Every
+# transition is appended to a hash chain, and an entry already written cannot
+# gain a field: backfilling would mean either rewriting the chain, which
+# defeats it, or a permanent population of entries that belong to nobody in
+# particular. Costless today, impossible next month.
+DEFAULT_TENANT = "paul"
+
+
 @dataclass
 class Proposal:
     """One thing Jarvis would post, if allowed."""
@@ -110,12 +122,18 @@ class Proposal:
     decided_by: str | None = None
     source_item: dict = field(default_factory=dict)
     error: str | None = None
+    # Whose account this would be posted to, and whose voice rules apply.
+    # Defaulted rather than required so a caller that forgets is attributed
+    # to the operator rather than to nobody: an unattributed proposal is the
+    # one shape this record must never hold.
+    tenant: str = DEFAULT_TENANT
 
     @staticmethod
     def new(*, kind: str, network: str, target_url: str, target_title: str,
             draft: str, rationale: str, discloses: list[str],
             source_item: dict | None = None, now: datetime | None = None,
-            ttl_days: int = DEFAULT_TTL_DAYS) -> "Proposal":
+            ttl_days: int = DEFAULT_TTL_DAYS,
+            tenant: str = DEFAULT_TENANT) -> "Proposal":
         now = now or datetime.now(timezone.utc)
         return Proposal(
             id=uuid.uuid4().hex,
@@ -125,6 +143,7 @@ class Proposal:
             created_at=now.isoformat(),
             expires_at=(now + timedelta(days=ttl_days)).isoformat(),
             source_item=source_item or {},
+            tenant=(tenant or DEFAULT_TENANT).strip().lower() or DEFAULT_TENANT,
         )
 
     @property
@@ -186,10 +205,19 @@ class ProposalStore:
         fields = {k: v for k, v in r["Attributes"].items() if k not in ("pk", "sk")}
         return Proposal(**fields)
 
-    def pending(self, limit: int = 50) -> list[Proposal]:
+    def pending(self, limit: int = 50, tenant: str | None = None) -> list[Proposal]:
+        """Pending proposals, for one tenant or for all of them.
+
+        `tenant=None` means every tenant, which is what the lapse sweep wants.
+        Anything that shows proposals to a person should pass a tenant: one
+        operator seeing another's drafts is the failure mode this argument
+        exists to make hard to reach by accident.
+        """
         from boto3.dynamodb.conditions import Attr
-        out, kwargs = [], {"FilterExpression": Attr("sk").eq("PROPOSAL")
-                           & Attr("status").eq(PENDING)}
+        cond = Attr("sk").eq("PROPOSAL") & Attr("status").eq(PENDING)
+        if tenant is not None:
+            cond = cond & Attr("tenant").eq((tenant or "").strip().lower())
+        out, kwargs = [], {"FilterExpression": cond}
         while len(out) < limit:
             r = self.table.scan(**kwargs)
             for it in r.get("Items", []):
