@@ -206,3 +206,71 @@ class TestItNeverBreaksTheLoop(Base):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestAggregatesSayWhichModelTheyAreAbout(Base):
+    """A rate averaged over two brains is not a fact about either.
+
+    Three brains are named in the architecture note and a switch is in
+    progress. Raised in the 23 September review: without a stamp, the drift
+    instruments measure model swaps and report them as drift, and the same
+    applies one level up to every rate in here.
+    """
+
+    def _write(self, kind, body, model=None, code=None):
+        stamp = {}
+        if model:
+            stamp["model"] = model
+        if code:
+            stamp["code"] = code
+        self.ledger.record(kind, dict(body, **({"by": stamp} if stamp else {})))
+
+    def _outcomes(self, n, model, code="build-a"):
+        for i in range(n):
+            self._write("outcome", {"type": "system_check", "success": True},
+                        model=model, code=code)
+
+    def test_one_model_is_named_and_nothing_is_flagged(self):
+        self._outcomes(4, "qwen3-32b")
+        got = self.knower().compute()
+        self.assertEqual(got["models"], ["qwen3-32b"])
+        self.assertFalse(got["spans_a_model_change"])
+        self.assertFalse(any("more than one model" in line
+                             for line in self.knower().lines()))
+
+    def test_a_window_spanning_two_models_says_so_before_any_rate(self):
+        self._outcomes(3, "qwen3-32b")
+        self._outcomes(3, "claude-opus-5")
+        knower = self.knower()
+        got = knower.compute()
+        self.assertTrue(got["spans_a_model_change"])
+        self.assertEqual(sorted(got["models"]), ["claude-opus-5", "qwen3-32b"])
+        lines = knower.lines()
+        said = [i for i, line in enumerate(lines) if "more than one model" in line]
+        self.assertTrue(said, lines)
+        for name in ("qwen3-32b", "claude-opus-5"):
+            self.assertIn(name, lines[said[0]])
+
+    def test_the_most_common_model_is_named_first(self):
+        # So the reader knows which model most of the numbers are about.
+        self._outcomes(1, "claude-opus-5")
+        self._outcomes(5, "qwen3-32b")
+        self.assertEqual(self.knower().compute()["models"][0], "qwen3-32b")
+
+    def test_a_code_change_inside_the_window_is_reported(self):
+        # The deploys a coding agent makes write nothing to the chain. The
+        # fingerprint is how they become visible after the fact.
+        self._outcomes(3, "qwen3-32b", code="build-a")
+        self._outcomes(3, "qwen3-32b", code="build-b")
+        got = self.knower().compute()
+        self.assertEqual(got["builds"], 2)
+        self.assertFalse(got["spans_a_model_change"])
+        self.assertTrue(any("your own code changed" in line.lower()
+                            for line in self.knower().lines()))
+
+    def test_unstamped_entries_do_not_invent_a_model(self):
+        for _ in range(3):
+            self.ledger.record("outcome", {"type": "system_check", "success": True})
+        got = self.knower().compute()
+        self.assertEqual(got["models"], [])
+        self.assertFalse(got["spans_a_model_change"])

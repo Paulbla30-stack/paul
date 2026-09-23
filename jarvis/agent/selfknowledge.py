@@ -92,10 +92,22 @@ class SelfKnowledge:
         consolidations = 0
         verdicts: list = []
         first_ts = last_ts = None
+        # Which brain wrote these entries. A rate computed across a model swap
+        # is two subjects averaged into one, and reads as the agent changing
+        # its mind. The entries carry the stamp; the aggregate has to carry
+        # what the stamp implies about whether it can be compared.
+        models: Counter = Counter()
+        builds: Counter = Counter()
 
         for kind, ts, body in self._entries():
             first_ts = ts if first_ts is None else min(first_ts, ts)
             last_ts = ts if last_ts is None else max(last_ts, ts)
+            stamp = body.get("by")
+            if isinstance(stamp, dict):
+                if stamp.get("model"):
+                    models[str(stamp["model"])] += 1
+                if stamp.get("code"):
+                    builds[str(stamp["code"])] += 1
             faults_seen.append((kind, ts, body))
             if kind == "decision":
                 decisions += 1
@@ -135,6 +147,11 @@ class SelfKnowledge:
 
         return {
             "window_days": round(self.window_s / 86400, 1),
+            # Sorted by how much of the window each accounts for, so the first
+            # entry is the model most of these numbers are about.
+            "models": [m for m, _ in models.most_common()],
+            "builds": len(builds),
+            "spans_a_model_change": len(models) > 1,
             "span_hours": (round((last_ts - first_ts) / 3600, 1)
                            if first_ts and last_ts else 0.0),
             "decisions": decisions,
@@ -215,6 +232,19 @@ class SelfKnowledge:
             failed = data["failures"]
             out.append(f"{failed} of them failed "
                        f"({data['failure_rate'] * 100:.0f}%).")
+        # Said before the fault profile, because it changes how every number
+        # above and below it should be read. A rate averaged over two brains
+        # is not a fact about either.
+        if data.get("spans_a_model_change"):
+            named = ", ".join(data.get("models") or [])
+            out.append(f"These figures span more than one model ({named}), so "
+                       "they are not a measurement of any one of them. Treat a "
+                       "change across that boundary as a change of model until "
+                       "there are enough entries under the current one.")
+        elif data.get("builds", 0) > 1:
+            out.append(f"Your own code changed {data['builds'] - 1} time(s) "
+                       "inside this window, so what came before a change was "
+                       "not necessarily done by the same system.")
 
         # Where the errors are, not just how many. Placed before the
         # per-task statistics because a named failure mode is more use than a

@@ -98,6 +98,13 @@ class AgentCore:
         # action and outcome. With fail_closed the agent does not act, plan
         # or answer while it cannot record. The brain never reads it.
         self.ledger = ledger if ledger is not None else NullLedger()
+        # Which model wrote what. A ledger read a year from now has to be able
+        # to tell "the agent changed its mind" from "the agent was replaced",
+        # and the entries are the only place that distinction can live.
+        try:
+            self.ledger.provenance = self._what_produced_this
+        except Exception:
+            pass
         # Failure streak of brain-chosen tasks; past the limit the brain sits
         # out a few cycles so the rule planner (and the operator) get a turn.
         self.brain_failures = 0
@@ -1014,6 +1021,28 @@ class AgentCore:
             result = self.act(task)
             self.reflect(task, result)
             out["result"] = result
+        return out
+
+    def _what_produced_this(self) -> dict:
+        """The brain behind the current entry, for the ledger's stamp.
+
+        Deliberately tolerant: an entry is worth writing even when nobody can
+        say which model is loaded, and a ledger that refused to record because
+        it could not name the brain would be a fail-closed rule protecting
+        nothing.
+        """
+        brain = self.brain
+        if brain is None:
+            return {"model": "none"}
+        out = {"model": str(getattr(brain, "model", "") or "unknown"),
+               "provider": getattr(brain, "provider", None)}
+        try:
+            from jarvis.brain import dials
+            settings = getattr(brain, "settings", None)
+            if settings:
+                out["dials"] = dials.fingerprint(settings)
+        except Exception:
+            pass
         return out
 
     def ask(self, question: str) -> str:

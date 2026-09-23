@@ -270,6 +270,89 @@ REALLY_SLIPPED = {
 }
 
 
+class _Brain:
+    def __init__(self, model):
+        self.model = model
+        self.provider = "test"
+
+
+class TestABaselineBelongsToOneModel(unittest.TestCase):
+    """Swapping the brain replaces the subject these questions are about.
+
+    Three brains are named in the architecture note and a switch to a larger
+    open-weights model is in progress. With one baseline for all of them, the
+    first run after a switch reads as several probes slipping at once -- an
+    instrument reporting a different model as the same model changing its
+    character. Raised in the 23 September review; the drift probes were the
+    example it gave.
+    """
+
+    def setUp(self):
+        self.agent = FakeAgent()
+        self.agent.brain = _Brain("qwen3-32b")
+        self.set = p.ProbeSet(self.agent, {}, clock=lambda: 1_800_000_000.0)
+
+    def answers(self, book):
+        def ask(question):
+            for probe in p.PROBES:
+                if probe["ask"] == question:
+                    return book[probe["id"]]
+            raise AssertionError(question)
+        return ask
+
+    def test_a_run_says_which_model_gave_the_answers(self):
+        run = self.set.run(ask=self.answers(GOOD), now=1_800_000_000.0)
+        self.assertEqual(run["model"], "qwen3-32b")
+
+    def test_a_new_model_does_not_inherit_the_old_baseline(self):
+        self.set.run(ask=self.answers(GOOD), now=1_800_000_000.0)
+        self.agent.brain = _Brain("claude-opus-5")
+        self.assertEqual(self.set.baseline, {})
+        got = self.set.drift()
+        self.assertFalse(got["read"])
+        self.assertIn("claude-opus-5", got["why"])
+        self.assertIn("qwen3-32b", got["why"])
+
+    def test_the_old_baseline_is_kept_and_found_again_on_switching_back(self):
+        # Not discarded: going back to a model should not cost its history.
+        self.set.run(ask=self.answers(GOOD), now=1_800_000_000.0)
+        self.agent.brain = _Brain("claude-opus-5")
+        self.set.run(ask=self.answers(BAD), now=1_800_086_400.0)
+        self.agent.brain = _Brain("qwen3-32b")
+        self.assertEqual(self.set.baseline.get("model"), "qwen3-32b")
+        self.assertEqual(sorted(self.set.baselines), ["claude-opus-5", "qwen3-32b"])
+
+    def test_a_run_under_another_model_is_never_read_as_drift(self):
+        # The failure this exists to stop: a baseline of six holding probes,
+        # a different model answering badly, and the report saying the
+        # character slipped rather than that the brain was replaced.
+        self.set.run(ask=self.answers(GOOD), now=1_800_000_000.0)
+        self.set.latest = dict(self.set.latest, model="claude-opus-5",
+                               at=1_800_086_400.0)
+        got = self.set.drift()
+        self.assertFalse(got["read"])
+        self.assertEqual((got["was_model"], got["now_model"]),
+                         ("qwen3-32b", "claude-opus-5"))
+        self.assertIn("not drift", got["why"])
+
+    def test_drift_is_still_read_within_one_model(self):
+        # The control: partitioning must not turn the instrument off.
+        self.set.run(ask=self.answers(GOOD), now=1_800_000_000.0)
+        self.set.run(ask=self.answers(BAD), now=1_800_086_400.0)
+        got = self.set.drift()
+        self.assertTrue(got["read"])
+        self.assertTrue(got["moved"])
+        self.assertEqual(got["model"], "qwen3-32b")
+
+    def test_an_unlabelled_baseline_is_nobody_s(self):
+        # Rows written before runs carried a model cannot be attributed, and
+        # adopting them for whatever is loaded now would be a guess presented
+        # as a measurement.
+        self.set.baselines["unknown"] = {"at": 1.0, "held": 6, "slipped": 0,
+                                         "of": 6, "results": []}
+        self.assertEqual(self.set.baseline, {})
+
+
 class TestAgainstWhatTheModelActuallySaid(unittest.TestCase):
     """The first baseline flagged four slips. Three were this module being
     wrong, which is the alert positive-predictive value problem the design doc

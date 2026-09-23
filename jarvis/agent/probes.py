@@ -170,6 +170,9 @@ def verdict(probe_id: str, seen: dict) -> str:
     return UNREAD
 
 
+UNKNOWN_MODEL = "unknown"
+
+
 class ProbeSet:
     """Runs the standing questions, keeps the baseline, reads the drift."""
 
@@ -179,8 +182,29 @@ class ProbeSet:
         self.agent = agent
         self.clock = clock
         self.enabled = cfg.get("enabled") is not False
-        self.baseline: dict = {}
+        # One baseline per model, not one baseline. "Frozen" is a claim about
+        # a model, and swapping the brain replaces the subject these questions
+        # are about. With a single baseline, the first run after a switch reads
+        # as five probes slipping at once -- an instrument that reports a
+        # different person as the same person changing.
+        self.baselines: dict = {}
         self.latest: dict = {}
+
+    # ---- whose character is being measured ------------------------------
+
+    def _model(self) -> str:
+        brain = getattr(self.agent, "brain", None)
+        return str(getattr(brain, "model", "") or UNKNOWN_MODEL)
+
+    @property
+    def baseline(self) -> dict:
+        """The baseline for the model that is loaded now, if there is one."""
+        return self.baselines.get(self._model()) or {}
+
+    @baseline.setter
+    def baseline(self, run):
+        run = run or {}
+        self.baselines[str(run.get("model") or self._model())] = run
 
     # ---- running --------------------------------------------------------
 
@@ -210,7 +234,7 @@ class ProbeSet:
                             "verdict": verdict(probe["id"], seen),
                             "markers": seen,
                             "answer_head": str(answer or "")[:240]})
-        run = {"at": now, "results": results,
+        run = {"at": now, "model": self._model(), "results": results,
                "held": sum(1 for r in results if r["verdict"] == HOLDS),
                "slipped": sum(1 for r in results if r["verdict"] == SLIPPED),
                "unread": sum(1 for r in results if r["verdict"] == UNREAD),
@@ -241,14 +265,29 @@ class ProbeSet:
     def drift(self, now: Optional[float] = None) -> dict:
         """What has moved since the baseline, probe by probe."""
         now = self.clock() if now is None else now
+        model = self._model()
         if not self.baseline:
-            return {"read": False,
-                    "why": "no baseline has been taken. Nothing to drift from"}
+            others = sorted(k for k in self.baselines if k != model)
+            why = f"no baseline has been taken for {model}. Nothing to drift from"
+            if others:
+                why += (f". There are baselines for {', '.join(others)}, and they "
+                        "are not this model's to drift from: comparing them would "
+                        "report a change of brain as a change of character")
+            return {"read": False, "why": why, "model": model,
+                    "baselines_for": sorted(self.baselines)}
         if not self.latest or self.latest.get("at") == self.baseline.get("at"):
-            return {"read": False,
+            return {"read": False, "model": model,
                     "why": ("only the baseline exists. Drift needs a second "
                             "reading, and the point of a baseline is that it "
                             "is taken before you need it")}
+        ran_under = str(self.latest.get("model") or UNKNOWN_MODEL)
+        taken_under = str(self.baseline.get("model") or UNKNOWN_MODEL)
+        if ran_under != taken_under:
+            return {"read": False, "model": model,
+                    "was_model": taken_under, "now_model": ran_under,
+                    "why": (f"the baseline was taken under {taken_under} and the "
+                            f"last run was under {ran_under}. That is a different "
+                            "model, not drift. Take a baseline for this one")}
         was = {r["probe"]: r for r in self.baseline["results"]}
         now_r = {r["probe"]: r for r in self.latest["results"]}
         moved, same = [], []
@@ -265,7 +304,7 @@ class ProbeSet:
                                             else "slipped")})
             else:
                 same.append(pid)
-        return {"read": True, "moved": moved, "unchanged": same,
+        return {"read": True, "moved": moved, "unchanged": same, "model": ran_under,
                 "baseline_at": self.baseline["at"], "latest_at": self.latest["at"],
                 "reads": (f"{len(moved)} of {len(PROBES)} changed verdict since "
                           "the baseline" if moved else
@@ -276,7 +315,9 @@ class ProbeSet:
         return {"probes": [{k: p[k] for k in ("id", "claims", "ask",
                                               "holds_if", "slips_if")}
                            for p in PROBES],
+                "model": self._model(),
                 "baseline": self.baseline or None,
+                "baselines_for": sorted(self.baselines),
                 "latest": self.latest or None,
                 "drift": self.drift(now),
                 "how_this_is_read": (
@@ -287,7 +328,8 @@ class ProbeSet:
                     "codebase already trusts.")}
 
     def summary(self, now: Optional[float] = None) -> dict:
-        got = {"probes": len(PROBES), "baseline": bool(self.baseline)}
+        got = {"probes": len(PROBES), "baseline": bool(self.baseline),
+               "model": self._model()}
         if self.latest:
             got.update({"held": self.latest["held"],
                         "slipped": self.latest["slipped"],
@@ -311,8 +353,12 @@ class ProbeSet:
             body = meta.get("run")
             if not isinstance(body, dict):
                 continue
-            if meta.get("what") == "baseline" and not self.baseline:
-                self.baseline = body
+            if meta.get("what") == "baseline":
+                # An older row has no model on it. It is keyed as unknown
+                # rather than adopted by whatever is loaded now: a baseline
+                # that cannot say whose it is cannot be anybody's.
+                key = str(body.get("model") or UNKNOWN_MODEL)
+                self.baselines.setdefault(key, body)
             elif meta.get("what") == "run":
                 self.latest = body
 
@@ -338,6 +384,7 @@ class ProbeSet:
         try:
             agent.ledger.record("thought", {
                 "cycle": getattr(agent, "cycle_count", 0), "kind": "probes",
+                "model": run.get("model"),
                 "held": run["held"], "slipped": run["slipped"],
                 "of": run["of"],
                 "verdicts": {r["probe"]: r["verdict"] for r in run["results"]},

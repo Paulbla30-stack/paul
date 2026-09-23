@@ -30,6 +30,42 @@ def sha256_text(text: str) -> str:
     return hashlib.sha256((text or "").encode("utf-8", errors="replace")).hexdigest()
 
 
+def code_fingerprint(root: Optional[str] = None) -> Optional[str]:
+    """One hash over the agent's own source, so a deploy is visible on the chain.
+
+    A coding agent changes this machine and writes nothing to the ledger: its
+    deploys are the most privileged unrecorded actions in the system. It cannot
+    be made to sign entries -- it does not hold the key and should not -- but
+    the agent it deploys does, and the agent can say what it is running. Two
+    entries either side of a deploy then carry different fingerprints, and the
+    chain shows that the code changed underneath it even though nothing on the
+    chain announced it.
+
+    Sorted by path, so it does not depend on directory order, and computed once
+    at open. It says a change happened, not what changed; the commit is in git.
+    """
+    try:
+        import jarvis
+        base = root or os.path.dirname(os.path.abspath(jarvis.__file__))
+        digest = hashlib.sha256()
+        found = 0
+        for directory, dirnames, filenames in os.walk(base):
+            dirnames[:] = sorted(d for d in dirnames if d != "__pycache__")
+            for name in sorted(filenames):
+                if not name.endswith(".py"):
+                    continue
+                full = os.path.join(directory, name)
+                one = sha256_file(full)
+                if one is None:
+                    continue
+                digest.update(os.path.relpath(full, base).encode("utf-8"))
+                digest.update(one.encode("ascii"))
+                found += 1
+        return digest.hexdigest()[:16] if found else None
+    except Exception:
+        return None
+
+
 def sha256_file(path: str, limit: int = 256 << 20) -> Optional[str]:
     try:
         h = hashlib.sha256()
@@ -69,6 +105,11 @@ class AgentLedger:
         self._warned = False
         self.anchor = LedgerAnchor(cfg.get("anchor") or {}, self.log, self.path, "", writer,
                                    client=anchor_client, region=region, instance_id=instance_id)
+        # What produced the entries. Set by the agent, because the ledger does
+        # not know which brain is loaded and must not import one to find out.
+        # Returns {"model": ..., "dials": ...} or None.
+        self.provenance = None
+        self.code = code_fingerprint()
         if self.enabled:
             self.open()
 
@@ -132,6 +173,29 @@ class AgentLedger:
 
     # ---- recording ----------------------------------------------------------------
 
+    def _stamp(self) -> Optional[dict]:
+        """Which model, under which dials, on which build.
+
+        "Frozen" only holds for one model. Without this, a rate computed either
+        side of a model swap reads as the same subject changing its mind, and a
+        drift probe reports the swap as drift. The stamp is what lets a reader
+        refuse that comparison instead of making it.
+        """
+        out = {}
+        if self.code:
+            out["code"] = self.code
+        source = self.provenance
+        if callable(source):
+            try:
+                given = source() or {}
+            except Exception:
+                given = {}
+            for key in ("model", "provider", "dials"):
+                value = given.get(key)
+                if value:
+                    out[key] = str(value)[:120]
+        return out or None
+
     def record(self, kind: str, body: dict) -> bool:
         """Append one entry. False (and fail-closed) when it could not be written."""
         if not self.enabled:
@@ -139,6 +203,13 @@ class AgentLedger:
         with self._lock:
             if self.writer is None:
                 return False
+            stamp = self._stamp()
+            if stamp:
+                # setdefault: a caller that already said what produced this
+                # (the lab, recording an answer given under other dials) is
+                # more specific than the agent's current state.
+                body = dict(body or {})
+                body.setdefault("by", stamp)
             try:
                 entry = self.writer.append(kind, body)
             except (LedgerError, OSError, ValueError, TypeError) as e:
