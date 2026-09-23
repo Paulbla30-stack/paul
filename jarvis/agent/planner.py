@@ -35,6 +35,10 @@ class TaskType(Enum):
     NOTIFY_OPERATOR = "notify_operator"
     ESTATE_REPORT = "estate_report"
     COMPOSE_DOCUMENT = "compose_document"
+    BROWSE_OPEN = "browse_open"
+    BROWSE_FOLLOW = "browse_follow"
+    BROWSE_READ = "browse_read"
+    BROWSE_ACT = "browse_act"
 
 
 # Boot-task profiles: what the agent should look at first depends on

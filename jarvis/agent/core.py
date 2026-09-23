@@ -188,6 +188,13 @@ class AgentCore:
         # visibility. One direction, and off unless configured.
         from jarvis.agent import marketing as _marketing
         self.marketing = _marketing.build_view(config, self.log)
+        # The browser, as a client of a service in another process under
+        # another uid. Off unless the operator switched it on: this is the
+        # widest capability on the machine and it should be a thing that was
+        # turned on rather than a thing that arrived.
+        from jarvis.agent import browse as _browse
+        self.browser = _browse.build_view(config, self.log)
+        self.executor.browser = self.browser
         from jarvis.agent import compose as _compose
         docs = config.get("documents")
         docs = docs if isinstance(docs, dict) else {}

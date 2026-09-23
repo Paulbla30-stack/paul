@@ -375,6 +375,21 @@ class HeadlessRunner:
                 self.end_headers()
                 self.wfile.write(body)
 
+            def _send_raw(self, code: int, body: bytes, content_type: str):
+                """Bytes that are not JSON: a screenshot, so far.
+
+                no-store and DENY for the same reason the UI page has them --
+                this is a picture of whatever page the browser is on, and it
+                should not sit in a cache or be framed by anything else.
+                """
+                self.send_response(code)
+                self.send_header("Content-Type", content_type)
+                self.send_header("Content-Length", str(len(body)))
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("X-Frame-Options", "DENY")
+                self.end_headers()
+                self.wfile.write(body)
+
             def _send_html(self, html: str):
                 body = html.encode()
                 self.send_response(200)
@@ -411,6 +426,40 @@ class HeadlessRunner:
                             "why": ("marketing.enabled is not set in config; "
                                     "the agent is not reading the scout")})
                     return self._send(200, dict(view.state(), enabled=True))
+                if path == "/browse":
+                    # What the browser is doing, for the tab. The page body
+                    # comes back as plain text rather than the envelope: the
+                    # envelope is for the model, which needs telling that page
+                    # text is not an instruction. Paul knows.
+                    view = getattr(runner.agent, "browser", None)
+                    if view is None:
+                        return self._send(200, {
+                            "enabled": False,
+                            "why": ("browser.enabled is not set in config; "
+                                    "the browser is switched off")})
+                    health = view.health()
+                    return self._send(200, {"enabled": True, "health": health,
+                                            "page": view.last or {}})
+                if path == "/browse/shot":
+                    view = getattr(runner.agent, "browser", None)
+                    if view is None:
+                        return self._send(404, {"error": "the browser is off"})
+                    try:
+                        # Bind the names, not the package: `import urllib.request`
+                        # here would make `urllib` a local of do_GET and shadow
+                        # the module-level one for every other branch, including
+                        # /documents/<name> further down. It did exactly that,
+                        # and three document tests caught it.
+                        from urllib.request import Request as _Req, urlopen as _open
+                        req = _Req(view.base + "/shot")
+                        token = view._token()
+                        if token:
+                            req.add_header("Authorization", f"Bearer {token}")
+                        with _open(req, timeout=view.timeout) as r:
+                            shot = r.read()
+                    except Exception as exc:      # noqa: BLE001
+                        return self._send(503, {"error": f"no screenshot: {exc}"})
+                    return self._send_raw(200, shot, "image/png")
                 if path == "/documents":
                     from jarvis.agent import compose as _compose
                     return self._send(200, {
@@ -554,6 +603,42 @@ class HeadlessRunner:
                 if int(self.headers.get("Content-Length") or 0) > 1_000_000:
                     return self._send(413, {"error": "body too large"})
                 body = self._body().strip()
+                if path.startswith("/browse/"):
+                    # Paul driving the browser himself. Deliberately the same
+                    # client the agent uses, so there is one set of fences and
+                    # not two: the metadata service, the private ranges and
+                    # the password-field refusals hold for him as well. That
+                    # is not paternalism -- they are properties of a browser
+                    # running unsandboxed on this box, and they do not stop
+                    # being true because a person asked.
+                    view = getattr(runner.agent, "browser", None)
+                    if view is None:
+                        return self._send(404, {"error": "the browser is off"})
+                    try:
+                        payload = json.loads(body or "{}")
+                    except ValueError:
+                        return self._send(400, {"error": "body is not JSON"})
+                    what = path[len("/browse/"):]
+                    if what == "open":
+                        url = str(payload.get("url") or "").strip()
+                        if not url:
+                            return self._send(400, {"error": "a url is required"})
+                        if "://" not in url:
+                            url = "https://" + url.lstrip("/")
+                        got = view.open(url)
+                    elif what == "follow":
+                        got = view.follow(str(payload.get("ref") or ""))
+                    elif what == "act":
+                        got = view.act(str(payload.get("kind") or ""),
+                                       str(payload.get("ref") or ""),
+                                       str(payload.get("text") or ""))
+                    elif what == "reset":
+                        got = view.reset()
+                    else:
+                        return self._send(404, {"error": f"no route /browse/{what}"})
+                    if isinstance(got, dict) and got.get("error"):
+                        return self._send(502, got)
+                    return self._send(200, got)
                 if path == "/proposals/decide":
                     # Until this existed, proposals went one way: the agent
                     # filed them, they sat in a list, and nothing came back, so

@@ -300,6 +300,10 @@ class TaskExecutor:
         # Off unless the operator says otherwise: it sends a page image out to
         # a service and bills per page. Set by the agent from config.
         self.document_ocr: dict = {}
+        # The browser, as a client of a service in another process under
+        # another uid. None means the operator has not turned it on, and the
+        # handlers say so rather than pretending the page was blank.
+        self.browser = None
 
         # Map task types to handlers
         self._handlers = {
@@ -318,6 +322,10 @@ class TaskExecutor:
             TaskType.READ_LOGS: self._handle_read_logs,
             TaskType.NOTIFY_OPERATOR: self._handle_notify_operator,
             TaskType.ESTATE_REPORT: self._handle_estate_report,
+            TaskType.BROWSE_OPEN: self._handle_browse_open,
+            TaskType.BROWSE_FOLLOW: self._handle_browse_follow,
+            TaskType.BROWSE_READ: self._handle_browse_read,
+            TaskType.BROWSE_ACT: self._handle_browse_act,
         }
 
     def execute(self, task: Task) -> dict:
@@ -646,6 +654,104 @@ class TaskExecutor:
                       written["bytes"], written["sha256"][:12])
         self.memory.store(category="compose_document", data=written)
         return {"success": True, "output": written}
+
+
+    # ---- the browser ----------------------------------------------------
+
+    def _browser_or_reason(self) -> tuple:
+        """(view, refusal). Exactly one of them is set."""
+        if self.browser is None:
+            return None, {"success": False,
+                          "error": "the browser is not switched on "
+                                   "(browser.enabled in config)"}
+        return self.browser, None
+
+    def _page_result(self, got: dict, did: str) -> dict:
+        """Turn a page into a result, or a refusal into one that says why.
+
+        The page body goes to the model inside its envelope and nowhere else.
+        It is **not** put in memory here: what the agent concludes from a page
+        is worth keeping, with its source; the page body is working text, and
+        a store quietly filling with the text of every page read is a store
+        nobody can find anything in. That was the agent's own point when it
+        was asked what it would refuse -- not to cache page content longer
+        than the task needs it.
+        """
+        from jarvis.agent import browse as _browse
+
+        if not isinstance(got, dict) or got.get("error"):
+            reason = (got or {}).get("reason") or ""
+            error = (got or {}).get("error") or "the browser did not answer"
+            return {"success": False, "error": error,
+                    **({"reason": reason} if reason else {})}
+        out = {
+            "did": did,
+            "url": got.get("url") or "",
+            "title": got.get("title") or "",
+            "status": got.get("status"),
+            "source": _browse.cite(got),
+            "has_password": bool(got.get("has_password")),
+            "links": len(got.get("links") or []),
+            "fields": len(got.get("fields") or []),
+            "truncated": bool(got.get("truncated")),
+            # The one field the model reads the page from. Fenced, stamped
+            # with where it came from, and carrying its own warning.
+            "page": _browse.envelope(got),
+        }
+        if got.get("error"):
+            out["note"] = got["error"]
+        self.log.info("browse %s: %s (%d links)", did, out["url"], out["links"])
+        return {"success": True, "output": out}
+
+    def _handle_browse_open(self, task: Task) -> dict:
+        """Open an address and read it."""
+        view, refusal = self._browser_or_reason()
+        if refusal:
+            return refusal
+        url = str(task.metadata.get("url") or task.metadata.get("command") or "").strip()
+        if not url:
+            return {"success": False, "error": "browse_open needs a url"}
+        if "://" not in url:
+            # A bare host is what a person types; assume https rather than
+            # refusing, but never assume http -- downgrading silently is how
+            # a page gets read over a connection anyone can rewrite.
+            url = "https://" + url.lstrip("/")
+        return self._page_result(view.open(url), f"opened {url}")
+
+    def _handle_browse_follow(self, task: Task) -> dict:
+        """Go to a link on the page that was read, by its ref."""
+        view, refusal = self._browser_or_reason()
+        if refusal:
+            return refusal
+        ref = str(task.metadata.get("ref") or "").strip()
+        if not ref:
+            return {"success": False,
+                    "error": "browse_follow needs the ref of a link on the page "
+                             "you read, like L3"}
+        return self._page_result(view.follow(ref), f"followed {ref}")
+
+    def _handle_browse_read(self, task: Task) -> dict:
+        """Read the open page again without moving."""
+        view, refusal = self._browser_or_reason()
+        if refusal:
+            return refusal
+        return self._page_result(view.read(), "read the open page")
+
+    def _handle_browse_act(self, task: Task) -> dict:
+        """Click, type or submit. The spine has already cleared the rung."""
+        view, refusal = self._browser_or_reason()
+        if refusal:
+            return refusal
+        kind = str(task.metadata.get("kind") or "").strip().lower()
+        if kind not in ("click", "type", "submit"):
+            return {"success": False,
+                    "error": "browse_act needs kind: click, type or submit"}
+        ref = str(task.metadata.get("ref") or "").strip()
+        text = str(task.metadata.get("text") or "")
+        if kind in ("click", "type") and not ref:
+            return {"success": False, "error": f"browse_act {kind} needs a ref"}
+        return self._page_result(view.act(kind, ref, text),
+                                 f"{kind} {ref}".strip())
 
     def _handle_estate_report(self, task: Task) -> dict:
         """What the account is spending and what it is holding on to.

@@ -456,7 +456,8 @@ class JarvisSystem:
         # same fault for the same reason.
         for dest, path in (("document_ocr", ("cloud", "document_ocr")),
                            ("documents", ("documents",)),
-                           ("marketing", ("marketing",))):
+                           ("marketing", ("marketing",)),
+                           ("browser", ("browser",))):
             node = self.config
             for step in path:
                 node = (node or {}).get(step) if isinstance(node, dict) else None

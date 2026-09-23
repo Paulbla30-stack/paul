@@ -1,0 +1,105 @@
+[Unit]
+Description=Jarvis browser (headless Chromium, fenced, loopback only)
+Documentation=https://github.com/Paulbla30-stack/paul
+After=network-online.target
+Wants=network-online.target
+# The agent does not require this. A browser that will not start is a tab that
+# says so; it is not a reason for the agent not to come up.
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=jarvis-browser
+Group=jarvis-browser
+Environment=PYTHONPATH=/usr/lib/jarvis
+Environment=PYTHONUNBUFFERED=1
+Environment=HOME=/var/lib/jarvis-browser
+Environment=XDG_CONFIG_HOME=/var/lib/jarvis-browser
+Environment=PLAYWRIGHT_BROWSERS_PATH=/opt/jarvis-browsers
+EnvironmentFile=-/etc/default/jarvis-browser
+RuntimeDirectory=jarvis-browser
+RuntimeDirectoryMode=0750
+StateDirectory=jarvis-browser
+StateDirectoryMode=0700
+
+# The token. Written into the unit's own runtime directory on every start, so
+# it is new each time the browser restarts and never lives on disk across a
+# reboot. Root -- which is what the agent runs as -- can read it; nothing else
+# on the box can.
+ExecStartPre=/bin/sh -c 'umask 077; head -c 32 /dev/urandom | od -An -tx1 | tr -d " \\n" > /run/jarvis-browser/token'
+ExecStart=/usr/bin/env python3 -m jarvis.browser.service --host 127.0.0.1 --port 8477
+Restart=always
+RestartSec=5
+KillSignal=SIGTERM
+TimeoutStopSec=20
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=jarvis-browser
+
+# ---- memory -----------------------------------------------------------------
+# This box is a t3.small: 1.9 GB, of which the agent and the system were using
+# about 350 MB when this was written. One Chromium tab on a heavy page can take
+# more than half the machine.
+#
+# Without these two lines the kernel's OOM killer chooses between the browser
+# and the agent when memory runs out, and it does not reliably prefer the
+# browser. jarvis.service carries OOMScoreAdjust=-500; this carries +900. The
+# pair is the actual decision: a page Paul opened may kill the browser and must
+# never kill the operating system he is running.
+MemoryHigh=700M
+MemoryMax=900M
+OOMScoreAdjust=900
+# Chromium spawns a renderer per site plus a GPU and a network process.
+TasksMax=512
+LimitNOFILE=8192
+
+# ---- where it may connect ---------------------------------------------------
+# link-local is 169.254.0.0/16 and fe80::/10, which is the cloud metadata
+# service. A browser that can reach it can be told by any page it loads to
+# fetch this instance's role credentials, and that role sits underneath every
+# other control on this machine -- the rung, the deny-list, the ledger. It is
+# the one fence whose failure cannot be recovered from.
+#
+# jarvis/browser/guard.py refuses the same addresses before the request is
+# made, and refuses loopback and the private ranges as well. Loopback is not
+# denied here because the service's own API listens on it. Two layers, one in
+# code and one in the kernel, because the code layer has a gap between
+# resolving a name and connecting to it and this one does not.
+IPAddressAllow=any
+IPAddressDeny=link-local
+IPAddressDeny=multicast
+IPAddressDeny=10.0.0.0/8
+IPAddressDeny=172.16.0.0/12
+IPAddressDeny=192.168.0.0/16
+IPAddressDeny=100.64.0.0/10
+IPAddressDeny=fc00::/7
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+
+# ---- what it can see ---------------------------------------------------------
+# The agent's ledger, its memory, its key and its token. A page that owns this
+# process has owned a process that cannot read any of them.
+InaccessiblePaths=/var/lib/jarvis
+InaccessiblePaths=/etc/jarvis
+InaccessiblePaths=/run/jarvis
+InaccessiblePaths=/root
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+LockPersonality=yes
+RemoveIPC=yes
+# Chromium needs to create user namespaces even with --no-sandbox off the
+# table, and it needs a writable place for its own scratch.
+ReadWritePaths=/var/lib/jarvis-browser
+ReadWritePaths=/run/jarvis-browser
+
+[Install]
+WantedBy=multi-user.target

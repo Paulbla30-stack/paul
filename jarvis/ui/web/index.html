@@ -182,6 +182,7 @@
   <button data-tab="agent">Agent</button>
   <button data-tab="diary">Diary</button>
   <button data-tab="files">Files</button>
+  <button data-tab="browser">Browser</button>
   <button data-tab="marketing">Marketing</button><button data-tab="ledger">Ledger</button>
   <button data-tab="lab">Lab</button>
 </nav>
@@ -342,6 +343,42 @@
       <textarea id="docBody" rows="6" placeholder="The document, as markdown: # headings, - bullets, blank lines between paragraphs." style="width:100%;margin-top:6px"></textarea>
       <p id="docMsg" class="small" style="margin:6px 0 0"></p>
       <ul id="documents"></ul>
+    </div>
+  </section>
+
+  <section id="browser">
+    <div class="card">
+      <h2>Browser</h2>
+      <p class="small muted" style="margin:0 0 10px">A real browser, in its own
+      process. Type an address and it goes; click a link below and it follows.
+      The agent drives the same one, so what you see here is what it sees.
+      <b>Nothing is logged in</b> &mdash; the profile is thrown away each
+      session, so it can look things up and can never be you.</p>
+      <div style="display:flex;gap:6px;margin-bottom:8px">
+        <input id="brUrl" type="text" placeholder="address, or something to search for"
+               style="flex:1" autocapitalize="off" autocorrect="off" spellcheck="false">
+        <button onclick="brGo()">Go</button>
+        <button onclick="brShot()" title="Picture of the page">View</button>
+        <button onclick="brReset()" title="Throw the profile away">Reset</button>
+      </div>
+      <p id="brStatus" class="small muted"></p>
+    </div>
+
+    <div class="card" id="brShotCard" style="display:none">
+      <h2>The page</h2>
+      <img id="brShotImg" alt="the page as it renders"
+           style="max-width:100%;border-radius:6px;border:1px solid var(--line)">
+    </div>
+
+    <div class="card">
+      <h2 id="brTitle">Nothing open</h2>
+      <p class="small muted" id="brWhere"></p>
+      <pre id="brText" class="small" style="white-space:pre-wrap;max-height:50vh;overflow:auto;margin:0"></pre>
+    </div>
+
+    <div class="card">
+      <h2>Links on this page</h2>
+      <ul id="brLinks" class="small"></ul>
     </div>
   </section>
 
@@ -512,6 +549,7 @@
     document.body.classList.toggle("chat-open", onChat);
     if (b.dataset.tab === "diary") loadDiary();
     if (b.dataset.tab === "files") { loadUploads(); loadDocuments(); }
+    if (b.dataset.tab === "browser") loadBrowser();
     if (b.dataset.tab === "marketing") loadMarketing();
     if (b.dataset.tab === "ledger") loadLedger();
     if (b.dataset.tab === "lab") loadLab();
@@ -916,6 +954,118 @@
   async function loadUploads() { try { const list = await api("/uploads"); const ul = $("uploads"); ul.innerHTML = "";
     if (!list.length) ul.innerHTML = '<li class="muted small">No files yet.</li>';
     for (const u of list.slice().reverse()) { const li = document.createElement("li"); li.innerHTML = escapeHtml(u.name) + ' <span class="small muted">' + fmtSize(u.size) + ' · ' + fmtTime(u.uploaded_at) + (u.exists === false ? ' · missing' : '') + '</span><div class="small muted">' + escapeHtml(u.path) + '</div>'; ul.appendChild(li); } } catch (e) {} }
+
+  // ---- browser ----
+  //
+  // Paul's reason for wanting this was that moving between apps to look
+  // something up was costing him more time than the looking up. So the tab has
+  // to be usable by him and not only by the agent: an address bar he types
+  // into, links he can click, and a picture when the text is not enough.
+  //
+  // It drives the same client the agent does, deliberately. One set of fences
+  // rather than two -- the metadata service and the private ranges are refused
+  // for him as well, because those are properties of an unsandboxed browser
+  // running on this box and they do not stop being true because a person asked.
+  let brLast = null;
+
+  function brSay(msg, bad) {
+    const el = $("brStatus");
+    el.textContent = msg || "";
+    el.style.color = bad ? "var(--bad, #c33)" : "";
+  }
+
+  function brRender(page) {
+    brLast = page || null;
+    $("brTitle").textContent = (page && page.title) || (page && page.url) || "Nothing open";
+    const where = $("brWhere");
+    where.textContent = page && page.url
+      ? page.url + (page.has_password ? "  ·  this page has a password field; nothing will be typed into it" : "")
+      : "";
+    $("brText").textContent = (page && page.text) || "";
+    const list = $("brLinks"); list.innerHTML = "";
+    for (const l of (page && page.links) || []) {
+      const li = document.createElement("li");
+      const a = document.createElement("a");
+      a.href = "#";
+      a.textContent = (l.text || l.href).slice(0, 120);
+      a.title = l.href;
+      a.onclick = (e) => { e.preventDefault(); brFollow(l.ref); };
+      li.appendChild(a);
+      const tail = document.createElement("span");
+      tail.className = "muted";
+      tail.textContent = "  " + l.ref;
+      li.appendChild(tail);
+      list.appendChild(li);
+    }
+    if (page && page.truncated) {
+      const li = document.createElement("li");
+      li.className = "muted";
+      li.textContent = "(the page was longer than this; what is shown is part of it)";
+      list.appendChild(li);
+    }
+  }
+
+  async function loadBrowser() {
+    brSay("Checking...");
+    let got;
+    try { got = await api("/browse"); }
+    catch (e) { return brSay("Could not load: " + e.message, true); }
+    if (got.enabled === false) return brSay(got.why, true);
+    const h = got.health || {};
+    if (h.error) return brSay("The browser service is not answering: " + h.error, true);
+    brSay(h.up ? ("Ready · clean profile" + (h.blocked ? " · " + h.blocked + " request(s) blocked this session" : ""))
+               : ("Not started yet" + (h.reason ? " (" + h.reason + ")" : "")));
+    brRender(got.page && got.page.url ? got.page : null);
+  }
+
+  async function brPost(path, body, saying) {
+    brSay(saying);
+    try {
+      const got = await api(path, { method: "POST",
+        headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      brRender(got);
+      brSay(got.error ? got.error : (got.url || "done"), !!got.error);
+      $("brShotCard").style.display = "none";
+      return got;
+    } catch (e) {
+      // A refusal reads the same as a failure here unless it says so, and the
+      // difference is the whole point: "I may not go there" is not "it broke".
+      brSay(e.message, true);
+      return null;
+    }
+  }
+
+  window.brGo = function () {
+    const raw = $("brUrl").value.trim();
+    if (!raw) return;
+    // A word is a search, an address is an address. Searching is a URL with
+    // the query in it, which is why looking things up needs no clicking.
+    const looksLikeUrl = /^[a-z][a-z0-9+.-]*:\/\//i.test(raw)
+      || (/^[\w-]+(\.[\w-]+)+(\/|$|\?)/.test(raw) && !/\s/.test(raw));
+    const url = looksLikeUrl ? raw
+      : "https://duckduckgo.com/?q=" + encodeURIComponent(raw);
+    brPost("/browse/open", { url }, "Opening...");
+  };
+  window.brFollow = function (ref) { brPost("/browse/follow", { ref }, "Following " + ref + "..."); };
+  window.brReset = async function () {
+    await brPost("/browse/reset", {}, "Throwing the profile away...");
+    brRender(null); brSay("Reset. Nothing is logged in and nothing is remembered.");
+  };
+  window.brShot = async function () {
+    const card = $("brShotCard");
+    brSay("Taking a picture...");
+    try {
+      const r = await fetch("/browse/shot", { headers: headers({}), credentials: "same-origin" });
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      const blob = await r.blob();
+      const old = $("brShotImg").src;
+      $("brShotImg").src = URL.createObjectURL(blob);
+      if (old && old.startsWith("blob:")) URL.revokeObjectURL(old);
+      card.style.display = "";
+      brSay(brLast && brLast.url ? brLast.url : "");
+    } catch (e) { brSay("No picture: " + e.message, true); }
+  };
+
   // ---- marketing ----
   function leftIn(seconds) {
     if (seconds === null || seconds === undefined) return "no window";

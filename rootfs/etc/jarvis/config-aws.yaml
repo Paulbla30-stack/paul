@@ -353,3 +353,33 @@ marketing:
   enabled: true
   table: jarvis-scout
   region: us-west-2
+
+# The browser. A real Chromium, in its own process under its own uid, that the
+# agent drives over loopback -- Paul asked for it because moving between apps
+# to look things up was costing him more time than the looking up.
+#
+# It is a client here, never a host. The service has its own systemd unit with
+# its own MemoryMax, because on a t3.small one page can take half the machine
+# and the OOM killer does not reliably prefer the browser to the agent.
+#
+# Three fences, and the first is the one that matters:
+#
+#   * every request the browser makes -- the page's images and XHR as much as
+#     the agent's navigation -- must resolve to a public address. A browser
+#     that can reach 169.254.169.254 can be told by any page to fetch the
+#     instance role's credentials, and the role sits underneath every other
+#     control on this machine.
+#   * the profile is thrown away each session. No cookies, no logins, nothing
+#     carried over: the agent helps Paul look things up, it is never him.
+#   * reading and moving are open; clicking, typing and submitting are a
+#     CHANGE tool, so at the proposer rung they become a card he approves.
+#     It never types into a password field and never submits a form on a page
+#     that has one, at any rung.
+#
+# Turn it off by setting enabled: false; nothing else needs changing.
+browser:
+  enabled: true
+  host: 127.0.0.1
+  port: 8477
+  token_file: /run/jarvis-browser/token
+  timeout_s: 45
