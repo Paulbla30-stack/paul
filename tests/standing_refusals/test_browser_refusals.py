@@ -118,7 +118,7 @@ def test_those_two_refusals_run_before_the_browser_is_started():
     makes them true rather than merely present.
     """
     from jarvis.browser.driver import Driver
-    src = textwrap.dedent(inspect.getsource(Driver.act))
+    src = textwrap.dedent(inspect.getsource(Driver._act))
     tree = ast.parse(src)
     order = []
     for node in ast.walk(tree):
@@ -171,10 +171,14 @@ def test_following_a_link_never_dispatches_a_click():
     it fires, so clicks cannot be sorted into safe and unsafe by looking.
     """
     from jarvis.browser.driver import Driver
-    src = textwrap.dedent(inspect.getsource(Driver.follow))
+    # _follow, not follow: the public method only hands the work to the pump
+    # thread, so reading it would pass without proving anything. The body is
+    # where a click could be added.
+    src = textwrap.dedent(inspect.getsource(Driver._follow))
     called = {n.func.attr for n in ast.walk(ast.parse(src))
               if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)}
     assert "click" not in called
+    assert "_open" in called, "follow no longer navigates by address"
 
 
 def test_page_text_reaches_the_model_only_inside_the_envelope():
@@ -220,3 +224,38 @@ def test_no_browse_handler_writes_the_page_into_memory():
                   if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)}
         assert "store" not in called, name
         assert "remember" not in called, name
+
+
+def test_a_link_the_page_chose_is_checked_as_hard_as_one_the_agent_typed():
+    """The untrusted-input path, asserted separately.
+
+    follow() takes its address from the page rather than from the agent, so it
+    is the one navigation whose URL an attacker picks. A refactor that moved
+    the guard up to the public open() once left exactly this path unchecked;
+    the invariant is about where the check has to be, not about which function
+    currently holds it.
+    """
+    from jarvis.browser import guard
+    from jarvis.browser.driver import Driver
+    from jarvis.browser.page import Link, Page
+
+    for href in ("http://169.254.169.254/latest/meta-data/",
+                 "http://127.0.0.1:8471/status",
+                 "http://10.0.0.5/"):
+        driver = Driver()
+        driver._last = Page(url="https://example.com/", title="t", text="b",
+                            links=(Link("L1", "click me", href),))
+        with pytest.raises(guard.Refused):
+            driver.follow("L1")
+
+
+def test_the_browser_work_is_pinned_to_one_thread():
+    """Playwright's sync API raises from any thread but its own.
+
+    The service is threaded, so without a single pump the first navigation
+    works and the next one fails -- which reads as a flake and is not. Found
+    on the box by following a link on the first page ever loaded.
+    """
+    from jarvis.browser.driver import Driver
+    driver = Driver()
+    assert driver._pump._max_workers == 1

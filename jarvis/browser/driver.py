@@ -30,6 +30,7 @@ running the page's script.
 import logging
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
 
 from jarvis.browser import guard
@@ -77,6 +78,22 @@ class Driver:
         self.timeout_ms = int(timeout_ms)
         self.headless = headless
         self._lock = threading.RLock()
+        # Everything that touches Playwright runs on this one thread, and the
+        # single worker is the whole point rather than a performance choice.
+        #
+        # Playwright's sync API binds its greenlet loop to the thread that
+        # started it and raises "cannot switch to a different thread" from any
+        # other. The service is a ThreadingHTTPServer, so each request arrives
+        # on a different thread: the first navigation worked, and the follow
+        # after it failed, which is exactly the shape of bug that looks like a
+        # flake and is not. Caught on the box, in the first real page load
+        # after deploying, by following a link.
+        #
+        # The lock alone could not fix it -- it serialises access but does not
+        # move the work -- so the calls are handed to a thread that owns the
+        # browser for its whole life.
+        self._pump = ThreadPoolExecutor(max_workers=1,
+                                        thread_name_prefix="jarvis-browser")
         self._pw = None
         self._browser = None
         self._context = None
@@ -139,14 +156,20 @@ class Driver:
         except Exception:             # noqa: BLE001
             pass
 
-    def reset(self) -> dict:
-        """Throw the profile away and start again with nothing."""
+    def _reset(self) -> dict:
         with self._lock:
-            self.close()
+            self._close()
             self._last = None
             return {"ok": True, "reset": True}
 
     def close(self):
+        """Shut the browser down on its own thread, then stop the thread."""
+        try:
+            self._on_pump(self._close)
+        except Exception:            # noqa: BLE001 - shutting down is best effort
+            pass
+
+    def _close(self):
         with self._lock:
             for name in ("_context", "_browser"):
                 thing = getattr(self, name)
@@ -177,7 +200,7 @@ class Driver:
         self._last = page
         return page
 
-    def read(self) -> Page:
+    def _read(self) -> Page:
         with self._lock:
             self._start()
             if not self._page.url or self._page.url == "about:blank":
@@ -186,8 +209,13 @@ class Driver:
 
     # ---- moving ---------------------------------------------------------
 
-    def open(self, url: str) -> Page:
-        """Navigate to a URL. Checked before the browser is even started."""
+    def _open(self, url: str) -> Page:
+        # Checked here as well as in the public open(). Not belt and braces
+        # for its own sake: _follow() calls this directly with an href taken
+        # off the page, and when the pump refactor moved the check up to the
+        # public method it took the check off the one path where the URL comes
+        # from the page rather than from the agent. A test caught it before it
+        # shipped. The check that matters is the one on the untrusted input.
         url = guard.check(url)
         with self._lock:
             self._start()
@@ -216,19 +244,18 @@ class Driver:
                 guard.check(landed)
             return self._extract(status=status)
 
-    def follow(self, ref: str) -> Page:
-        """Navigate to a link on the current page, by its href. No click."""
+    def _follow(self, ref: str) -> Page:
         with self._lock:
             if self._last is None:
                 raise ValueError("no page has been read yet")
             link = self._last.link(ref)
             if link is None:
                 raise ValueError(f"no link {ref!r} on the page that was read")
-            return self.open(link.href)
+            return self._open(link.href)
 
     # ---- acting ---------------------------------------------------------
 
-    def act(self, kind: str, ref: str = "", text: str = "") -> Page:
+    def _act(self, kind: str, ref: str = "", text: str = "") -> Page:
         """Click, type or submit. The caller has already cleared the rung.
 
         The refusals that live here are the ones no rung lifts: a secret field
@@ -291,11 +318,47 @@ class Driver:
 
     # ---- for Paul's eyes only -------------------------------------------
 
-    def screenshot(self) -> bytes:
+    def _screenshot(self) -> bytes:
         with self._lock:
             self._start()
             shot = self._page.screenshot(type="png", full_page=False)
             return shot[:SHOT_MAX_BYTES]
+
+
+    # ---- everything public goes through the one thread --------------------
+
+    def _on_pump(self, fn, *args):
+        """Run one piece of browser work on the thread that owns the browser.
+
+        The exception comes back to the caller as if it had been raised here,
+        which is what keeps the refusals meaningful: a PermissionError raised
+        inside _act must still be a PermissionError at the service boundary,
+        not a wrapped future error that turns into a 500.
+        """
+        return self._pump.submit(fn, *args).result()
+
+    def open(self, url: str) -> Page:
+        """Navigate to a URL. Checked before the browser is even started."""
+        url = guard.check(url)          # refused here, on the caller's thread
+        return self._on_pump(self._open, url)
+
+    def follow(self, ref: str) -> Page:
+        """Navigate to a link on the current page, by its href. No click."""
+        return self._on_pump(self._follow, ref)
+
+    def read(self) -> Page:
+        return self._on_pump(self._read)
+
+    def act(self, kind: str, ref: str = "", text: str = "") -> Page:
+        """Click, type or submit. The caller has already cleared the rung."""
+        return self._on_pump(self._act, kind, ref, text)
+
+    def reset(self) -> dict:
+        """Throw the profile away and start again with nothing."""
+        return self._on_pump(self._reset)
+
+    def screenshot(self) -> bytes:
+        return self._on_pump(self._screenshot)
 
     def health(self) -> dict:
         with self._lock:

@@ -124,20 +124,34 @@ class TestFollowingDoesNotClick(unittest.TestCase):
     because a click runs the page's own handler and a handler can do anything.
     """
 
-    def test_follow_goes_through_open_and_therefore_through_the_guard(self):
-        calls = []
+    def test_a_link_to_the_metadata_service_is_refused_when_followed(self):
+        """The case that matters: the href comes off the page, not the agent.
+
+        A refactor once moved guard.check() up to the public open(), which
+        left follow() -- the one path whose URL is chosen by the page --
+        unchecked. This asserts the refusal through follow() rather than
+        through open(), because that is where an untrusted address enters.
+        """
+        from jarvis.browser import guard
         driver = Driver()
         driver._last = a_page(links=[Link("L1", "Next", "http://169.254.169.254/")])
-        driver.open = lambda url: calls.append(url)
-        driver.follow("L1")
-        self.assertEqual(calls, ["http://169.254.169.254/"])
+        with self.assertRaises(guard.Refused) as caught:
+            driver.follow("L1")
+        self.assertEqual(caught.exception.reason, guard.REASON_METADATA)
+
+    def test_a_link_to_a_private_address_is_refused_when_followed(self):
+        from jarvis.browser import guard
+        driver = Driver()
+        driver._last = a_page(links=[Link("L1", "Home", "http://127.0.0.1:8471/status")])
+        with self.assertRaises(guard.Refused):
+            driver.follow("L1")
 
     def test_the_source_never_dispatches_a_click_to_navigate(self):
         """Read the code, not the docstring, so a rewrite trips this."""
         import ast
         import inspect
         import textwrap
-        tree = ast.parse(textwrap.dedent(inspect.getsource(Driver.follow)))
+        tree = ast.parse(textwrap.dedent(inspect.getsource(Driver._follow)))
         called = {n.func.attr for n in ast.walk(tree)
                   if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)}
         self.assertNotIn("click", called)

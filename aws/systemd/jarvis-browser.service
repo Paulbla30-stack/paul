@@ -28,7 +28,13 @@ StateDirectoryMode=0700
 # reboot. Root -- which is what the agent runs as -- can read it; nothing else
 # on the box can.
 ExecStartPre=/bin/sh -c 'umask 077; head -c 32 /dev/urandom | od -An -tx1 | tr -d " \\n" > /run/jarvis-browser/token'
-ExecStart=/usr/bin/env python3 -m jarvis.browser.service --host 127.0.0.1 --port 8477
+# Pinned, not `env python3`. On this AMI /usr/bin/python3 is 3.9 and the agent
+# runs on 3.11; a browser service on a different interpreter from the agent is
+# a second set of installed packages to keep in step, and the first symptom
+# would be an import error at boot rather than anything that reads as a
+# version problem. /etc/default/jarvis-browser can override it.
+Environment=JARVIS_BROWSER_PYTHON=/usr/bin/python3.11
+ExecStart=/bin/sh -c 'exec "$JARVIS_BROWSER_PYTHON" -m jarvis.browser.service --host 127.0.0.1 --port 8477'
 Restart=always
 RestartSec=5
 KillSignal=SIGTERM
