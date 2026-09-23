@@ -24,6 +24,15 @@ then summarising that, is how a memory becomes a confident fiction with no
 provenance left -- the model's own drift, compounding, with nothing to check it
 against. Depth is capped at one. Consolidation only ever reads originals.
 
+**What the agent said is not evidence that it is so.** An exchange row records
+what was answered at the time; it is the agent quoting itself. Three consistent
+answers to similar questions are one observer repeating itself, not a fact
+confirmed three times, and promotion would hand that back to the model as
+standing -- the hardening the agent itself warned about, arriving through
+consolidation instead of through the prompt. Exchange rows are read, decayed
+and pruned like anything else, and are never promoted, never merged, and never
+count towards the confirmation of another row.
+
 What a pass does, in order:
 
   decay      weaken what has not been used; pinned entries do not fade
@@ -55,6 +64,13 @@ MEASUREMENT = re.compile(
     r"^(?P<subject>.{3,80}?)\s+(?:is|was|at)\s+(?P<value>-?\d+(?:\.\d+)?)\s*"
     r"(?P<unit>%|(?:percent|gb|mb|kb|gib|mib|kib|°c|c|ms|s)\b)?",
     re.IGNORECASE)
+
+# Kinds consolidation may read but must never act on. An exchange is the
+# agent's own past answer; treating it as an observation makes the store agree
+# with itself. See the third rule above. Held as a set rather than a check in
+# one place because promotion, merging and superseding each have to honour it,
+# and a rule enforced in two of three places is not a rule.
+NOT_EVIDENCE = frozenset({"exchange"})
 
 DEFAULT_MIN_GROUP = 3        # observations before a merge is worth writing
 DEFAULT_PROMOTE_AT = 5       # confirmations before something becomes standing
@@ -105,6 +121,11 @@ def measurement_of(text: str):
     if not subject:
         return None
     return subject, float(m.group("value")), (m.group("unit") or "").lower()
+
+
+def is_evidence(row) -> bool:
+    """Whether a row may act on the store, rather than merely sit in it."""
+    return (row.get("kind") or "note") not in NOT_EVIDENCE
 
 
 class Consolidator:
@@ -171,7 +192,7 @@ class Consolidator:
         """
         by_subject: dict = {}
         for row in rows:
-            if row.get("pinned"):
+            if row.get("pinned") or not is_evidence(row):
                 continue
             parsed = measurement_of(row["text"])
             if parsed:
@@ -207,7 +228,7 @@ class Consolidator:
         five times in its own context window.
         """
         groups, used = [], set()
-        candidates = [r for r in rows if not r.get("pinned")]
+        candidates = [r for r in rows if not r.get("pinned") and is_evidence(r)]
         for i, row in enumerate(candidates):
             if row["id"] in used:
                 continue
@@ -272,6 +293,8 @@ class Consolidator:
         out = []
         for row in rows:
             if row.get("pinned") or row.get("derived"):
+                continue
+            if not is_evidence(row):
                 continue
             if int(row.get("seen") or 0) + int(row.get("used") or 0) < self.promote_at:
                 continue

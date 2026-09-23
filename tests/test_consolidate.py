@@ -270,3 +270,87 @@ class TestTheRecord(Base):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestWhatTheAgentSaidIsNotEvidence(Base):
+    """An exchange row is the agent quoting itself.
+
+    The conversation memory added on 23 September records what was answered at
+    the time. A reviewer caught the consequence the same day: consolidation
+    ends in promote, and a row confirmed often enough becomes standing fact. So
+    three consistent answers to similar questions would have hardened the
+    agent's own past position into something the model is handed as given --
+    the exact failure the agent warned about when asked, arriving through the
+    memory pass rather than through the prompt.
+
+    Exclusion is from acting, not from existing. The rows stay live, readable
+    and subject to decay and prune like anything else.
+    """
+
+    def _age(self, memory_id, seconds):
+        self.store._db.execute("UPDATE memories SET first_ts = ts - ? WHERE id = ?",
+                               (float(seconds), memory_id))
+        self.store._db.commit()
+
+    def _said(self, text, times=6, age_s=3 * 86400):
+        entry = self.store.remember(text, kind="exchange", source="operator")
+        for _ in range(times - 1):
+            self.store.remember(text, kind="exchange", source="operator")
+        self._age(entry["id"], age_s)
+        return entry
+
+    def test_a_repeated_answer_never_becomes_standing_fact(self):
+        self._said("23 Sep: spoke with Paul. They asked: \"have we spoken?\" "
+                   "What I said at the time, which may since be wrong: \"no\"")
+        report = self.consolidator().run()
+        self.assertEqual(report["promoted"], [])
+        row = self.store.recent(5, kind="exchange")[0]
+        self.assertFalse(row["pinned"])
+
+    def test_the_same_shape_of_row_is_promoted_when_it_is_an_observation(self):
+        # The control. Without this the test above passes for the wrong reason
+        # -- a promotion path that never fires proves nothing about exchanges.
+        entry = self.store.remember("the planner is an imported Qwen3-32B on Bedrock")
+        for _ in range(5):
+            self.store.remember("the planner is an imported Qwen3-32B on Bedrock")
+        self._age(entry["id"], 3 * 86400)
+        self.assertEqual(len(self.consolidator().run()["promoted"]), 1)
+
+    def test_answers_are_not_merged_into_one_derived_memory(self):
+        # A merge writes a new row that cites its sources and reads as a
+        # finding. Summarising three of the agent's own replies would produce
+        # one confident sentence with the hedging gone.
+        for n in range(3):
+            self.store.remember(
+                f"spoke with Paul about the ledger and what it records, note {n}",
+                kind="exchange", source="operator")
+        report = self.consolidator().run()
+        self.assertEqual(report["merged"], [])
+
+    def test_an_answer_cannot_make_up_the_numbers_for_a_real_merge(self):
+        # This is the "counting as confirmation for any other row" half. Two
+        # observations are below the threshold; the agent having said the same
+        # thing must not carry them over it.
+        self.store.remember("the tunnel to the instance is up and serving the UI")
+        self.store.remember("the tunnel to the instance is up and serving traffic")
+        self.store.remember("the tunnel to the instance is up and serving pages",
+                            kind="exchange", source="operator")
+        self.assertEqual(self.consolidator().run()["merged"], [])
+
+    def test_a_quoted_measurement_does_not_retire_a_real_reading(self):
+        real = self.store.remember("the root filesystem is 20 GB")
+        time.sleep(0.01)
+        self.store.remember("the root filesystem is 8 GB, or so I said at the time",
+                            kind="exchange", source="operator")
+        report = self.consolidator().run()
+        self.assertEqual(report["superseded"], [])
+        row = self.store._query("SELECT * FROM memories WHERE id = ?", (real["id"],))[0]
+        self.assertEqual(row["state"], "live")
+
+    def test_the_rows_are_still_there_afterwards(self):
+        self._said("23 Sep: spoke with Paul. They asked: \"are you awake?\" "
+                   "What I said at the time, which may since be wrong: \"yes\"")
+        before = self.store.stats()["entries"]
+        self.consolidator().run()
+        self.assertEqual(self.store.stats()["entries"], before)
+        self.assertTrue(self.store.recent(5, kind="exchange"))
