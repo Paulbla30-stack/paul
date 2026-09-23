@@ -109,8 +109,18 @@ STATES = ("live", "dormant", "superseded")
 # "hunch" is something it thinks is wrong while the readings say otherwise,
 # filed with a number and a test so it can be scored later; "probe" is a run
 # of the standing question set against the character the dials specify.
+# "exchange" is what the agent said; "told" is what the operator said to it.
+# They arrive in the same conversation and they are not the same claim. The
+# agent's own answer is a position it took and must never harden into fact by
+# repetition. What the operator states is a fact about the world the agent
+# often cannot yet see -- "I moved the file to X" -- and barring it forever
+# from becoming standing would mean the person cannot teach the agent anything
+# it has not already measured for itself. So: separate kind, and a told row is
+# promoted only when an instrument agrees with it, never by being restated.
+# The agent asked for this distinction when consulted, 23 September 2026.
 KINDS = ("note", "fact", "upload", "goal", "operator", "proposal", "verdict",
-         "commitment", "appointment", "vital", "hunch", "probe", "exchange")
+         "commitment", "appointment", "vital", "hunch", "probe", "exchange",
+         "told")
 SOURCES = ("brain", "operator", "system", "review", "machine")
 
 DEFAULT_PATH = "/var/lib/jarvis/memory.db"
@@ -158,6 +168,12 @@ class NullStore:
 
     def set_state(self, memory_id: int, state: str) -> bool:
         return False
+
+    def pin(self, memory_id: int) -> bool:
+        return False
+
+    def note_meta(self, memory_id: int, **fields):
+        return None
 
     def remember_derived(self, text, sources, kind="fact", weight=2.0, pinned=False):
         return None
@@ -377,6 +393,50 @@ class MemoryStore:
         except Exception as exc:
             self.log.warning("Could not decay memories: %s", exc)
             return 0
+
+    def pin(self, memory_id: int) -> bool:
+        """Mark a memory as standing fact. Pinning is never undone here."""
+        if self._db is None:
+            return False
+        try:
+            with self._lock:
+                cur = self._db.execute(
+                    "UPDATE memories SET pinned = 1 WHERE id = ?", (int(memory_id),))
+                self._db.commit()
+                return cur.rowcount > 0
+        except Exception as exc:
+            self.log.warning("Could not pin memory %s: %s", memory_id, exc)
+            return False
+
+    def note_meta(self, memory_id: int, **fields) -> Optional[dict]:
+        """Merge fields into a row's meta, returning the new meta.
+
+        Read-modify-write under the store's own lock, because two callers
+        merging different keys must not each write the version they read.
+        """
+        if self._db is None or not fields:
+            return None
+        try:
+            with self._lock:
+                row = self._db.execute("SELECT meta FROM memories WHERE id = ?",
+                                       (int(memory_id),)).fetchone()
+                if row is None:
+                    return None
+                try:
+                    meta = json.loads(row["meta"]) if row["meta"] else {}
+                except (TypeError, ValueError):
+                    meta = {}
+                if not isinstance(meta, dict):
+                    meta = {}
+                meta.update(fields)
+                blob = json.dumps(meta)[:2000]
+                self._db.execute("UPDATE memories SET meta = ? WHERE id = ?",
+                                 (blob, int(memory_id)))
+                self._db.commit()
+                return meta
+        except Exception as exc:
+            self.log.warning("Could not update memory meta %s: %s", memory_id, exc)
+            return None
 
     def set_state(self, memory_id: int, state: str) -> bool:
         """Retire a memory without destroying it.

@@ -70,7 +70,21 @@ MEASUREMENT = re.compile(
 # with itself. See the third rule above. Held as a set rather than a check in
 # one place because promotion, merging and superseding each have to honour it,
 # and a rule enforced in two of three places is not a rule.
-NOT_EVIDENCE = frozenset({"exchange"})
+NOT_EVIDENCE = frozenset({"exchange", "told"})
+
+# What the operator stated. Barred from promotion by repetition like an
+# exchange -- restating a thing is not evidence, whoever restates it -- but
+# unlike an exchange it has a way to become standing: an instrument agreeing
+# with it. The agent asked for the distinction when it was consulted on
+# conversation memory, and it was right: without one, the person cannot teach
+# it anything it has not already measured, which is most of what a person
+# knows and the machine does not.
+TOLD = "told"
+# Confirmations, spread over the same span promotion already requires. Two
+# readings rather than one, because a single reading is a moment and the claim
+# "standing fact" is about more than a moment. They are measurements, not
+# repetitions: the operator saying it twice adds nothing.
+CONFIRMATIONS_TO_STAND = 2
 
 DEFAULT_MIN_GROUP = 3        # observations before a merge is worth writing
 DEFAULT_PROMOTE_AT = 5       # confirmations before something becomes standing
@@ -154,7 +168,7 @@ class Consolidator:
         """Decay, supersede, merge, promote. Returns what changed."""
         report = {"ran_at": self.clock(), "dry_run": bool(dry_run),
                   "decayed": 0, "superseded": [], "merged": [], "promoted": [],
-                  "scanned": 0, "skipped": None}
+                  "confirmed": [], "scanned": 0, "skipped": None}
         if not self.enabled:
             report["skipped"] = "consolidation disabled"
             return report
@@ -173,6 +187,7 @@ class Consolidator:
             report["merged"] = self._merge([r for r in rows if r["id"] not in done],
                                            dry_run)
             report["promoted"] = self._promote(rows, dry_run)
+            report["confirmed"] = self._confirm(rows, dry_run)
         except Exception as exc:                       # never fatal
             self.log.warning("Consolidation pass failed: %s", exc)
             report["skipped"] = f"{type(exc).__name__}: {exc}"
@@ -306,16 +321,75 @@ class Consolidator:
                 continue
             if not dry_run:
                 self.store.reinforce([row["id"]], amount=1.0)
-                try:
-                    with self.store._lock:                  # noqa: SLF001
-                        self.store._db.execute(             # noqa: SLF001
-                            "UPDATE memories SET pinned = 1 WHERE id = ?", (row["id"],))
-                        self.store._db.commit()             # noqa: SLF001
-                except Exception as exc:
-                    self.log.warning("Could not promote memory %s: %s", row["id"], exc)
+                if not self.store.pin(row["id"]):
                     continue
             out.append({"id": row["id"], "text": row["text"][:120],
                         "seen": row.get("seen"), "used": row.get("used")})
+        return out
+
+    # ---- what the operator said, checked ---------------------------------
+
+    def _confirm(self, rows, dry_run: bool) -> list:
+        """A told memory becomes standing when an instrument agrees with it.
+
+        Never by being restated. Repeated confirmation by the same observer is
+        not independent evidence, and the operator is one observer however many
+        times he says it -- which is the same rule that keeps the agent's own
+        answers out of promotion, applied to the other side of the
+        conversation.
+
+        The instrument here is environment.py, the module that reads the disk.
+        A told memory that names paths, all of which are there, has been agreed
+        with by a measurement. A told memory that names nothing checkable can
+        never be promoted, and that is stated rather than worked around: the
+        alternative is a rule that promotes on a similarity score, which is the
+        model's judgement wearing an instrument's clothes.
+
+        Two agreements, spread over the same span promotion already requires,
+        because one reading is a moment.
+
+        Asked whether this was too narrow, the agent answered that it is the
+        boundary rather than a flaw, and asked for it to be said plainly, so:
+        **this agent cannot confirm unverifiable human input, ever.** "The
+        spare charger is in the hall cupboard" has no instrument on this box
+        and will never become standing fact for it. Most of what a person
+        knows is like that. The alternative is not a better rule, it is a
+        worse one wearing an instrument's clothes.
+        """
+        try:
+            from jarvis.agent import environment
+        except Exception as exc:
+            self.log.debug("No environment module to confirm against: %s", exc)
+            return []
+        now = self.clock()
+        out = []
+        for row in rows:
+            if (row.get("kind") or "") != TOLD or row.get("pinned"):
+                continue
+            try:
+                result = environment.verify(row.get("text") or "")
+            except Exception:
+                continue
+            # Every path it named has to be there. One missing path is the
+            # claim being wrong about something, not partially right.
+            if not result.get("present"):
+                continue
+            if result.get("missing") or result.get("unknown"):
+                continue
+            meta = row.get("meta") if isinstance(row.get("meta"), dict) else {}
+            seen = [float(t) for t in (meta.get("confirmed_at") or [])
+                    if isinstance(t, (int, float))]
+            if seen and (now - seen[-1]) < self.promote_span_s:
+                continue                      # the same moment, read twice
+            seen = (seen + [now])[-8:]
+            entry = {"id": row["id"], "text": row["text"][:120],
+                     "paths": result["present"][:5], "confirmations": len(seen)}
+            if not dry_run:
+                self.store.note_meta(row["id"], confirmed_at=seen)
+                if len(seen) >= CONFIRMATIONS_TO_STAND:
+                    self.store.reinforce([row["id"]], amount=1.0)
+                    entry["promoted"] = bool(self.store.pin(row["id"]))
+            out.append(entry)
         return out
 
     # ---- the record -----------------------------------------------------
@@ -324,7 +398,8 @@ class Consolidator:
         """How the memory got its shape is itself worth being able to audit."""
         if self.ledger is None or report.get("dry_run"):
             return
-        if not (report["merged"] or report["superseded"] or report["promoted"]):
+        if not (report["merged"] or report["superseded"] or report["promoted"]
+                or report["confirmed"]):
             return                                   # a quiet pass is not an event
         try:
             self.ledger.record("consolidation", {
@@ -334,6 +409,9 @@ class Consolidator:
                 "superseded": [{"subject": s["subject"], "current": s["current"],
                                 "retired": s["retired"]} for s in report["superseded"]],
                 "promoted": [p["id"] for p in report["promoted"]],
+                "confirmed": [{"id": c["id"], "confirmations": c["confirmations"],
+                               "promoted": bool(c.get("promoted"))}
+                              for c in report["confirmed"]],
             })
         except Exception as exc:
             self.log.warning("Could not record consolidation: %s", exc)

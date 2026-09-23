@@ -84,12 +84,21 @@ fi
 # so when it is missing rather than returning an empty document, so this is
 # an improvement rather than a requirement -- but an unread bill is a useless
 # assistant, so it goes in the image.
-log "Installing the anthropic SDK, boto3 and the PDF reader"
-$PY -m pip install --no-cache-dir --upgrade "anthropic>=1.6" "boto3>=1.34" "cryptography>=42" "pypdf>=4.0" \
-    || $PY -m pip install --no-cache-dir --upgrade --break-system-packages "anthropic>=1.6" "boto3>=1.34" "cryptography>=42" "pypdf>=4.0"
+# pytest is not a development dependency here. The standing refusals are the
+# boot gate: the unit runs them before the agent starts and the agent does not
+# start if one fails. That makes the test runner part of the running system,
+# and an image that cannot run its own refusals is an image whose refusals are
+# a claim again.
+log "Installing the anthropic SDK, boto3, the PDF reader and pytest"
+$PY -m pip install --no-cache-dir --upgrade "anthropic>=1.6" "boto3>=1.34" "cryptography>=42" "pypdf>=4.0" "pytest>=7.0" \
+    || $PY -m pip install --no-cache-dir --upgrade --break-system-packages "anthropic>=1.6" "boto3>=1.34" "cryptography>=42" "pypdf>=4.0" "pytest>=7.0"
 $PY -c 'import anthropic, boto3, cryptography; print("[provision] anthropic", anthropic.__version__, "boto3", boto3.__version__, "cryptography", cryptography.__version__)'
 $PY -c 'import pypdf; print("[provision] pypdf", pypdf.__version__)' \
     || log "WARNING: pypdf missing; PDFs will be reported as unreadable rather than read"
+# Not a warning. Without pytest the boot gate cannot run, and a gate that
+# cannot run has to stop the build rather than the box.
+$PY -c 'import pytest; print("[provision] pytest", pytest.__version__)' \
+    || { echo "[provision] pytest missing; the boot gate could not run" >&2; exit 1; }
 command -v aws >/dev/null 2>&1 && log "aws cli: $(aws --version 2>&1 | head -1)" \
     || log "WARNING: aws cli missing; llm.api_key_ssm_parameter will not work"
 
@@ -104,6 +113,11 @@ log "Installing Jarvis to $PREFIX"
 rm -rf "$PREFIX"
 mkdir -p "$PREFIX"
 cp -r "$SRC/jarvis" "$PREFIX/jarvis"
+cp -r "$SRC/ledgerd" "$PREFIX/ledgerd"
+# The refusals ship with the code they are about. They are not a suite that
+# lives in a repository and describes the box; they are what the box runs on
+# itself before it starts.
+cp -r "$SRC/tests/standing_refusals" "$PREFIX/refusals"
 find "$PREFIX" -name '__pycache__' -type d -prune -exec rm -rf {} +
 $PY -m compileall -q "$PREFIX/jarvis" || true
 chown -R root:root "$PREFIX"
@@ -125,6 +139,7 @@ YAML
 log "Installing launcher and systemd units"
 install -m 0755 "$SRC/rootfs/usr/local/bin/jarvis" /usr/local/bin/jarvis
 install -m 0755 "$SRC/rootfs/usr/local/bin/jarvis-health" /usr/local/bin/jarvis-health
+install -m 0755 "$SRC/rootfs/usr/local/bin/jarvis-refusals" /usr/local/bin/jarvis-refusals
 install -m 0644 "$SRC/aws/systemd/jarvis-bootstrap.service" /etc/systemd/system/
 install -m 0644 "$SRC/aws/systemd/jarvis.service" /etc/systemd/system/
 install -m 0644 "$SRC/aws/systemd/jarvis-health.service" /etc/systemd/system/
@@ -208,5 +223,13 @@ PYTHONPATH="$PREFIX" $PY -m jarvis.main \
     || { cat /tmp/jarvis-selftest.log; echo "[provision] self-test failed" >&2; exit 1; }
 $PY -c 'import json,sys; d=json.load(open("/tmp/jarvis-selftest.json")); sys.exit(0 if d["cycle_count"]==3 else 1)'
 rm -f /tmp/jarvis-selftest.json /tmp/jarvis-selftest.log
+
+# The gate the unit will run on every boot, run once here. An image that
+# cannot pass its own standing refusals must not become an image: the
+# alternative is an instance that boots into a failing gate and stops, and
+# the first anyone hears of it is an agent that is not there.
+log "Running the standing refusals (the boot gate the unit runs)"
+/usr/local/bin/jarvis-refusals \
+    || { echo "[provision] the standing refusals do not hold; no image" >&2; exit 1; }
 
 log "Done. Jarvis $JARVIS_VERSION installed; agent starts on first boot."

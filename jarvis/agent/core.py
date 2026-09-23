@@ -1023,6 +1023,35 @@ class AgentCore:
             out["result"] = result
         return out
 
+    TOLD_CHARS = 400
+
+    def told(self, text: str, by: str = "operator") -> Optional[dict]:
+        """Record something the operator stated as so.
+
+        Separate from an exchange, which is what the agent said. An exchange
+        can never become standing fact, because an agent agreeing with itself
+        is one observer; a told memory can, but only when an instrument agrees
+        with it, never by being restated. See consolidate._confirm.
+
+        Deliberately an explicit act rather than something inferred from the
+        conversation. Deciding which sentences in a chat were assertions is a
+        judgement, and a judgement made by the model about what it was told is
+        the model deciding what it may later treat as fact.
+        """
+        text = " ".join(str(text or "").split())[:self.TOLD_CHARS]
+        if not text:
+            return None
+        who = " ".join(str(by or "").split())[:80] or "operator"
+        entry = self.remember(f"{who} told me: {text}", kind="told", source="operator")
+        try:
+            self.ledger.record("action", {
+                "cycle": self.cycle_count, "actor": "operator", "action": "told",
+                "by": who, "text": text[:300],
+                "stored": bool(entry)})
+        except Exception:
+            pass
+        return entry
+
     def _what_produced_this(self) -> dict:
         """The brain behind the current entry, for the ledger's stamp.
 

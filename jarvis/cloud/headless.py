@@ -20,6 +20,9 @@ Endpoints (default 127.0.0.1:8471):
     POST /chat     -> JSON {"messages": [{role, content}, ...], "from": "..."};
                       multi-turn answer. "from" is optional and names the
                       correspondent in the agent's memory of the exchange.
+    POST /told     -> {text, by} -> the operator states a fact the agent cannot
+                      yet see. Kept apart from what the agent itself said, and
+                      promoted to standing only when a reading agrees with it.
     POST /upload   -> raw file body with X-Filename; saved under the upload dir
     GET  /uploads  -> files the agent has been given
     GET  /ui       -> the web UI (chat, agent panel, uploads)   (no token; the
@@ -567,6 +570,25 @@ class HeadlessRunner:
                                                    asked_by=asked_by)
                     runner.wake()
                     self._send(200, {"answer": answer, "dials": settings is not None})
+                elif path == "/told":
+                    # Something the operator states as so. Not inferred from a
+                    # chat turn: which sentences were assertions is a judgement,
+                    # and letting the model make it is the model choosing what
+                    # it may later treat as fact.
+                    try:
+                        payload = json.loads(body or "{}")
+                    except ValueError:
+                        return self._send(400, {"error": "body must be JSON"})
+                    if not isinstance(payload, dict):
+                        return self._send(400, {"error": "JSON object required"})
+                    with runner._lock:
+                        runner.agent.note_operator("told")
+                        entry = runner.agent.told(str(payload.get("text") or ""),
+                                                  str(payload.get("by") or "operator"))
+                    if entry is None:
+                        return self._send(400, {"error": "nothing to remember"})
+                    runner.wake()
+                    self._send(200, {"stored": True, "text": entry.get("text")})
                 elif path in ("/operator/add", "/operator/forget"):
                     try:
                         payload = json.loads(body or "{}")
