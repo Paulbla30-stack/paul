@@ -181,6 +181,11 @@ class AgentCore:
         # Where documents it writes are put. From config at boot and never
         # from a task, because a caller that can choose the directory can
         # choose any directory.
+        # The scout's proposals, read-only. The first coupling between the
+        # agent and the scout, which until now shared no code, no IAM and no
+        # visibility. One direction, and off unless configured.
+        from jarvis.agent import marketing as _marketing
+        self.marketing = _marketing.build_view(config, self.log)
         from jarvis.agent import compose as _compose
         docs = config.get("documents")
         docs = docs if isinstance(docs, dict) else {}

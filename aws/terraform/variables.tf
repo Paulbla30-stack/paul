@@ -198,3 +198,12 @@ variable "memory_backup_keep_days" {
   type        = number
   default     = 90
 }
+
+# The scout's DynamoDB table, for the Marketing tab's read-only view. Empty
+# disables the grant entirely, which is the right default for an instance
+# that has nothing to do with the scout.
+variable "scout_table" {
+  description = "DynamoDB table the agent may READ the scout's proposals from"
+  type        = string
+  default     = "jarvis-scout"
+}

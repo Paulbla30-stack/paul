@@ -203,6 +203,30 @@ resource "aws_iam_role_policy" "estate" {
   })
 }
 
+# The scout's proposals, for the Marketing tab. READ ONLY, and the read-only
+# part is here rather than in the code: Query and GetItem, no PutItem, no
+# UpdateItem, no DeleteItem. The agent shows Paul what the scout drafted; the
+# approve app, with the signing secret, is the only thing that can move a
+# proposal to sent.
+resource "aws_iam_role_policy" "scout_read" {
+  count = var.scout_table == "" ? 0 : 1
+  name  = "jarvis-scout-read"
+  role  = aws_iam_role.jarvis.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect = "Allow"
+      Action = [
+        "dynamodb:GetItem",
+        "dynamodb:Query",
+        "dynamodb:Scan",
+        "dynamodb:DescribeTable",
+      ]
+      Resource = "arn:aws:dynamodb:${var.region}:${data.aws_caller_identity.current.account_id}:table/${var.scout_table}"
+    }]
+  })
+}
+
 # Bedrock: let the instance role invoke catalog models, inference profiles
 # and imported models. Scope var.bedrock_model_arns down once you know the
 # exact model or imported-model ARN.

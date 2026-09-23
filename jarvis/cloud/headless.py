@@ -20,6 +20,10 @@ Endpoints (default 127.0.0.1:8471):
     POST /chat     -> JSON {"messages": [{role, content}, ...], "from": "..."};
                       multi-turn answer. "from" is optional and names the
                       correspondent in the agent's memory of the exchange.
+    GET  /marketing        -> the scout's drafts: pending (soonest to lapse
+                              first), recently decided, and counts. Read-only;
+                              approving is done on the emailed link, which is
+                              the only thing holding the signing secret.
     GET  /documents        -> documents the agent has written, newest first
     GET  /documents/<name> -> download one, as an attachment
     POST /compose  -> {content, title, format, name} -> write one. content is
@@ -399,6 +403,14 @@ class HeadlessRunner:
                     return
                 if path == "/uploads":
                     return self._send(200, runner.list_uploads())
+                if path == "/marketing":
+                    view = getattr(runner.agent, "marketing", None)
+                    if view is None:
+                        return self._send(200, {
+                            "enabled": False,
+                            "why": ("marketing.enabled is not set in config; "
+                                    "the agent is not reading the scout")})
+                    return self._send(200, dict(view.state(), enabled=True))
                 if path == "/documents":
                     from jarvis.agent import compose as _compose
                     return self._send(200, {

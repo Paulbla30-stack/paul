@@ -82,12 +82,6 @@ cloud:
     tls_dir: /etc/jarvis/tls
     upload_dir: /var/lib/jarvis/uploads
     max_upload_mb: 50
-
-# Where documents the agent writes are put. One directory, fixed here rather
-# than chosen per request: the format decides the extension and the name is
-# scrubbed to a basename, so nothing the model writes can land anywhere else.
-documents:
-  dir: /var/lib/jarvis/documents
   # The one way the agent can reach the operator when nobody is looking at
   # the UI. Without it, everything it works out stays inside the box.
   #
@@ -327,3 +321,35 @@ llm:
     cwd: /
     deny_patterns: null      # extra patterns, ADDED to the built-in list (which never shrinks)
     allow_package_install: false   # true = let the planner run dnf/apt/pip install
+
+# ---------------------------------------------------------------------------
+# Top-level sections. They sit at column 0 and they go LAST, deliberately.
+#
+# A column-0 key placed in the middle of this file ends the mapping it lands
+# in and adopts everything indented below it. That happened on 22 September:
+# a `documents:` block inserted just after cloud.ui quietly moved
+# cloud.estate, cloud.notify, cloud.memory_backup and cloud.document_ocr
+# underneath it. Nothing raised, because nothing validates this file's shape
+# at load time -- they would simply have been absent, and notify is the one
+# way the agent can reach Paul when nobody is looking at the UI.
+#
+# Anything new at column 0 belongs here, under this line, and nowhere else.
+
+# Where documents the agent writes are put. One directory, fixed here rather
+# than chosen per request: the format decides the extension and the name is
+# scrubbed to a basename, so nothing the model writes can land anywhere else.
+documents:
+  dir: /var/lib/jarvis/documents
+
+# The scout's drafts, shown in the Marketing tab. Read-only: the instance
+# gets dynamodb:Query and GetItem on the scout's table and nothing else, and
+# approving is done on the signed link in the digest email, which is the only
+# thing holding the signing secret.
+#
+# The first coupling between the agent and the scout, which until now shared
+# no code, no IAM and no visibility. One direction, and switched on
+# deliberately rather than found on by default.
+marketing:
+  enabled: true
+  table: jarvis-scout
+  region: us-west-2
