@@ -141,13 +141,19 @@ class BrowserView:
     def __init__(self, host: str = DEFAULT_HOST, port: int = DEFAULT_PORT,
                  token_file: str = DEFAULT_TOKEN_FILE,
                  timeout: float = DEFAULT_TIMEOUT_S,
-                 logger: Optional[logging.Logger] = None, opener=None):
+                 logger: Optional[logging.Logger] = None, opener=None,
+                 approved=(), persistent: bool = False):
         self.host, self.port = host, int(port)
         self.token_file = token_file
         self.timeout = float(timeout)
         self.log = logger or logging.getLogger("jarvis.browse")
         self._opener = opener            # injected in tests; urllib otherwise
         self.last: dict = {}
+        # Sites Paul has approved for acting, and whether there is anything to
+        # act AS. Both come from config; the pair is what trust.py decides on.
+        from jarvis.browser import trust as _trust
+        self.approved = _trust.normalise_approved(approved)
+        self.persistent = bool(persistent)
 
     # ---- the wire -------------------------------------------------------
 
@@ -213,7 +219,12 @@ class BrowserView:
 
     def act(self, kind: str, ref: str = "", text: str = "") -> dict:
         return self._page(self._call("POST", "/act",
-                                     {"kind": kind, "ref": ref, "text": text}))
+                                     {"kind": kind, "ref": ref, "text": text,
+                                      "approved": sorted(self.approved)}))
+
+    def move(self, kind: str, amount: int = 0) -> dict:
+        return self._page(self._call("POST", "/move",
+                                     {"kind": kind, "amount": int(amount or 0)}))
 
     def reset(self) -> dict:
         self.last = {}
@@ -236,4 +247,6 @@ def build_view(config: Optional[dict] = None,
                        port=int(cfg.get("port") or DEFAULT_PORT),
                        token_file=str(cfg.get("token_file") or DEFAULT_TOKEN_FILE),
                        timeout=float(cfg.get("timeout_s") or DEFAULT_TIMEOUT_S),
+                       approved=cfg.get("approved_origins") or (),
+                       persistent=bool(cfg.get("persistent")),
                        logger=logger)

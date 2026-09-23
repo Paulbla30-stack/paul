@@ -18,6 +18,21 @@ agent:
   # still under the deny-list. Anything unrecognised falls back to proposer.
   rung: proposer
 
+  # Capabilities opened one at a time, above the rung. The only thing config
+  # may loosen -- and WHAT may be opened is a frozen set in authority.py,
+  # reviewed in a commit, containing only capabilities already fenced
+  # somewhere other than the spine. A grant naming shell_command is discarded,
+  # not honoured.
+  #
+  # browse_act is here because Paul asked for the browser to act rather than
+  # file a card for every click. The alternative was rung: actor, which would
+  # have handed over the machine as well -- shell included -- to buy the
+  # ability to press a button on a web page.
+  #
+  # Remove the line and every click becomes a proposal again.
+  grants:
+    - browse_act
+
   # What is coming, and speaking up before it arrives. Reading a date off a
   # page and keeping it are different jobs, and only the first one existed:
   # "due 14 Oct" was true for one cycle, went into a note, and nothing was
@@ -383,3 +398,35 @@ browser:
   port: 8477
   token_file: /run/jarvis-browser/token
   timeout_s: 45
+
+  # Whether logins survive. Paul's decision, 23 September 2026, reversing the
+  # morning's default after weighing it: "he should be able to do everything
+  # on it, have full admin control", then "can we sandbox it, that would help
+  # with risk".
+  #
+  # true keeps cookies in /var/lib/jarvis-browser/profile, so a site he signs
+  # into in the Browser tab stays signed in for the agent. That is the useful
+  # half and the dangerous half at once, and it is why the next setting exists.
+  persistent: false
+
+  # Which sites the agent may ACT on while signed in. Empty is not "none
+  # allowed" in general -- with persistent: false the agent may act anywhere,
+  # because nothing is signed in and there is nobody to be. It is only once
+  # logins survive that this list starts deciding, origin by origin.
+  #
+  # The design is the agent's own, from being asked what it would want given
+  # that Paul had decided to let it act: "track which origins the browser has
+  # active sessions on ... require explicit, one-time operator approval the
+  # first time any action is attempted from a new origin ... trust per origin,
+  # not blanket trust". Better than what I had, which was blanket.
+  #
+  # Written as scheme://host[:port]. http and https are different entries on
+  # purpose: approving a site should not quietly approve a plaintext one.
+  approved_origins: []
+
+  # Typing into a password or payment field. Separate from the grant to act,
+  # because pressing "next page" and filling in a password are not the same
+  # kind of act and should not be opened by the same switch. With
+  # persistent: true the better path is that Paul signs in once himself in the
+  # Browser tab and the agent rides the session, never touching the secret.
+  allow_secrets: false

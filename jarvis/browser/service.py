@@ -66,9 +66,17 @@ class BrowserService:
             if method == "POST" and path == "/follow":
                 return 200, self.driver.follow(str(body.get("ref") or "")).as_dict()
             if method == "POST" and path == "/act":
+                # approved comes from the agent on every call rather than being
+                # held here. The browser knows which origin it is on; whose
+                # sites those are, and which Paul has said yes to, is the
+                # agent's business and belongs where it can be ledgered.
                 return 200, self.driver.act(str(body.get("kind") or ""),
                                             str(body.get("ref") or ""),
-                                            str(body.get("text") or "")).as_dict()
+                                            str(body.get("text") or ""),
+                                            body.get("approved") or ()).as_dict()
+            if method == "POST" and path == "/move":
+                return 200, self.driver.move(str(body.get("kind") or ""),
+                                             int(body.get("amount") or 0)).as_dict()
             if method == "POST" and path == "/reset":
                 return 200, self.driver.reset()
             return 404, {"error": f"no route {method} {path}"}

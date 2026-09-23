@@ -172,7 +172,23 @@ class AgentCore:
         # reviewed commit rather than a YAML file. See jarvis/agent/tools.py.
         raw = config.get("tools")
         self.tool_restrictions = {str(k): v for k, v in raw.items()} if isinstance(raw, dict) else {}
+        # Capabilities the operator has opened individually, above the rung.
+        #
+        # This is the one thing config may loosen, and the rule just above
+        # still holds rather than being quietly dropped: WHAT may be granted is
+        # a frozen set in authority.py, reviewed in a commit, and it contains
+        # only capabilities already fenced somewhere other than the spine.
+        # The YAML says whether an already-reviewed grant is on. It cannot
+        # invent one -- a grant naming shell_command is discarded, not honoured
+        # -- so a config file still cannot decide what this agent is trusted
+        # with, only whether a trust already agreed is in effect today.
+        #
+        # Paul's decision, 23 September 2026: he wanted the browser to act
+        # rather than file a card for every click, and the alternative on offer
+        # was rung: actor, which would have handed over the machine as well.
+        self.grants = _authority.normalise_grants(config.get("grants"))
         self.executor.rung = self.rung
+        self.executor.grants = self.grants
         # Recognising characters in a scan or a photograph. Off by default:
         # the page leaves the box for a service and is billed per page, and
         # both halves of that are the operator's decision rather than a
@@ -733,7 +749,7 @@ class AgentCore:
                                         "rule_planner_cycles": cooldown})
             return None
         from jarvis.agent import authority
-        verdict = authority.review(decision.task, self.rung)
+        verdict = authority.review(decision.task, self.rung, self.grants)
         if not verdict.allowed:
             # Out of scope for this mandate. Not a denied command, a change the
             # agent was never asked to make: there is no other spelling of it.

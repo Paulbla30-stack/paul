@@ -144,6 +144,47 @@ DOWNWARD_ALIASES = {
 }
 
 
+# --- grants -----------------------------------------------------------------
+#
+# A grant opens ONE capability at the proposer rung. Paul's decision,
+# 23 September 2026: he wanted Jarvis to act in the browser rather than file a
+# card for every click.
+#
+# The obvious way to give him that was to set rung: actor. It would also have
+# opened shell_command and maintenance -- the whole machine -- which is not
+# what he asked for and is not something anybody should acquire as a side
+# effect of wanting to click a link. The rung answers "what may this agent be";
+# a grant answers "and this one thing as well", narrowly, on the record.
+#
+# GRANTABLE is why this is not simply "actor with extra steps". A grant may
+# name only capabilities whose blast radius is already fenced somewhere other
+# than the spine. browse_act qualifies because the thing it drives is a
+# separate process, under a separate uid, inside Chromium's own sandbox, with
+# no credentials, no access to the ledger or memory, and no route to the
+# metadata service. Nothing that changes THIS machine is grantable, ever, and
+# a grant naming one is dropped rather than honoured.
+GRANTABLE = frozenset({"browse_act"})
+
+
+def normalise_grants(value) -> frozenset:
+    """The capabilities a config value actually opens. Fails closed.
+
+    Same discipline as normalise_rung and for the same reason: every
+    transformation applied before a privilege lookup is a second spelling of
+    the privilege. Exact strings, no folding, no trimming, and anything not in
+    GRANTABLE is discarded -- silently for the caller, loudly for the reader,
+    because the alternative is a config typo that grants nothing while looking
+    like it granted something.
+    """
+    if isinstance(value, str) or not hasattr(value, "__iter__"):
+        return frozenset()
+    out = set()
+    for item in value:
+        if type(item) is str and item in GRANTABLE:
+            out.add(item)
+    return frozenset(out)
+
+
 def normalise_rung(value) -> str:
     """The rung a value actually grants. Unrecognised is proposer, never actor.
 
@@ -234,12 +275,27 @@ def classify_task(task) -> str:
     return CHANGE
 
 
-def review(task, rung: str) -> Decision:
-    """Decide whether this task is within the mandate."""
+def review(task, rung: str, granted=()) -> Decision:
+    """Decide whether this task is within the mandate.
+
+    ``granted`` is the operator's list of individually opened capabilities.
+    It is checked after the rung and only ever widens a single named tool; it
+    cannot open anything outside GRANTABLE, so it can never stand in for the
+    actor rung.
+    """
     rung = normalise_rung(rung)
     kind = classify_task(task)
     if kind == READ or rung == ACTOR:
         return Decision(True, rung, kind)
+    tool = getattr(getattr(task, "task_type", None), "value", None) or ""
+    # Only at proposer. A grant widens the rung Paul actually runs at; it is
+    # not a way round the rung below it. Someone who sets observer has said
+    # "this agent only looks", and a line left behind in a config file should
+    # not quietly overrule that -- the rung is the ceiling and a grant raises
+    # one tile of it, not the floor.
+    if rung == PROPOSER and tool in normalise_grants(granted):
+        return Decision(True, rung, kind,
+                        reason=f"{tool} was opened by the operator at this rung")
     what = (task.metadata or {}).get("command") or getattr(task, "description", "")
     if rung == PROPOSER:
         return Decision(

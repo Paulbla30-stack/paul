@@ -46,8 +46,13 @@ class FakeDriver:
         from jarvis.browser.page import Page
         return Page(url="https://e.test/b", title="t", text="body")
 
-    def act(self, kind, ref="", text=""):
+    def act(self, kind, ref="", text="", approved=()):
         self._maybe("act")
+        from jarvis.browser.page import Page
+        return Page(url="https://e.test/", title="t", text="body")
+
+    def move(self, kind, amount=0):
+        self._maybe("move")
         from jarvis.browser.page import Page
         return Page(url="https://e.test/", title="t", text="body")
 
@@ -80,6 +85,7 @@ class TestRouting(unittest.TestCase):
         for method, path, body in (("GET", "/read", {}),
                                    ("POST", "/follow", {"ref": "L1"}),
                                    ("POST", "/act", {"kind": "click", "ref": "L1"}),
+                                   ("POST", "/move", {"kind": "back"}),
                                    ("POST", "/reset", {})):
             status, _ = self.service.handle(method, path, body)
             self.assertEqual(status, 200, path)

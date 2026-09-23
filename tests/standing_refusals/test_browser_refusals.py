@@ -259,3 +259,87 @@ def test_the_browser_work_is_pinned_to_one_thread():
     from jarvis.browser.driver import Driver
     driver = Driver()
     assert driver._pump._max_workers == 1
+
+
+# --- what widening did not widen --------------------------------------------
+
+def test_chromium_runs_with_its_own_sandbox():
+    """--no-sandbox is not passed, and its absence is load-bearing.
+
+    Running as an unprivileged uid is a fence AROUND the browser and does
+    nothing inside it: without this, one process boundary holds every tab, so
+    a renderer exploit owns the browser and every other tab's cookies. Paul
+    asked for the sandbox in the same breath as asking for full control, and
+    this is what he was asking for.
+    """
+    from jarvis.browser.driver import CHROMIUM_ARGS
+    assert "--no-sandbox" not in CHROMIUM_ARGS
+    assert "--disable-setuid-sandbox" not in CHROMIUM_ARGS
+    assert not any("sandbox" in a and a.startswith("--disable") for a in CHROMIUM_ARGS)
+
+
+def test_a_grant_can_never_name_something_that_changes_this_machine():
+    """The grant is one tool, not the actor rung under another name."""
+    from jarvis.agent import authority
+    for forbidden in ("shell_command", "maintenance", "user_command"):
+        assert forbidden not in authority.GRANTABLE
+        assert authority.normalise_grants([forbidden]) == frozenset()
+
+
+def test_a_grant_does_not_lift_the_observer_rung():
+    from jarvis.agent import authority
+    from jarvis.agent.planner import Task, TaskType
+    task = Task(priority=5, description="t", task_type=TaskType.BROWSE_ACT,
+                metadata={"kind": "click"})
+    assert not authority.review(task, "observer", ["browse_act"]).allowed
+
+
+def test_acting_on_a_signed_in_site_needs_that_site_approved():
+    """Full control plus persistent logins is the pairing that needed a fence.
+
+    The agent's own design: trust per origin, not blanket trust. With nothing
+    signed in, acting is free -- there is no identity to borrow. Once logins
+    survive, each site is Paul's decision once.
+    """
+    from jarvis.browser import trust
+    assert trust.decide("https://bank.test/pay", persistent=True,
+                        approved=[])[0] == trust.NEEDS_APPROVAL
+    assert trust.decide("https://bank.test/pay", persistent=True,
+                        approved=["https://bank.test"])[0] == trust.ALLOW
+    assert trust.decide("https://bank.test/pay", persistent=False)[0] == trust.ALLOW
+
+
+def test_approving_a_site_over_tls_does_not_approve_it_in_plaintext():
+    from jarvis.browser import trust
+    assert trust.decide("http://bank.test/pay", persistent=True,
+                        approved=["https://bank.test"])[0] == trust.NEEDS_APPROVAL
+
+
+def test_filling_a_secret_stays_shut_unless_separately_opened():
+    """Pressing 'next page' and typing a password are not one decision."""
+    from jarvis.browser import trust
+    assert trust.decide("https://bank.test/login", persistent=True,
+                        approved=["https://bank.test"],
+                        has_secret=True)[0] == trust.REFUSE
+
+
+def test_reload_does_not_resend_the_last_request():
+    """Reloading after a form submission re-POSTs it.
+
+    That turns "look at that again" into doing it twice: ordering the thing
+    twice, sending the message twice. _move navigates to the current address
+    instead, which is what a person means and is always a GET.
+    """
+    from jarvis.browser.driver import Driver
+    src = textwrap.dedent(inspect.getsource(Driver._move))
+    called = {n.func.attr for n in ast.walk(ast.parse(src))
+              if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)}
+    assert "reload" not in called
+    assert "goto" in called
+
+
+def test_a_download_cannot_choose_where_it_lands():
+    """suggested_filename comes from the page."""
+    from jarvis.browser.driver import Driver
+    src = textwrap.dedent(inspect.getsource(Driver._keep_download))
+    assert "basename" in src and "realpath" in src

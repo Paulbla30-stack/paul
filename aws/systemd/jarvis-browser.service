@@ -83,27 +83,72 @@ IPAddressDeny=fc00::/7
 RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
 
 # ---- what it can see ---------------------------------------------------------
+# Two boundaries, and they do different jobs.
+#
+# Chromium's own sandbox (see driver.py: --no-sandbox is NOT passed) puts each
+# renderer -- the part that parses hostile HTML and JavaScript -- in its own
+# user namespace under a seccomp filter. That is the boundary around the
+# untrusted work, and it is the one that stops a browser exploit becoming a
+# shell.
+#
+# Everything below is the boundary around Chromium itself, for the case where
+# the first one fails. Paul asked for the sandbox when he widened what the
+# agent may do in the browser: full control inside, tighter walls around.
+#
 # The agent's ledger, its memory, its key and its token. A page that owns this
 # process has owned a process that cannot read any of them.
 InaccessiblePaths=/var/lib/jarvis
 InaccessiblePaths=/etc/jarvis
 InaccessiblePaths=/run/jarvis
 InaccessiblePaths=/root
+# NoNewPrivileges blocks the OLD setuid sandbox helper, not the namespace one
+# Chromium actually uses, so it costs nothing here.
 NoNewPrivileges=yes
 PrivateTmp=yes
 ProtectSystem=strict
 ProtectHome=yes
 ProtectKernelTunables=yes
 ProtectKernelModules=yes
+ProtectKernelLogs=yes
 ProtectControlGroups=yes
 ProtectClock=yes
 ProtectHostname=yes
+# Other processes are not this one's business. Without it, a renderer that got
+# out could at least read /proc and learn what else runs on the box.
+ProtectProc=invisible
+ProcSubset=pid
+PrivateIPC=yes
 RestrictSUIDSGID=yes
 RestrictRealtime=yes
 LockPersonality=yes
+MemoryDenyWriteExecute=no
 RemoveIPC=yes
-# Chromium needs to create user namespaces even with --no-sandbox off the
-# table, and it needs a writable place for its own scratch.
+# Empty. Chromium's sandbox needs no capability at all to build a user
+# namespace, which is exactly why that design replaced the setuid one.
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+# Namespaces, and why this is an allow rather than a deny. Chromium's sandbox
+# IS namespaces: each renderer goes into its own user, pid, ipc and network
+# namespace, and a blanket RestrictNamespaces=yes would switch the sandbox off
+# while looking like hardening. So the four it needs are permitted and the
+# rest are not.
+# An allow-list: only these five may be created, so cgroup and uts cannot.
+# (`net.ipv4` was here briefly and is not a namespace type -- systemd logged
+# "Failed to parse namespace type string, ignoring" and dropped the WHOLE
+# line, which would have left every namespace permitted while the file read
+# as if it were restricted. A hardening directive that fails by doing nothing
+# is worth verifying rather than reading.)
+RestrictNamespaces=user pid ipc net mnt
+SystemCallArchitectures=native
+# @sandbox is what lets seccomp-bpf be installed in the first place -- without
+# it the renderers cannot lock themselves down and Chromium refuses to start.
+SystemCallFilter=@system-service @sandbox
+SystemCallFilter=~@debug @module @mount @obsolete @raw-io @reboot @swap @cpu-emulation
+SystemCallErrorNumber=EPERM
+
+# Chromium needs a writable place for the profile, the downloads and its own
+# scratch. Everything else on the filesystem is read-only or invisible.
 ReadWritePaths=/var/lib/jarvis-browser
 ReadWritePaths=/run/jarvis-browser
 

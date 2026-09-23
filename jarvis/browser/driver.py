@@ -28,27 +28,49 @@ running the page's script.
 """
 
 import logging
+import os
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
 
-from jarvis.browser import guard
+from jarvis.browser import guard, trust
 from jarvis.browser.page import EXTRACT_JS, Page
 
 DEFAULT_TIMEOUT_MS = 20000
+DEFAULT_PROFILE_DIR = "/var/lib/jarvis-browser/profile"
+# Downloads land in one directory, fixed here rather than chosen per request,
+# for the same reason composed documents do: a caller that could choose the
+# directory could choose any directory. The agent's uid can read it; the
+# browser's can write it.
+DEFAULT_DOWNLOAD_DIR = "/var/lib/jarvis-browser/downloads"
+MAX_DOWNLOADS_REMEMBERED = 40
 DEFAULT_VIEWPORT = {"width": 1280, "height": 900}
 # Screenshots are for Paul's eyes in the UI, not for the model: nothing here
 # sends an image to a model, and doing so would be a separate decision about
 # vision that nobody has taken.
 SHOT_MAX_BYTES = 4 * 1024 * 1024
 
-# Chromium flags. --no-sandbox is the one that needs saying: the usual reason
-# to keep it is that the browser is running as a user with something to lose,
-# and here it is running as a uid with no files, no credentials and no network
-# beyond what the guard permits. The systemd unit is the sandbox.
+# Chromium flags.
+#
+# --no-sandbox is NOT here, and its absence is the most important line in this
+# file. It was here until Paul said "can we sandbox it, that would help with
+# risk", and he was right to ask: running as an unprivileged uid is a fence
+# around the browser, and it does nothing at all inside it. Every tab shares
+# one process boundary, so a renderer exploit owns the whole browser including
+# any other tab's cookies.
+#
+# With the flag gone, Chromium uses its own layered sandbox: each renderer --
+# the part that actually parses hostile HTML, CSS, images and JavaScript --
+# runs in its own user namespace under a seccomp-bpf filter, unable to open
+# files, reach the network or see other processes. That is a kernel-enforced
+# boundary around the untrusted work, which is the thing a uid cannot give you.
+#
+# It needs unprivileged user namespaces. Checked on the box rather than
+# assumed: user.max_user_namespaces is 7368 and `unshare --user` succeeds as
+# the jarvis-browser user. NoNewPrivileges=yes in the unit does not conflict --
+# that blocks the old setuid helper, not the namespace sandbox.
 CHROMIUM_ARGS = (
-    "--no-sandbox",
     "--disable-dev-shm-usage",        # /dev/shm is tiny here; use /tmp instead
     "--disable-gpu",
     "--no-first-run",
@@ -73,10 +95,24 @@ class Driver:
     """
 
     def __init__(self, logger: Optional[logging.Logger] = None,
-                 timeout_ms: int = DEFAULT_TIMEOUT_MS, headless: bool = True):
+                 timeout_ms: int = DEFAULT_TIMEOUT_MS, headless: bool = True,
+                 persistent: bool = False, profile_dir: str = DEFAULT_PROFILE_DIR,
+                 download_dir: str = DEFAULT_DOWNLOAD_DIR,
+                 allow_secrets: bool = False):
         self.log = logger or logging.getLogger("jarvis.browser")
         self.timeout_ms = int(timeout_ms)
         self.headless = headless
+        # Whether cookies survive. False is still the default and still the
+        # safer shape; true is Paul's choice, taken with the trade in front of
+        # him, and it is what makes trust.py's per-origin rule start applying.
+        self.persistent = bool(persistent)
+        self.profile_dir = profile_dir
+        self.download_dir = download_dir
+        # Typing into a password or payment field. Separate from the grant to
+        # act, because pressing "next page" and filling in a password are not
+        # the same kind of act and should not be opened by the same switch.
+        self.allow_secrets = bool(allow_secrets)
+        self.downloads = []
         self._lock = threading.RLock()
         # Everything that touches Playwright runs on this one thread, and the
         # single worker is the whole point rather than a performance choice.
@@ -114,25 +150,63 @@ class Driver:
             raise BrowserUnavailable(
                 "playwright is not installed for this interpreter") from exc
         self._pw = sync_playwright().start()
+        os.makedirs(self.download_dir, mode=0o750, exist_ok=True)
+        shared = dict(viewport=dict(DEFAULT_VIEWPORT),
+                      accept_downloads=True,
+                      java_script_enabled=True)
         try:
-            self._browser = self._pw.chromium.launch(
-                headless=self.headless, args=list(CHROMIUM_ARGS))
+            if self.persistent:
+                # One object is both browser and context: a profile on disk
+                # that keeps cookies, storage and logins between runs. This is
+                # the half of Paul's decision that makes trust.py's per-origin
+                # rule start applying, because from here on there is an
+                # identity in the browser to borrow.
+                os.makedirs(self.profile_dir, mode=0o700, exist_ok=True)
+                self._context = self._pw.chromium.launch_persistent_context(
+                    self.profile_dir, headless=self.headless,
+                    args=list(CHROMIUM_ARGS), downloads_path=self.download_dir,
+                    **shared)
+                self._browser = None
+            else:
+                # A fresh context is a fresh profile: no storage state is
+                # passed in and none is written out.
+                self._browser = self._pw.chromium.launch(
+                    headless=self.headless, args=list(CHROMIUM_ARGS),
+                    downloads_path=self.download_dir)
+                self._context = self._browser.new_context(**shared)
         except Exception as exc:      # noqa: BLE001 - the message is the value
             self._pw.stop()
             self._pw = None
             raise BrowserUnavailable(f"chromium would not start: {exc}") from exc
-        # A fresh context is a fresh profile: no storage state is passed in and
-        # none is written out.
-        self._context = self._browser.new_context(
-            viewport=dict(DEFAULT_VIEWPORT),
-            accept_downloads=False,
-            java_script_enabled=True)
         self._context.set_default_timeout(self.timeout_ms)
         self._context.route("**/*", self._screen)
-        self._page = self._context.new_page()
+        self._context.on("download", self._keep_download)
+        pages = self._context.pages
+        self._page = pages[0] if pages else self._context.new_page()
         self.started_at = time.time()
-        self.log.info("browser up: chromium, clean profile, %dms timeout",
-                      self.timeout_ms)
+        self.log.info("browser up: chromium, %s profile, sandbox on, %dms timeout",
+                      "persistent" if self.persistent else "clean", self.timeout_ms)
+
+    def _keep_download(self, download):
+        """Put a download in the one directory and remember that it happened.
+
+        Saved under a scrubbed basename inside download_dir and nowhere else:
+        a page choosing the filename must not be able to choose the path, and
+        suggested_filename comes from the page.
+        """
+        try:
+            name = os.path.basename(str(download.suggested_filename or "download"))
+            name = "".join(c for c in name if c.isalnum() or c in "._- ").strip() or "download"
+            target = os.path.join(self.download_dir, name)
+            if os.path.realpath(os.path.dirname(target)) != os.path.realpath(self.download_dir):
+                raise OSError("download would land outside the download directory")
+            download.save_as(target)
+            self.downloads.append({"name": name, "path": target,
+                                   "url": download.url, "at": time.time()})
+            del self.downloads[:-MAX_DOWNLOADS_REMEMBERED]
+            self.log.info("downloaded %s from %s", name, download.url)
+        except Exception as exc:      # noqa: BLE001 - a bad download is not a crash
+            self.log.warning("download not kept: %s", exc)
 
     def _screen(self, route, request):
         """Every request the page makes, checked before it leaves.
@@ -255,47 +329,98 @@ class Driver:
 
     # ---- acting ---------------------------------------------------------
 
-    def _act(self, kind: str, ref: str = "", text: str = "") -> Page:
-        """Click, type or submit. The caller has already cleared the rung.
+    ACTIONS = ("click", "type", "submit", "press", "select")
+    MOVES = ("back", "forward", "reload", "scroll")
 
-        The refusals that live here are the ones no rung lifts: a secret field
-        is never typed into and a form holding one is never submitted, whoever
-        is asking.
+    def _move(self, kind: str, amount: int = 0) -> Page:
+        """Go back, go forward, reload, scroll. Reading, not acting.
+
+        `reload` deliberately navigates to the current address rather than
+        calling reload(). A reload after a form submission re-sends the POST,
+        which would turn "look at that again" into doing it twice -- ordering
+        the thing twice, sending the message twice. Going to the URL is what a
+        person means by reload and is always a GET.
         """
         with self._lock:
-            # The refusals come before the browser is touched, deliberately.
-            # A fence that needs Chromium running to say no is a fence that
-            # has already started doing the thing, and it is also a fence no
-            # test can reach without a browser.
+            kind = (kind or "").strip().lower()
+            if kind not in self.MOVES:
+                raise ValueError(f"not a move: {kind!r}")
+            self._start()
+            if kind == "scroll":
+                step = int(amount or 600)
+                self._page.mouse.wheel(0, step)
+            elif kind == "reload":
+                here = self._page.url
+                if here and here != "about:blank":
+                    guard.check(here)
+                    self._page.goto(here, wait_until="domcontentloaded",
+                                    timeout=self.timeout_ms)
+            else:
+                getattr(self._page, "go_back" if kind == "back" else "go_forward")(
+                    wait_until="domcontentloaded", timeout=self.timeout_ms)
+            landed = self._page.url
+            if landed and landed != "about:blank":
+                guard.check(landed)
+            return self._extract()
+
+    def _act(self, kind: str, ref: str = "", text: str = "",
+             approved=()) -> Page:
+        """Click, type, submit, press a key, choose from a dropdown.
+
+        Three fences, in order, and they answer different questions.
+
+        1. **Is this the kind of thing this browser does at all?** A secret
+           field is not typed into and a form on a page holding one is not
+           submitted -- unless the operator has separately switched that on,
+           which is a different decision from letting the agent act.
+        2. **May it act on THIS site?** trust.py. With a clean profile the
+           answer is always yes, because nothing is signed in and there is no
+           identity to borrow. With a profile that stays signed in, each origin
+           is approved once by Paul.
+        3. **Did the page move somewhere it should not have?** The guard, on
+           the address it landed on.
+
+        All of it before Chromium is touched, except the last, which cannot be.
+        """
+        with self._lock:
             if self._last is None:
                 raise ValueError("no page has been read yet")
             kind = (kind or "").strip().lower()
-            if kind not in ("click", "type", "submit"):
+            if kind not in self.ACTIONS:
                 raise ValueError(f"not an action: {kind!r}")
 
-            if kind in ("type", "submit"):
-                target = self._last.field_by_ref(ref) if ref else None
-                if kind == "type":
-                    if target is None:
-                        raise ValueError(f"no field {ref!r} on the page that was read")
-                    if target.is_secret:
-                        raise PermissionError(
-                            "that field is a secret; this browser never types into one")
-                if self._last.has_password:
+            target = self._last.field_by_ref(ref) if ref else None
+            if kind in ("type", "select"):
+                if target is None:
+                    raise ValueError(f"no field {ref!r} on the page that was read")
+                if target.is_secret and not self.allow_secrets:
                     raise PermissionError(
-                        "the page holds a password field; this browser never "
-                        "submits a form on a page that does")
+                        "that field is a secret and filling those is not "
+                        "switched on (browser.allow_secrets)")
+
+            verdict, why = trust.decide(
+                self._last.url, self.persistent, approved,
+                has_secret=self._last.has_password,
+                secrets_unlocked=self.allow_secrets)
+            if verdict != trust.ALLOW:
+                raise PermissionError(why)
 
             self._start()
             selectors = {"click": "a, button, input[type=submit], [role=button]",
                          "type": "input, textarea, select",
+                         "select": "select",
+                         "press": "input, textarea, select, button, a",
                          "submit": "form"}
-            index = self._index_of(ref)
+            index = self._index_of(ref) if ref else 0
             handle = self._page.locator(selectors[kind]).nth(index)
             if kind == "click":
                 handle.click(timeout=self.timeout_ms)
             elif kind == "type":
                 handle.fill(text or "", timeout=self.timeout_ms)
+            elif kind == "select":
+                handle.select_option(text or "", timeout=self.timeout_ms)
+            elif kind == "press":
+                handle.press(text or "Enter", timeout=self.timeout_ms)
             else:
                 handle.evaluate("f => f.requestSubmit ? f.requestSubmit() : f.submit()")
             try:
@@ -349,9 +474,13 @@ class Driver:
     def read(self) -> Page:
         return self._on_pump(self._read)
 
-    def act(self, kind: str, ref: str = "", text: str = "") -> Page:
-        """Click, type or submit. The caller has already cleared the rung."""
-        return self._on_pump(self._act, kind, ref, text)
+    def act(self, kind: str, ref: str = "", text: str = "", approved=()) -> Page:
+        """Click, type, submit, press or select. The rung is already cleared."""
+        return self._on_pump(self._act, kind, ref, text, approved)
+
+    def move(self, kind: str, amount: int = 0) -> Page:
+        """Back, forward, reload or scroll. Reading, not acting."""
+        return self._on_pump(self._move, kind, amount)
 
     def reset(self) -> dict:
         """Throw the profile away and start again with nothing."""
@@ -364,7 +493,12 @@ class Driver:
         with self._lock:
             up = self._page is not None
             out = {"up": up, "engine": "chromium", "blocked": self.blocked,
-                   "profile": "clean per session",
+                   "profile": "persistent" if self.persistent else "clean per session",
+                   "persistent": self.persistent,
+                   "sandbox": "--no-sandbox" not in CHROMIUM_ARGS,
+                   "allow_secrets": self.allow_secrets,
+                   "downloads": list(self.downloads[-10:]),
+                   "download_dir": self.download_dir,
                    "since": self.started_at,
                    "url": self._last.url if self._last else ""}
             if not up:

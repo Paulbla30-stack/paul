@@ -287,6 +287,9 @@ class TaskExecutor:
         self.shell_policy = normalise_shell_policy(shell_policy, self.log)
         # Set by the agent; None leaves the executor unbounded, as before.
         self.rung = None
+        # Capabilities the operator opened one at a time, above the rung. Set
+        # by the agent; empty leaves the spine exactly as it was.
+        self.grants = frozenset()
         # The one way out to the operator. None means nothing was configured,
         # and the handler says so rather than pretending the message landed.
         self.notifier = notifier
@@ -326,6 +329,7 @@ class TaskExecutor:
             TaskType.BROWSE_FOLLOW: self._handle_browse_follow,
             TaskType.BROWSE_READ: self._handle_browse_read,
             TaskType.BROWSE_ACT: self._handle_browse_act,
+            TaskType.BROWSE_MOVE: self._handle_browse_move,
         }
 
     def execute(self, task: Task) -> dict:
@@ -737,18 +741,34 @@ class TaskExecutor:
             return refusal
         return self._page_result(view.read(), "read the open page")
 
+    def _handle_browse_move(self, task: Task) -> dict:
+        """Back, forward, reload or scroll. Reading, so no rung question."""
+        view, refusal = self._browser_or_reason()
+        if refusal:
+            return refusal
+        kind = str(task.metadata.get("kind") or "").strip().lower()
+        if kind not in ("back", "forward", "reload", "scroll"):
+            return {"success": False,
+                    "error": "browse_move needs kind: back, forward, reload or scroll"}
+        try:
+            amount = int(task.metadata.get("amount") or 0)
+        except (TypeError, ValueError):
+            amount = 0
+        return self._page_result(view.move(kind, amount), kind)
+
     def _handle_browse_act(self, task: Task) -> dict:
         """Click, type or submit. The spine has already cleared the rung."""
         view, refusal = self._browser_or_reason()
         if refusal:
             return refusal
         kind = str(task.metadata.get("kind") or "").strip().lower()
-        if kind not in ("click", "type", "submit"):
+        if kind not in ("click", "type", "select", "press", "submit"):
             return {"success": False,
-                    "error": "browse_act needs kind: click, type or submit"}
+                    "error": "browse_act needs kind: click, type, select, "
+                             "press or submit"}
         ref = str(task.metadata.get("ref") or "").strip()
         text = str(task.metadata.get("text") or "")
-        if kind in ("click", "type") and not ref:
+        if kind in ("click", "type", "select") and not ref:
             return {"success": False, "error": f"browse_act {kind} needs a ref"}
         return self._page_result(view.act(kind, ref, text),
                                  f"{kind} {ref}".strip())
@@ -870,7 +890,8 @@ class TaskExecutor:
         normalise_rung decides that rather than this function guessing.
         """
         from jarvis.agent import authority
-        verdict = authority.review(task, authority.normalise_rung(self.rung))
+        verdict = authority.review(task, authority.normalise_rung(self.rung),
+                                  getattr(self, "grants", ()))
         return None if verdict.allowed else verdict.reason
 
     def _handle_shell_command(self, task: Task) -> dict:

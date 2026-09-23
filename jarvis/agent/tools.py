@@ -215,6 +215,23 @@ TOOLS = (
          required=("ref",)),
     Tool("browse_read", "Read the page that is open again, without moving.",
          arguments=dict(_DESC)),
+    # Moving about is reading. Back and forward revisit pages already fetched,
+    # and scrolling is looking further down the one you are on.
+    #
+    # "reload" is the interesting one: it navigates to the current address
+    # rather than re-sending the last request, because reloading after a form
+    # submission re-POSTs it -- which would turn "look at that again" into
+    # doing it twice. Ordering the thing twice. Sending the message twice.
+    Tool("browse_move", "Go back, go forward, reload, or scroll down the page "
+                        "you are on. Reads only; it revisits pages rather than "
+                        "doing anything new.",
+         arguments={**_DESC,
+                    "kind": {"type": "string",
+                             "description": "back, forward, reload or scroll."},
+                    "amount": {"type": "integer",
+                               "description": "For scroll: pixels, 600 by default. "
+                                              "Negative scrolls up."}},
+         required=("kind",)),
     # effect=CHANGE and min_rung=PROPOSER, deliberately, and the pair is the
     # whole design. CHANGE means that at the default rung this is attempted,
     # refused by the spine and written down as a proposal -- so Paul sees what
@@ -229,20 +246,23 @@ TOOLS = (
     # what it would refuse, and they are in code rather than in a policy
     # document for the reason it gave: "if the capability exists, it will
     # eventually be triggered. Fence it at birth."
-    Tool("browse_act", "Click, type into a field, or submit a form on the page "
-                       "you last read. This one changes something at the other "
-                       "end, so at the proposer rung it becomes a card for Paul "
-                       "rather than an action. It never types into a password "
-                       "field and never submits a form on a page that has one.",
+    Tool("browse_act", "Act on the page you last read: click, type into a "
+                       "field, choose from a dropdown, press a key, or submit a "
+                       "form. This one changes something at the other end. "
+                       "Whether you may do it, or only ask, depends on what Paul "
+                       "has opened -- and where the browser stays signed in, on "
+                       "whether he has approved that particular site.",
          effect=CHANGE, min_rung=PROPOSER,
          arguments={**_DESC,
                     "kind": {"type": "string",
-                             "description": "click, type or submit."},
+                             "description": "click, type, select, press or submit."},
                     "ref": {"type": "string",
                             "description": "The ref of the link, button or field "
                                            "from the page you read."},
                     "text": {"type": "string",
-                             "description": "For type: what to put in the field."}},
+                             "description": "For type: what to put in the field. "
+                                            "For select: the option. For press: "
+                                            "the key, Enter by default."}},
          required=("kind",)),
     Tool("maintenance", "Perform routine upkeep of this machine.",
          effect=CHANGE, arguments=dict(_DESC)),
