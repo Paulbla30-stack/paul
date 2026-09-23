@@ -1,6 +1,15 @@
 variable "region" {
-  type    = string
-  default = "eu-west-2"
+  type = string
+  # us-west-2, because that is where the estate IS. The default read eu-west-2
+  # while every resource in the state file sits in us-west-2 -- the instance is
+  # i-016f9f37fe6ca2ba8 in us-west-2b -- so every apply so far has depended on
+  # somebody remembering `-var region=us-west-2` on the command line.
+  #
+  # Forgetting it does not fail. The provider points at London, the data
+  # sources read London's default VPC, and Terraform finds none of the estate
+  # it is holding state for. A default that is wrong and silent is worse than
+  # no default.
+  default = "us-west-2"
 }
 
 variable "ami_id" {
@@ -9,8 +18,21 @@ variable "ami_id" {
 }
 
 variable "name" {
-  type    = string
-  default = "jarvis-agent"
+  type = string
+  # jarvis, because that is the name the estate was built with. Almost every
+  # resource here is named from this: the IAM role, the security group, the
+  # instance, and -- the one that matters -- the ledger's witness bucket,
+  # jarvis-ledger-485964361844-jarvis.
+  #
+  # With the default reading "jarvis-agent", a plan came back
+  # "21 to add, 0 to change, 16 to destroy": the instance replaced, the role
+  # replaced, and the Object-Locked ledger bucket destroyed and recreated
+  # under a new name. Not drift. Terraform correctly comparing the estate
+  # against a different estate that happens to share a state file.
+  #
+  # As with the region, the apply that built this passed the value on the
+  # command line and the default has been a loaded gun ever since.
+  default = "jarvis"
 }
 
 variable "instance_type" {
@@ -77,8 +99,21 @@ variable "anthropic_api_key_ssm_parameter" {
 }
 
 variable "llm_provider" {
-  type        = string
-  default     = "anthropic"
+  type = string
+  # bedrock, because that is what the box runs: the journal says
+  # `provider=bedrock model=qwen.qwen3-235b-a22b-2507-v1:0` and the instance
+  # role's bedrock policy is in the state file. There is no Anthropic key
+  # anywhere and Paul's decision, 23 September 2026, is that there will not be
+  # one -- the models come through the instance role, where the vigil gates
+  # them and the ledger records them.
+  #
+  # The old default did more than mislabel. It made the llm_key data source
+  # count = 1, which looked up a Secrets Manager secret named
+  # jarvis/anthropic-api-key that does not exist, and that lookup failed
+  # BEFORE any other work -- so `terraform import`, `plan` and `apply` all
+  # errored on a resource nobody wanted. An unused variable took the whole
+  # workspace down.
+  default     = "bedrock"
   description = "Which planner the instance role is set up for: anthropic (Claude API key from Secrets Manager / SSM) or bedrock (Amazon Bedrock, no key). Must match llm.provider in the user data."
   validation {
     condition     = contains(["anthropic", "bedrock"], var.llm_provider)
