@@ -300,6 +300,68 @@ repository, so treat the details as mine to re-confirm rather than as a record:
 
 ---
 
+## 10. The browser is live, and one decision in it is yours
+
+Added this afternoon, after you asked for it. It is on the **Browser** tab in
+the UI on port 8443.
+
+Type an address and it goes; type words and it searches; the links are listed
+underneath and clicking one follows it; **View** takes a picture of the page
+when the text is not enough. Jarvis drives the same browser, so what you see
+there is what it sees.
+
+**The decision that is yours: nothing is logged in.** The profile is thrown
+away every session — no cookies, no saved passwords, nothing carried over.
+Jarvis and I landed on this independently and its framing is the better one:
+you do not want it *being* you online, you want it helping you look things up.
+A browser holding your sessions is a browser that can act as you, and then
+every instruction injected into every page carries your authority.
+
+The cost is real and you should weigh it rather than inherit it: **nothing
+behind a login can be read.** Not your email, not your bank, not your energy
+account. If you want that, say so and it becomes a deliberate, per-site
+change rather than a cookie jar quietly filling up. I have not built it.
+
+What it will never do, at any rung and whoever asks: type into a password or
+card field, or submit a form on a page that has one. Those are decided by the
+page's own declared input types, not guessed from labels.
+
+Reading and following links happen at Jarvis's normal rung — no approval, no
+friction, because a search is just an address with your question in it.
+Clicking, typing and submitting are a change, so they arrive as a card you
+approve.
+
+Verified live rather than assumed: example.com read and its link followed
+through a redirect; Hacker News read with 200 links; a 1280x900 screenshot.
+And the fences, each refusing with its own reason — the cloud metadata
+service, loopback, 10.0.0.0/8, and `file://` — refused for you through the UI
+as well as for Jarvis, because those are properties of a browser running
+unsandboxed on your box and they do not stop being true because a person
+asked.
+
+**Estate, since it is your account:** I made a `jarvis-browser` system user,
+installed pip and the Chromium runtime libraries with dnf, and put Chromium in
+`/opt/jarvis-browsers`. Root filesystem went **26% → 40%**. The browser has
+its own systemd unit with `MemoryMax=900M` and an OOM score of +900 against
+Jarvis's −500, so on this t3.small a heavy page kills the browser and never
+the agent. Told Jarvis the same, the same day.
+
+---
+
+## 11. Those three stale goals are now blocking real work
+
+Item 7 above has stopped being tidy-up. I asked Jarvis to open Hacker News and
+tell me what was on it. It replied about the missing gas and electricity bills
+instead — it never reached the browser.
+
+The three goals sit at priority 5, above every standing goal it has, and they
+can never complete. Everything else queues behind them.
+
+Its proposal to retire them is waiting for you. Approving it is the single
+highest-value thing on this list after the Bedrock form.
+
+---
+
 ## What I did, for the record
 
 Deployed and verified live rather than assumed:
