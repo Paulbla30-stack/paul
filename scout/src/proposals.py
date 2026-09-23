@@ -28,30 +28,65 @@ from datetime import datetime, timedelta, timezone
 PENDING, APPROVED, REJECTED, EXPIRED, SENT, FAILED = (
     "pending", "approved", "rejected", "expired", "sent", "failed")
 
-# Which networks the machine may post to, and which it may only draft for.
+# Two different questions, kept apart because conflating them is how the
+# wrong thing gets posted to the wrong place.
 #
-# Paul's decision, 23 September 2026. Moltbook is an agent-only network: only
-# agents post and humans observe. An agent posting there is the native act
-# rather than an imposition, and every reader knows what they are reading.
+#   PERMITTED  — what Paul has decided the machine MAY post, per network.
+#   SENDERS    — what this project actually HAS a write path for.
 #
-# Facebook is his own page, under his own name, read by patients, colleagues
-# and anyone else. So the agent drafts and HE posts. There is no machine
-# write path to it and there is not meant to be one -- which also means no
-# Facebook app, no page access token, no pages_manage_posts, and no token
-# refresh cycle to maintain.
+# A network is sendable only if it is in both. Permission without a sender is
+# a decision waiting on code; a sender without permission is code waiting on a
+# decision. Neither may post.
 #
-# This is a registry, not a convention, because _send() used to call the
-# Moltbook sender for any approved proposal whatever its network. The moment
-# a second network existed, approving a Facebook draft would have posted it
-# to Moltbook. A network absent from both sets is refused: a new destination
-# has to be classified deliberately, and the failure is a refusal to send.
-SENDABLE = frozenset({"moltbook"})
-DRAFT_ONLY = frozenset({"facebook"})
+# Paul's decision, 23 September 2026: both networks, always behind approval.
+# Moltbook is agent-only — agents post, humans observe — so an agent posting
+# there is the native act and every reader knows what they are reading.
+# Facebook is his own page under his own name; he wants the machine to post
+# it rather than copy and paste, and nothing goes without his approval.
+#
+# Facebook is permitted and has no sender yet, so it is refused today, by the
+# same check that would refuse a network nobody has decided about. That is
+# deliberate: _send() used to call the Moltbook sender for ANY approved
+# proposal, so listing Facebook as simply "sendable" before its sender exists
+# would post it to Moltbook — the right text to the wrong audience.
+PERMITTED = frozenset({"moltbook", "facebook"})
+
+# Populated as each write path is built. The key is the network; the value is
+# the dotted path of the callable that sends it, resolved at send time.
+SENDERS = {
+    "moltbook": "sender:MoltbookSender",
+}
+
+
+def _normalise(network: str) -> str:
+    return (network or "").strip().lower()
+
+
+def permitted(network: str) -> bool:
+    """True when Paul has decided the machine may post to this network."""
+    return _normalise(network) in PERMITTED
+
+
+def has_sender(network: str) -> bool:
+    """True when a write path for this network actually exists."""
+    return _normalise(network) in SENDERS
 
 
 def may_send(network: str) -> bool:
-    """True only for a network this project is allowed to post to itself."""
-    return (network or "").strip().lower() in SENDABLE
+    """True only when posting is both permitted and possible."""
+    return permitted(network) and has_sender(network)
+
+
+def refusal_reason(network: str) -> str:
+    """Why a network may not be posted to, in words the operator can act on."""
+    name = _normalise(network)
+    if not name:
+        return "no network named"
+    if not permitted(name):
+        return "is not a network this project may post to"
+    if not has_sender(name):
+        return "is permitted but has no write path built yet; drafts only"
+    return ""
 
 TERMINAL = (REJECTED, EXPIRED, SENT, FAILED)
 DEFAULT_TTL_DAYS = 7

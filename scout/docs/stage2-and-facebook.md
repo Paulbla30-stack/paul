@@ -86,80 +86,92 @@ Decisions, not much code:
    reason recorded is the current design, and is right. Worth confirming the
    reason reaches the digest so a silently narrow pipeline is visible.
 
-## The decision: post to Moltbook, draft for Facebook
+## The decision: both networks, always behind approval
 
-Paul, 23 September 2026. Two networks, two different permissions, for a
-reason that is about the audience rather than the technology.
+Paul, 23 September 2026, after working through draft-only and rejecting it.
 
-**Moltbook, the agent may post.** It is an agent-only network: agents post,
-humans observe. An agent posting there is the native act rather than an
-imposition, and every reader already knows what they are reading. Through
-the approval gate as before.
+**Both networks are permitted, and nothing goes without his approval.**
+Moltbook is agent-only — agents post, humans observe — so an agent posting
+there is the native act and every reader knows what they are reading.
+Facebook is his own page under his own name; he wants the machine to post it
+rather than copy and paste it himself.
 
-**Facebook, the agent drafts and Paul posts.** It is his own page, under his
-own name, read by patients and colleagues. There is no machine write path to
-it and there is not meant to be one.
+Draft-only was considered and dropped, for a reason worth keeping. If the
+machine drafts and he posts by hand, the system never learns whether he
+posted it. The record says `drafted` forever, and clearing it by hand means
+the chain records *"Paul says he posted this"* rather than *"this was posted
+and verified"* — a strictly weaker record, and the record is the point. The
+"way to clear them" that draft-only seemed to need was a symptom of
+draft-only, not a missing feature.
 
-That second decision removes the entire Meta integration: no Facebook app,
-no page access token, no `pages_manage_posts`, no permission bundle, no
-App Review question, and no token refresh cycle to maintain. It also settles
-the media argument without needing the argument — a draft he pastes himself
-is one he has necessarily read.
+Copy-paste is labour, not review. Removing it does not weaken the gate as
+long as approving stays a real decision: read the draft, click once. What
+would weaken it is an "approve all" button, and there will not be one.
 
-### Encoded as a registry, not a convention
+### Permission and capability are different questions
 
-`proposals.py` now carries `SENDABLE = {"moltbook"}` and
-`DRAFT_ONLY = {"facebook"}`, and `_send()` refuses anything not sendable
-before it reaches a sender.
+`proposals.py` keeps them apart, because conflating them is how the wrong
+thing reaches the wrong place:
 
-This closed a real defect rather than only recording a preference. `_send()`
-called the Moltbook sender for **any** approved proposal, whatever its
-network. The moment a second network existed, approving a Facebook draft
-would have posted it to Moltbook: the right text to the wrong audience,
-published, verified, and reported as a success.
+```python
+PERMITTED = frozenset({"moltbook", "facebook"})
+SENDERS   = {"moltbook": "sender:MoltbookSender"}
+```
 
-A network on neither list is refused. A new destination has to be classified
-deliberately, and the failure mode of forgetting is a refusal to send.
+A network is sendable only if it is in **both**. Permission without a sender
+is a decision waiting on code; a sender without permission is code waiting on
+a decision. Neither may post, and `refusal_reason()` says which it is, so
+"not yet" never reads as "never".
 
-## Facebook, as a draft-only destination
+Facebook is permitted today and has no write path, so it is refused today —
+by the same check that refuses a network nobody has decided about. That is
+deliberate. `_send()` used to call the Moltbook sender for **any** approved
+proposal whatever its network, so listing Facebook as simply "sendable"
+before its sender existed would have posted it to Moltbook: the right text
+to the wrong audience, published, verified, and reported as a success.
 
-The gate machinery needs no change. `proposals.py` already anticipates a
-second network (`network: str  # "moltbook" | …`).
+## The marketing area, on the instance
 
-**Search is closed, so Facebook is a destination only.** Public post data
-needs App Review plus Business Verification; X is pay-per-read with no free
-tier since February 2026; LinkedIn publishing is Partner Program only.
-Scraping is against terms and not available to somebody posting under their
-own name on a professional register. The open sources the scout already
-reads — arXiv, medRxiv, LessWrong, Hacker News, Moltbook — are where the
-subject is actually argued.
+Paul's framing: the UI at `/ui` exists to build a partner that complements
+his strengths, and what he needs now is somewhere to see the advertising
+work and act on it.
 
-**None of the Meta API work is needed.** Posting to a Page you administer
-would have needed Standard Access, a `pages_manage_posts` bundle and a token
-refresh cycle. Drafting for a page needs none of it: the draft goes in the
-digest and Paul posts it. That is the whole integration.
+**On the instance, not on heartbeat-framework.org.** That site's job is
+credibility for published work; a private content pipeline does not belong
+bolted to it, as a surface or as a tone.
 
-### Two positions taken
+**Read on the instance, write through the gate.** The instance gets
+read-only access to the scout's table and shows pending, recent, refused and
+chain status. Approving does a signed POST to the approve app, which remains
+the only thing that can move `pending → approved → sent`. The instance never
+holds a network credential, and the only write path is still `sender.py` in
+the Lambda.
 
-**Replies by hand, like posts.** Draft-only settles this for Facebook: a
-reply is an unbounded real-time conversation with the public in Paul's name,
-and nothing machine-sent reaches that page anyway.
+This is the first coupling between the agent and the scout, which until now
+shared no code, no IAM and no visibility. Read-only, one direction, and
+worth doing deliberately rather than by accident.
+
+One consequence to settle first: the UI is served by the agent's own
+process, so the dashboard cannot see the data without the agent seeing it
+too. That is a change to what the agent knows about its own estate, and it
+is Paul's to decide.
+
+### Two positions taken### Two positions taken
+
+**Posting only. Not replies.** Posting publishes fixed text approved
+verbatim. Replying to comments is an unbounded real-time conversation with
+the public in Paul's name, on a register where he is personally accountable.
+Comments into the digest; replies by hand.
 
 **A higher bar on Facebook than Moltbook.** From the agent's review, and
 correct: "public perception is not version-controlled". A Moltbook error is
 corrected in-thread by peers; a Facebook error is screenshotted and
 attributed to him.
 
-### Media: still not yet, for a smaller reason
+### Media: not yet
 
-Draft-only removes the rubber-stamping risk on Facebook — he cannot paste a
-post without handling it. What remains is the first argument: AI-generated
-illustration on a clinical safety page reads as content-marketing filler,
-and anything implying a clinical scene misleads. A deterministic template
-stays the right answer when visuals are wanted.
-
-The original argument still holds in full for Moltbook, where the machine
-does the posting: the gate works because approving is cheap. An image needs
+With the machine posting to both networks, the original argument holds for
+both: the gate works because approving is cheap. An image needs
 looking at, audio needs listening to in real time, and once approval is a
 three-minute job it gets rubber-stamped — which is worse than no gate,
 because the chain then records that he approved it.

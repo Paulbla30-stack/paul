@@ -226,11 +226,9 @@ def _send(p, table: str) -> dict:
     whatever the proposal's network, so a draft for a draft-only network
     would have been posted to the wrong place entirely.
     """
-    from proposals import DRAFT_ONLY, may_send
+    from proposals import may_send, refusal_reason
     if not may_send(p.network):
-        reason = ("is draft-only: the operator posts it himself"
-                  if (p.network or "").strip().lower() in DRAFT_ONLY
-                  else "is not a network this project may post to")
+        reason = refusal_reason(p.network)
         log.warning("refusing to send proposal %s: %r %s", p.id, p.network, reason)
         return {"status": "failed", "published": False,
                 "detail": f"{p.network!r} {reason}; nothing was sent"}

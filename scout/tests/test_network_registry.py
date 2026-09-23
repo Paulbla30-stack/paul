@@ -19,7 +19,8 @@ import unittest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 import approve_app  # noqa: E402
-from proposals import DRAFT_ONLY, SENDABLE, may_send  # noqa: E402
+from proposals import (PERMITTED, SENDERS, has_sender, may_send,  # noqa: E402
+                       permitted, refusal_reason)
 
 
 class _P:
@@ -38,17 +39,26 @@ class RegistryTest(unittest.TestCase):
     def test_moltbook_is_sendable(self):
         self.assertTrue(may_send("moltbook"))
 
-    def test_facebook_is_not(self):
+    def test_facebook_is_permitted_but_has_no_write_path_yet(self):
+        # Paul's decision is that the machine may post there. The sender does
+        # not exist, so it is still refused — and refused for the honest
+        # reason, not silently treated as forbidden.
+        self.assertTrue(permitted("facebook"))
+        self.assertFalse(has_sender("facebook"))
         self.assertFalse(may_send("facebook"))
+        self.assertIn("no write path", refusal_reason("facebook"))
 
-    def test_the_two_sets_do_not_overlap(self):
-        self.assertEqual(SENDABLE & DRAFT_ONLY, frozenset())
+    def test_every_sender_is_for_a_permitted_network(self):
+        # A write path to somewhere nobody decided about is the dangerous
+        # direction: the code could post before the decision was made.
+        self.assertTrue(set(SENDERS) <= set(PERMITTED))
 
     def test_an_unclassified_network_is_refused(self):
         # A new destination has to be classified deliberately. Defaulting to
         # sendable is how a network nobody decided about gets posted to.
         for unknown in ("linkedin", "x", "twitter", "mastodon", "", None):
             self.assertFalse(may_send(unknown), unknown)
+            self.assertFalse(permitted(unknown), unknown)
 
     def test_case_and_spacing_do_not_decide(self):
         for spelling in ("Moltbook", "MOLTBOOK", "  moltbook  "):
@@ -72,16 +82,21 @@ class SendGuardTest(unittest.TestCase):
         sender.MoltbookSender = _boom
         self.addCleanup(lambda: setattr(sender, "MoltbookSender", self._real))
 
-    def test_a_draft_only_network_is_refused(self):
+    def test_a_permitted_network_with_no_sender_is_refused(self):
+        # This is the case that would otherwise post a Facebook draft to
+        # Moltbook, because _send used to call the Moltbook sender for
+        # anything approved.
         out = approve_app._send(_P("facebook"), "tbl")
         self.assertEqual(out["status"], "failed")
         self.assertFalse(out["published"])
-        self.assertIn("draft-only", out["detail"])
+        self.assertIn("no write path", out["detail"])
         self.assertIn("nothing was sent", out["detail"])
 
-    def test_the_refusal_says_who_posts_it_instead(self):
-        out = approve_app._send(_P("facebook"), "tbl")
-        self.assertIn("operator posts it himself", out["detail"])
+    def test_the_refusal_distinguishes_not_yet_from_never(self):
+        not_yet = approve_app._send(_P("facebook"), "tbl")["detail"]
+        never = approve_app._send(_P("linkedin"), "tbl")["detail"]
+        self.assertNotEqual(not_yet, never)
+        self.assertIn("permitted", not_yet)
 
     def test_an_unclassified_network_is_refused_too(self):
         out = approve_app._send(_P("linkedin"), "tbl")
