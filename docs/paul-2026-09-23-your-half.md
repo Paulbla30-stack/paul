@@ -51,27 +51,71 @@ Same capability, no spine.
 
 ---
 
-## 2. One Terraform import, because I created a policy by hand
+## 2. ~~One Terraform import~~ — done, and it found something worse
 
-I added the inline policy `jarvis-scout-read` to the instance role directly, so
-the Marketing tab could read the scout's proposals. It is declared in
-`aws/terraform/main.tf:211` under the same name, so the next `terraform apply`
-will try to create something that already exists and fail.
+The import is in and it is clean:
 
 ```
-cd aws/terraform
-terraform import 'aws_iam_role_policy.scout_read[0]' \
-  jarvis-0cebbd6512f7ecc9f8838558a3:jarvis-scout-read
-terraform plan        # expect: no changes to scout_read
+aws_iam_role_policy.scout_read[0]
+No changes. Your infrastructure matches the configuration.
 ```
 
-The `[0]` is because the resource has `count = var.scout_table == "" ? 0 : 1`.
-`var.scout_table` defaults to `jarvis-scout`, which is the live table, so the
-count is 1 and the index is 0.
+The hand-made policy and the declared one are identical. That question is
+closed.
 
-If `plan` shows a diff after the import, tell me what it says rather than
-applying it — it would mean the hand-made policy and the declared one differ,
-and I would rather find out which of the two is wrong than let apply pick.
+**But do not run `terraform apply`.** Getting the import to run at all meant
+correcting three defaults, and the plan that came back afterwards is not safe.
+
+### Three defaults aimed at an estate that does not exist
+
+None of these changes any infrastructure. They change where Terraform aims
+when nobody remembers a `-var` flag on the command line — and every apply so
+far has depended on somebody remembering all three.
+
+| variable | was | is now | what the old value did |
+|---|---|---|---|
+| `llm_provider` | `anthropic` | `bedrock` | looked up a secret `jarvis/anthropic-api-key` that does not exist, and that failure aborted **every** terraform command before it did anything else |
+| `region` | `eu-west-2` | `us-west-2` | pointed the provider at London. The first import attempt read London's default VPC; only the second read yours |
+| `name` | `jarvis-agent` | `jarvis` | see below |
+
+The `name` one was the bad one. Nearly every resource is named from it, so
+the plan came back:
+
+```
+Plan: 21 to add, 0 to change, 16 to destroy
+```
+
+— the instance replaced, the IAM role replaced, and **the Object-Locked ledger
+witness bucket destroyed and recreated** under a new name. That is not drift.
+That is Terraform correctly comparing your estate against a different estate
+that happens to share a state file. Correcting the default takes the same plan
+to 8 add, 1 change, 3 destroy.
+
+**On "key role can be dropped":** I read that as the Anthropic API key path —
+the `jarvis/anthropic-api-key` secret and the IAM grant that reads it
+(`aws_iam_role_policy.llm_key`). Defaulting `llm_provider` to `bedrock` makes
+both count zero. That policy was never in the state file, so nothing live was
+removed. If you meant a different role, say so and I will put it back.
+
+### What the plan still says, and why apply is not safe
+
+I have not touched any of this — the choices in it are yours.
+
+- **`aws_instance.jarvis` must be replaced.** The AMI it was actually built
+  from, `ami-08c4f9cf196d23579`, no longer exists in the account, and the
+  repo's user data no longer matches the instance's. Either difference on its
+  own destroys and rebuilds the box.
+- **The memory bucket exists and is not in state.** Terraform would try to
+  create `jarvis-memory-485964361844-jarvis` over the top of itself.
+- **`notify[0]` and `tunnel_token[0]` would be destroyed**, their counts
+  having gone to zero.
+- **`textract[0]` and `memory_backup[0]` would be created** — grants the code
+  declares and the live role does not have. OCR is one of them, which is worth
+  knowing given item 7.
+
+None of it is urgent while nobody runs apply. Tell me when you want it
+reconciled and I will do it resource by resource, importing rather than
+replacing, and show you each step before it lands.
 
 ---
 
@@ -348,17 +392,22 @@ the agent. Told Jarvis the same, the same day.
 
 ---
 
-## 11. Those three stale goals are now blocking real work
+## 11. ~~Those three stale goals~~ — retired on your ruling
 
-Item 7 above has stopped being tidy-up. I asked Jarvis to open Hacker News and
-tell me what was on it. It replied about the missing gas and electricity bills
-instead — it never reached the browser.
+You said they were my tests and he never needed them. Withdrawn through the
+agent's own withdraw path, so they are superseded rather than deleted and the
+record of having been asked survives.
 
-The three goals sit at priority 5, above every standing goal it has, and they
-can never complete. Everything else queues behind them.
+Checked after a restart, because surviving a restart was the whole original
+problem:
 
-Its proposal to retire them is waiting for you. Approving it is the single
-highest-value thing on this list after the Bedrock form.
+```
+after a restart, open goals naming those files: 0
+open goals in total: 7
+```
+
+The seven left are the five standing ones and the two from your instance user
+data. Jarvis has been told the ruling came from you.
 
 ---
 
