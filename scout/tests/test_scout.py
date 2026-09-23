@@ -442,7 +442,7 @@ def test_a_failed_chain_append_does_not_mark_the_hit_seen():
     cfg = _app.load_config(os.path.join(ROOT, "config.toml"))
     store = _Store()
     saved = _app.collect
-    _app.collect = lambda c, n: ([item], ["arxiv"], [])
+    _app.collect = lambda c, n: ([item], ["arxiv"], [], [])
     try:
         _app.run(cfg, hit_store=store, chain_store=_Boom(), mailer=_Mail())
     finally:

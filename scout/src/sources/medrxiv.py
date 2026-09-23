@@ -7,9 +7,13 @@ so results are filtered to the configured categories before scoring.
 
 from __future__ import annotations
 
+import logging
+
 from datetime import timedelta
 
-from . import Item, http_json, sanitise, safe_url, utc, MAX_TITLE, MAX_BODY, MAX_AUTHOR
+from . import BudgetExpired, Item, MAX_AUTHOR, MAX_BODY, MAX_TITLE, http_json, safe_url, sanitise, utc
+
+log = logging.getLogger("scout.medrxiv")
 
 SOURCE = "medrxiv"
 
@@ -23,7 +27,17 @@ def fetch(cfg: dict, now, lookback_days: int, limit: int) -> list[Item]:
     out: dict[str, Item] = {}
     cursor = 0
     while True:
-        data = http_json(f"{endpoint}/{start}/{end}/{cursor}", timeout=30.0, retries=2)
+        try:
+            data = http_json(f"{endpoint}/{start}/{end}/{cursor}",
+                             timeout=30.0, retries=2)
+        except BudgetExpired as why:
+            # Stop with what has been gathered rather than losing the lot.
+            # collect() reads budget.tripped and reports the source as
+            # truncated, because a partial sweep presented as a complete one
+            # is the failure this codebase keeps coming back to.
+            log.warning("medrxiv: %s; returning %d of an unknown total",
+                        why, len(out))
+            break
         msgs = data.get("messages") or [{}]
         if (msgs[0].get("status") or "").lower() != "ok":
             break

@@ -23,6 +23,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from chain import Chain, DynamoChainStore, LocalChainStore          # noqa: E402
 from scoring import Scorer                                          # noqa: E402
 from store import DynamoHitStore, LocalHitStore, record_from        # noqa: E402
+import sources                                                      # noqa: E402
 from sources import arxiv, hackernews, lesswrong, medrxiv, moltbook  # noqa: E402
 import digest                                                       # noqa: E402
 
@@ -40,14 +41,20 @@ def load_config(path: str | None = None) -> dict:
         return tomllib.load(fh)
 
 
-def collect(cfg: dict, now: datetime) -> tuple[list, list[str], list[str]]:
+def collect(cfg: dict, now: datetime) -> tuple[list, list[str], list[str], list[str]]:
     """Fetch from every enabled source. One source failing never fails the run."""
     lookback = int(cfg["run"]["lookback_days"])
     limit = int(cfg["run"]["max_items_per_source"])
     kw = cfg["keywords"]
     search_terms = list(kw["tier_a"]) + list(kw["tier_b"])
 
-    items, ok, failed = [], [], []
+    # How long any one source may spend. Nothing bounded this before: every
+    # request had a timeout and a paginating source could still make hundreds
+    # of them. On 23 Sep 2026 medRxiv took 234 seconds of the Lambda's 300 and
+    # the run hit the wall; it survived only because Lambda retried it, and a
+    # retry after a partial run can mark items seen and then send nothing.
+    budget_s = float(cfg["run"].get("source_budget_s", 90.0))
+    items, ok, failed, truncated = [], [], [], []
     # Order matters. arXiv throttles hard and answers 406 when it does, so it
     # goes first, before the ~20 rapid queries Hacker News needs. Running it
     # last cost a whole afternoon of "arXiv is broken" that it was not.
@@ -63,15 +70,28 @@ def collect(cfg: dict, now: datetime) -> tuple[list, list[str], list[str]]:
         if not scfg.get("enabled"):
             log.info("source %s: disabled in config", name)
             continue
+        budget = sources.Budget(budget_s)
+        sources.set_budget(budget)
         try:
             got = fn(scfg)
             items.extend(got)
             ok.append(name)
-            log.info("source %s: %d items", name, len(got))
+            if budget.tripped:
+                # Reported separately from ok and from failed, because it is
+                # neither: some of the window was read and the rest was not,
+                # and calling that a clean sweep is how a partial day gets
+                # filed as a complete one.
+                truncated.append(name)
+                log.warning("source %s: %d items, TRUNCATED at its %.0fs budget",
+                            name, len(got), budget_s)
+            else:
+                log.info("source %s: %d items", name, len(got))
         except Exception as e:   # noqa: BLE001 - one bad source must not kill the run
             failed.append(name)
             log.warning("source %s FAILED: %s: %s", name, type(e).__name__, str(e)[:200])
-    return items, ok, failed
+        finally:
+            sources.set_budget(None)
+    return items, ok, failed, truncated
 
 
 def run(cfg: dict, *, hit_store, chain_store, mailer, now: datetime | None = None,
@@ -95,7 +115,7 @@ def run(cfg: dict, *, hit_store, chain_store, mailer, now: datetime | None = Non
         cfg = {**cfg, "run": {**cfg["run"], "lookback_days": wide}}
         log.info("first run: sweeping %d days instead of the usual window", wide)
 
-    items, ok, failed = collect(cfg, now)
+    items, ok, failed, truncated = collect(cfg, now)
 
     vetoed = 0
     new_records: list[dict] = []
@@ -146,6 +166,7 @@ def run(cfg: dict, *, hit_store, chain_store, mailer, now: datetime | None = Non
         "above": len(above),
         "sources_ok": ok,
         "sources_failed": failed,
+        "sources_truncated": truncated,
         "threshold": threshold,
     }
     try:

@@ -29,6 +29,22 @@ first_run_lookback_days = 90
 # suddenly returning thousands of results, not a quality setting.
 max_items_per_source = 200
 
+# How long one source may spend before it has to stop, in seconds.
+#
+# max_items_per_source bounds what comes back; this bounds what it costs to
+# find out. They are different guards and only one of them existed. Every
+# request already had a timeout, and medRxiv pages through its results in a
+# loop, so a slow morning is not one slow request, it is two hundred of them:
+# on 23 Sep 2026 it spent 234 seconds of the Lambda's 300 and the run hit the
+# wall. No single request was slow enough for any timeout to notice.
+#
+# Five sources at 90s fit inside the Lambda's 600s with room for the scoring
+# and the digest. A source that runs out is reported as truncated -- not as
+# ok, and not as failed -- because some of the window was read and the rest
+# was not, and a partial sweep filed as a complete one is exactly the shape
+# of error this project keeps having to undo.
+source_budget_s = 90.0
+
 # Items scoring at or above this go in the digest. Nothing above it means
 # no email is sent at all.
 #

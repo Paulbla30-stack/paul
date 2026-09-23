@@ -101,6 +101,54 @@ class FetchError(Exception):
     pass
 
 
+class BudgetExpired(FetchError):
+    """A source ran out of its wall-clock allowance."""
+
+
+class Budget:
+    """How long one source may spend before it has to stop.
+
+    Every request already had a timeout. What nothing had was a limit on how
+    many requests a source could make: medRxiv pages through its results in a
+    `while True`, so a slow morning is not a slow request, it is two hundred
+    of them. On 23 Sep 2026 that took 234 seconds of the Lambda's 300 and the
+    run died at the wall; it survived only because Lambda retried it.
+
+    A per-request timeout cannot catch that, because no individual request was
+    slow. This is the missing bound, and it lives in http_get so every source
+    inherits it without changing a single fetcher's signature.
+    """
+
+    def __init__(self, seconds: float, clock=time.monotonic):
+        self.seconds = float(seconds)
+        self.clock = clock
+        self.started = clock()
+        self.tripped = False
+
+    def remaining(self) -> float:
+        return self.seconds - (self.clock() - self.started)
+
+    def check(self, url: str = "") -> None:
+        if self.remaining() <= 0:
+            self.tripped = True
+            raise BudgetExpired(
+                f"source budget of {self.seconds:.0f}s spent"
+                + (f" before {url}" if url else ""))
+
+
+_BUDGET: "Budget | None" = None
+
+
+def set_budget(budget: "Budget | None") -> None:
+    """Set the allowance the next fetch runs under. None removes it."""
+    global _BUDGET
+    _BUDGET = budget
+
+
+def current_budget() -> "Budget | None":
+    return _BUDGET
+
+
 # Codes that mean "you are going too fast", not "this is broken".
 # arXiv answers 406 when throttling, which is unusual but real: observed
 # 21 Sep 2026, then 12/12 identical requests succeeded once spaced out.
@@ -119,8 +167,17 @@ def http_get(url: str, *, timeout: float = 25.0, retries: int = 2,
     hdrs = {"User-Agent": USER_AGENT, "Accept": "*/*"}
     if headers:
         hdrs.update(headers)
+    budget = current_budget()
     last = None
     for attempt in range(retries + 1):
+        # Checked before every attempt, so the backoff sleeps count against the
+        # allowance too -- a source that spends its budget waiting has still
+        # spent it.
+        if budget is not None:
+            budget.check(url)
+            # Never wait longer than there is left: a 30s timeout with 4s of
+            # budget remaining just moves the overrun into the socket.
+            timeout = min(timeout, max(1.0, budget.remaining()))
         try:
             req = urllib.request.Request(url, headers=hdrs, data=data)
             with urllib.request.urlopen(req, timeout=timeout) as r:
