@@ -89,7 +89,40 @@ def refusal_reason(network: str) -> str:
     return ""
 
 TERMINAL = (REJECTED, EXPIRED, SENT, FAILED)
-DEFAULT_TTL_DAYS = 7
+
+# How long a proposal stays open, by what the post is actually for.
+#
+# One window for everything was the first design and it was wrong. A reply to
+# a live thread is worthless once the thread moves on; an announcement of
+# Paul's own work has no external clock and is his to time. Giving both seven
+# days tells the truth about neither, and the number that lapses them is not
+# a scheduling detail — it is the system's claim about how long the
+# opportunity lasted.
+#
+# So the window comes from the purpose, and the purposes are named after what
+# the post is doing rather than how urgent somebody feels:
+PURPOSE_TTL_DAYS = {
+    "reply":     2,    # joining a conversation happening now; it moves on
+    "news":      4,    # responding to something just published or announced
+    "release":  14,    # announcing Paul's own work; no one else sets the clock
+    "evergreen": 30,   # explains the framework; nothing external expires it
+}
+
+# An unclassified proposal gets the SHORTEST window, not a comfortable middle.
+# Two reasons. A drafter that did not say what a post is for has told you
+# something about its confidence. And of the two ways to be wrong, lapsing a
+# good proposal is recoverable — it can be proposed again — while posting a
+# reply to a three-week-old thread cannot be taken back.
+DEFAULT_PURPOSE = "news"
+DEFAULT_TTL_DAYS = PURPOSE_TTL_DAYS[DEFAULT_PURPOSE]
+
+
+def ttl_for(purpose: str) -> int:
+    """Days a proposal for this purpose stays open. Unknown fails short."""
+    name = (purpose or "").strip().lower()
+    if name in PURPOSE_TTL_DAYS:
+        return PURPOSE_TTL_DAYS[name]
+    return min(PURPOSE_TTL_DAYS.values())
 
 
 # Whose behalf a proposal is made on. Paul is the first tenant and for now
@@ -127,23 +160,32 @@ class Proposal:
     # to the operator rather than to nobody: an unattributed proposal is the
     # one shape this record must never hold.
     tenant: str = DEFAULT_TENANT
+    # What the post is for, which is what decides how long it stays open.
+    # On the record rather than only in the expiry maths, so a lapse can be
+    # read back as "the moment passed" rather than "nobody looked".
+    purpose: str = DEFAULT_PURPOSE
 
     @staticmethod
     def new(*, kind: str, network: str, target_url: str, target_title: str,
             draft: str, rationale: str, discloses: list[str],
             source_item: dict | None = None, now: datetime | None = None,
-            ttl_days: int = DEFAULT_TTL_DAYS,
-            tenant: str = DEFAULT_TENANT) -> "Proposal":
+            ttl_days: int | None = None,
+            tenant: str = DEFAULT_TENANT,
+            purpose: str = DEFAULT_PURPOSE) -> "Proposal":
+        """`ttl_days` overrides the purpose's window; normally leave it unset."""
         now = now or datetime.now(timezone.utc)
+        purpose = (purpose or "").strip().lower() or DEFAULT_PURPOSE
+        days = ttl_for(purpose) if ttl_days is None else int(ttl_days)
         return Proposal(
             id=uuid.uuid4().hex,
             kind=kind, network=network,
             target_url=target_url, target_title=target_title,
             draft=draft, rationale=rationale, discloses=list(discloses),
             created_at=now.isoformat(),
-            expires_at=(now + timedelta(days=ttl_days)).isoformat(),
+            expires_at=(now + timedelta(days=days)).isoformat(),
             source_item=source_item or {},
             tenant=(tenant or DEFAULT_TENANT).strip().lower() or DEFAULT_TENANT,
+            purpose=purpose,
         )
 
     @property

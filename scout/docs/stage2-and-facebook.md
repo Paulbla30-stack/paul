@@ -70,6 +70,50 @@ guarantee `voice.py`'s own doctrine warns about.
 
 14 tests, 125 in the scout suite.
 
+## Two decisions settled, 23 September
+
+**Jarvis sees what it needs to.** Paul: it should be able to see all the
+information it needs to complete its objectives. So the instance reads the
+scout's table, and the agent — which serves the UI from the same process —
+sees it too. Read-only, one direction. The write path stays in the Lambda
+behind the approve app.
+
+**The window is not one number.** Paul: urgency varies — urgent, new news,
+important, regular posts, what the post is for — and forcing that into one
+box "does it a dishonesty". He is right, and the number that lapses a
+proposal is not a scheduling detail. It is the system's claim about how long
+the opportunity lasted.
+
+So the window comes from the purpose:
+
+| purpose | days | why |
+|---|---|---|
+| `reply` | 2 | joining a conversation happening now; it moves on |
+| `news` | 4 | responding to something just published or announced |
+| `release` | 14 | announcing Paul's own work; no one else sets the clock |
+| `evergreen` | 30 | explains the framework; nothing external expires it |
+
+An unclassified proposal gets the **shortest** window, not a comfortable
+middle. A drafter that did not say what a post is for has said something
+about its confidence; and of the two ways to be wrong, lapsing a good
+proposal is recoverable — it can be proposed again — while replying to a
+three-week-old thread cannot be taken back. `ttl_for()` computes that
+fallback from the table rather than naming a constant, so adding a
+long-lived purpose later cannot silently become the window for everything
+nobody classified.
+
+### The interaction this creates
+
+Short windows and an approval gate pull against each other, and the pull is
+worst exactly where it matters. A `reply` lapses in two days; away for three
+and the most time-sensitive drafts are the ones that die. That is correct
+behaviour — silence is not consent — but it means a daily digest is the
+wrong notification for a two-day window.
+
+Whatever the marketing area ends up showing, short-window proposals need to
+sort first and say how long is left. Anything else and the gate quietly
+becomes a filter that only passes the unimportant.
+
 ## What connecting Stage 2 actually needs
 
 Decisions, not much code:
