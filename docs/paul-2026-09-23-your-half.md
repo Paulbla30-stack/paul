@@ -413,6 +413,42 @@ a stranger. **The moment you turn logins on, every site needs approving once.**
 Widening one capability re-narrows the other automatically, rather than by
 anyone remembering.
 
+### Your hard rule, built (25 Sep)
+
+*"If Jarvis wants to post on something he gets approval first."* It sits
+**above** the grant. Reading and moving are free; anything that would *say*
+something waits for you as a card in the proposals you already read. The
+browser decides from what the action **does**, not what the button is called:
+a form submission, a press inside a form, a press on a page where text is
+composed in a box, a bare key press. It fails closed. There is no switch for
+it.
+
+Proved live on a real form: Jarvis's submit → *waited for you*; its press on
+the submit button → *waited*; it typed into the comment box (allowed), and
+then even a harmless-looking button *waited* because text was composed; you
+pressing submit yourself → went through and read the result.
+
+### What it sees now
+
+Headings, the part of the page that is actually **on the screen** (marked as
+such, with "more below" when there is), every button with a ref and whether it
+sits inside a form, and a note when a box holds composed text. The Browser tab
+shows the buttons and the on-screen text first.
+
+### The daily debrief
+
+Every browser action — Jarvis's with its outcome, yours marked as yours, and
+every decision you make on one of its browser cards — goes to a journal on the
+agent's side of the fence. Once a day after **21:00** it writes a plain
+debrief: pages, actions, what waited for you, what you accepted or declined,
+what was refused, what failed. Asked, Jarvis chose to list only the sites it
+*did something on* rather than every page it read, and I took that. It is on
+the **Debrief** card in the tab and Jarvis can give it on demand.
+
+**One thing that is yours:** the debrief is *sent* through the notifier, and
+`notify.enabled` is still `false` in the config. Until you turn notifications
+on it lands as a note Jarvis can see and on the tab, not in your inbox.
+
 ### Two switches still off, both yours
 
 - **`browser.persistent`** — keeps logins between sessions. Off. Turning it on
