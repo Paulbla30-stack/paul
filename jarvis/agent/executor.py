@@ -330,6 +330,7 @@ class TaskExecutor:
             TaskType.BROWSE_READ: self._handle_browse_read,
             TaskType.BROWSE_ACT: self._handle_browse_act,
             TaskType.BROWSE_MOVE: self._handle_browse_move,
+            TaskType.BROWSE_DEBRIEF: self._handle_browse_debrief,
         }
 
     def execute(self, task: Task) -> dict:
@@ -683,11 +684,30 @@ class TaskExecutor:
         """
         from jarvis.agent import browse as _browse
 
+        journal = getattr(getattr(self, "browser", None), "journal", None)
         if not isinstance(got, dict) or got.get("error"):
             reason = (got or {}).get("reason") or ""
             error = (got or {}).get("error") or "the browser did not answer"
+            if reason == "needs-approval":
+                # Not a failure and not something to rephrase. The browser
+                # said this would say something to someone, or act on a site
+                # Paul has not opened, and his rule is that it waits for him.
+                # reflect() in core turns this into a card.
+                detail = str(got.get("detail") or error)
+                if journal is not None:
+                    journal.record(did, self._last_url(), "needs-approval",
+                                   reason=detail, gate=str(got.get("gate") or ""))
+                self.log.info("browse %s waits for the operator: %s", did, detail)
+                return {"success": False, "needs_approval": True,
+                        "gate": str(got.get("gate") or ""), "detail": detail,
+                        "error": f"waiting for Paul: {detail}"}
+            outcome = "refused" if reason else "error"
+            if journal is not None:
+                journal.record(did, self._last_url(), outcome, reason=error)
             return {"success": False, "error": error,
                     **({"reason": reason} if reason else {})}
+        if journal is not None:
+            journal.record(did, str(got.get("url") or ""), "ok")
         out = {
             "did": did,
             "url": got.get("url") or "",
@@ -706,6 +726,26 @@ class TaskExecutor:
             out["note"] = got["error"]
         self.log.info("browse %s: %s (%d links)", did, out["url"], out["links"])
         return {"success": True, "output": out}
+
+    def _last_url(self) -> str:
+        view = getattr(self, "browser", None)
+        last = getattr(view, "last", None) or {}
+        return str(last.get("url") or "")
+
+    def _handle_browse_debrief(self, task: Task) -> dict:
+        """What the browser was used for, read back from the journal."""
+        view, refusal = self._browser_or_reason()
+        if refusal:
+            return refusal
+        journal = getattr(view, "journal", None)
+        if journal is None:
+            return {"success": False, "error": "the browser journal is not configured"}
+        try:
+            hours = max(1, min(168, int(task.metadata.get("hours") or 24)))
+        except (TypeError, ValueError):
+            hours = 24
+        got = journal.debrief(hours * 3600)
+        return {"success": True, "output": {**got, "text": journal.render(got)}}
 
     def _handle_browse_open(self, task: Task) -> dict:
         """Open an address and read it."""

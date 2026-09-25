@@ -377,8 +377,24 @@
     </div>
 
     <div class="card">
+      <h2>Buttons on this page</h2>
+      <p class="small muted" style="margin:0 0 6px">Pressing one here is you pressing
+      it. When the agent wants to press one that would post or send, it asks
+      you first &mdash; that shows up under Agent &rarr; proposals.</p>
+      <ul id="brControls" class="small"></ul>
+    </div>
+
+    <div class="card">
       <h2>Links on this page</h2>
       <ul id="brLinks" class="small"></ul>
+    </div>
+
+    <div class="card">
+      <h2>Debrief</h2>
+      <p class="small muted" style="margin:0 0 6px">What the browser was used for,
+      what waited for you, and where you corrected it. Sent to you daily as
+      well, after the debrief hour.</p>
+      <pre id="brDebrief" class="small" style="white-space:pre-wrap;margin:0"></pre>
     </div>
   </section>
 
@@ -997,6 +1013,20 @@
       li.appendChild(tail);
       list.appendChild(li);
     }
+    const ctl = $("brControls"); ctl.innerHTML = "";
+    for (const c of (page && page.controls) || []) {
+      const li = document.createElement("li");
+      const a = document.createElement("a");
+      a.href = "#"; a.textContent = (c.text || "(unlabelled)").slice(0, 80);
+      a.onclick = (e) => { e.preventDefault(); brPost("/browse/act", { kind: "click", ref: c.ref }, "Pressing " + c.ref + "..."); };
+      li.appendChild(a);
+      const tail = document.createElement("span"); tail.className = "muted";
+      tail.textContent = "  " + c.ref + (c.in_form ? "  (in a form)" : "");
+      li.appendChild(tail); ctl.appendChild(li);
+    }
+    if (page && page.on_screen) {
+      $("brText").textContent = "ON SCREEN NOW\n" + page.on_screen + (page.below_fold ? "\n\n(more below)\n\n" : "\n\n") + "FULL PAGE\n" + (page.text || "");
+    }
     if (page && page.truncated) {
       const li = document.createElement("li");
       li.className = "muted";
@@ -1016,6 +1046,8 @@
     brSay(h.up ? ("Ready · clean profile" + (h.blocked ? " · " + h.blocked + " request(s) blocked this session" : ""))
                : ("Not started yet" + (h.reason ? " (" + h.reason + ")" : "")));
     brRender(got.page && got.page.url ? got.page : null);
+    try { const d = await api("/browse/debrief"); $("brDebrief").textContent = d.text || ""; }
+    catch (e) { $("brDebrief").textContent = "(no debrief: " + e.message + ")"; }
   }
 
   async function brPost(path, body, saying) {

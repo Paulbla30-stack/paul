@@ -629,6 +629,77 @@ class AgentCore:
                          self.rung, entry["description"])
         return entry
 
+    def _record_browse_proposal(self, task, result: dict) -> dict:
+        """A browser action that waits for Paul: post, send, submit, buy.
+
+        Same list, same card, same memory as a spine proposal, so it shows up
+        where he already looks. Marked browse=True so his decision can be
+        written to the browser journal, which is where "where I had to
+        correct" lives for the daily debrief.
+        """
+        meta = task.metadata or {}
+        what = " ".join(str(meta.get(k) or "") for k in ("kind", "ref", "text")).strip()
+        entry = {
+            "ts": time.time(),
+            "cycle": self.cycle_count,
+            "description": f"Browser: {task.description}"[:300],
+            "command": f"browse_act {what}"[:1000],
+            "goal": str(meta.get("goal") or "")[:300],
+            "reasoning": str(result.get("detail") or "")[:500],
+            "rung": self.rung,
+            "browse": True,
+            "gate": str(result.get("gate") or ""),
+            "url": str(getattr(getattr(self, "browser", None), "last", {}).get("url") or "")[:500],
+        }
+        self.proposals.append(entry)
+        summary = (f"Proposed (waiting for you, {entry['gate'] or 'browser'}): "
+                   f"{entry['description']} [{entry['command'][:200]}] -- {entry['reasoning'][:200]}")
+        self.remember(summary, kind="proposal", source="brain")
+        self.log.warning("Browser action waits for the operator: %s", entry["description"])
+        return entry
+
+    def _maybe_daily_debrief(self):
+        """Once a day, after the debrief hour, say what the browser was used for.
+
+        Paul's ask. Sent through the notifier where one is configured, and
+        always kept as a note the model can see, so "what did you do online
+        yesterday" has an answer even where nothing was sent.
+        """
+        view = getattr(self, "browser", None)
+        journal = getattr(view, "journal", None)
+        if journal is None:
+            return
+        try:
+            from zoneinfo import ZoneInfo
+            tz = ZoneInfo(str((self.config.get("diary") or {}).get("timezone") or "UTC"))
+        except Exception:                      # noqa: BLE001
+            import datetime as _dt
+            tz = _dt.timezone.utc
+        import datetime as _dt
+        now = _dt.datetime.now(tz)
+        stamp = now.strftime("%Y-%m-%d")
+        if now.hour < int(getattr(view, "debrief_hour", 21)):
+            return
+        if getattr(self, "_debriefed_on", None) == stamp:
+            return
+        self._debriefed_on = stamp
+        got = journal.debrief()
+        text = journal.render(got)
+        self.remember(f"Daily browser debrief ({stamp}): {text[:900]}", kind="note",
+                      source="system")
+        notifier = getattr(self, "notifier", None)
+        if notifier is not None and (got.get("actions") or got.get("operator_actions")):
+            try:
+                notifier.send("Browser debrief", text, severity="info",
+                              key=f"browser-debrief-{stamp}")
+            except Exception as exc:           # noqa: BLE001
+                self.log.debug("debrief not sent: %s", exc)
+        self.ledger.record("action", {"cycle": self.cycle_count, "actor": "system",
+                                      "action": "browser_debrief", "day": stamp,
+                                      "actions": got.get("actions"),
+                                      "waited": len(got.get("waited_for_paul") or []),
+                                      "corrections": got.get("corrections")})
+
     def _raise_hunch(self, decision) -> Optional[dict]:
         """File a hunch the model attached to this decision.
 
@@ -977,6 +1048,15 @@ class AgentCore:
             },
         )
 
+        if not success and result.get("needs_approval"):
+            # The browser said this would say something to someone, or act on
+            # a site Paul has not opened. Not a failure: a card. Paul's rule,
+            # 23 September 2026 -- "if jarvis wants to post on something he
+            # get approval first" -- and it sits above the grant.
+            self._record_browse_proposal(task, result)
+            self.brain_failures = 0
+            return
+
         if not success:
             error = result.get("error", "Unknown error")
             self.log.warning("Task failed: %s - %s", task.description, error)
@@ -1006,6 +1086,7 @@ class AgentCore:
     def run_cycle(self) -> dict:
         """Run a single observe-plan-act-reflect cycle."""
         self.cycle_count += 1
+        self._maybe_daily_debrief()
         cycle_result = {"cycle": self.cycle_count}
 
         # 1. Observe
@@ -1571,6 +1652,11 @@ class AgentCore:
             summary += f" -- because: {note}"
         self.remember(summary, kind="operator", source="operator")
         self.log.info("Proposal %s by operator: %s", verdict, str(text)[:160])
+        if proposal.get("browse"):
+            journal = getattr(getattr(self, "browser", None), "journal", None)
+            if journal is not None:
+                journal.record(str(text)[:200], proposal.get("url") or "", verdict,
+                               by="operator", reason=note, kind="decision")
         self.ledger.record("action", {
             "cycle": self.cycle_count, "actor": "operator",
             "action": "decide_proposal", "verdict": verdict,

@@ -41,6 +41,7 @@ from typing import Optional
 MAX_TEXT = 40000
 MAX_LINKS = 200
 MAX_FIELDS = 60
+MAX_CONTROLS = 120
 MAX_HREF = 2000
 
 # Fields whose presence makes a form un-submittable at any rung. Not a
@@ -108,6 +109,25 @@ class Field:
 
 
 @dataclass(frozen=True)
+class Control:
+    """Something clickable, and the two facts that decide whether it posts.
+
+    ``in_form`` is structural and is the one that matters: a page chooses what
+    its buttons say and can call a "post comment" button anything at all, but
+    it cannot make a button inside a form not be inside a form.
+    """
+
+    ref: str
+    text: str
+    kind: str = "button"
+    in_form: bool = False
+
+    def as_dict(self) -> dict:
+        return {"ref": self.ref, "text": self.text, "kind": self.kind,
+                "in_form": self.in_form}
+
+
+@dataclass(frozen=True)
 class Page:
     """One page load, as the agent is allowed to know it."""
 
@@ -116,6 +136,16 @@ class Page:
     text: str
     links: tuple = ()
     fields: tuple = ()
+    controls: tuple = ()
+    headings: tuple = ()
+    # What a person would actually be looking at, versus what is further down.
+    # Paul's point is that browsing is an experience rather than a fetch, and
+    # "it is on the page somewhere" is not the same as "it is on the screen".
+    on_screen: str = ""
+    below_fold: bool = False
+    # A visible multi-line field currently holds text. One press away from
+    # publishing it, whoever put it there.
+    composing: bool = False
     fetched_at: float = field(default_factory=time.time)
     truncated: bool = False
     status: Optional[int] = None
@@ -137,6 +167,12 @@ class Page:
                 return item
         return None
 
+    def control(self, ref: str) -> Optional[Control]:
+        for item in self.controls:
+            if item.ref == ref:
+                return item
+        return None
+
     def as_dict(self) -> dict:
         return {
             "url": self.url,
@@ -144,6 +180,11 @@ class Page:
             "text": self.text,
             "links": [l.as_dict() for l in self.links],
             "fields": [f.as_dict() for f in self.fields],
+            "controls": [c.as_dict() for c in self.controls],
+            "headings": list(self.headings),
+            "on_screen": self.on_screen,
+            "below_fold": self.below_fold,
+            "composing": self.composing,
             "fetched_at": self.fetched_at,
             "truncated": self.truncated,
             "status": self.status,
@@ -164,7 +205,17 @@ class Page:
                   autocomplete=str(f.get("autocomplete") or ""),
                   required=bool(f.get("required")))
             for f in (raw.get("fields") or [])[:MAX_FIELDS])
+        controls = tuple(
+            Control(ref=str(c.get("ref") or ""), text=str(c.get("text") or "")[:120],
+                    kind=str(c.get("kind") or "button"),
+                    in_form=bool(c.get("in_form")))
+            for c in (raw.get("controls") or [])[:MAX_CONTROLS])
         return cls(
+            controls=controls,
+            headings=tuple(_clean(str(h), 160) for h in (raw.get("headings") or [])[:40]),
+            on_screen=_clean(str(raw.get("on_screen") or ""), 6000),
+            below_fold=bool(raw.get("below_fold")),
+            composing=bool(raw.get("composing")),
             url=str(raw.get("url") or ""),
             title=_clean(str(raw.get("title") or ""), 300),
             text=_clean(str(raw.get("text") or ""), MAX_TEXT),
@@ -182,8 +233,9 @@ class Page:
 # elements are exactly where a page puts what it does not want Paul to read.
 EXTRACT_JS = r"""
 () => {
-  const MAX_LINKS = %(max_links)d, MAX_FIELDS = %(max_fields)d;
+  const MAX_LINKS = %(max_links)d, MAX_FIELDS = %(max_fields)d, MAX_CONTROLS = %(max_controls)d;
   const MAX_HREF = %(max_href)d;
+  const vh = window.innerHeight || 900, vw = window.innerWidth || 1280;
   const shown = (el) => {
     if (!el) return false;
     const s = window.getComputedStyle(el);
@@ -196,6 +248,13 @@ EXTRACT_JS = r"""
     // leaving it in the document for anything that reads the source.
     if (r.bottom < -2000 || r.right < -2000) return false;
     return true;
+  };
+  // What a person looking at the screen right now can actually see. "It is
+  // on the page" and "it is on the screen" are different facts, and the
+  // agent is told both.
+  const inView = (el) => {
+    const r = el.getBoundingClientRect();
+    return r.bottom > 0 && r.top < vh && r.right > 0 && r.left < vw;
   };
   const label = (el) => {
     const bits = [el.getAttribute('aria-label'), el.getAttribute('placeholder'),
@@ -218,7 +277,23 @@ EXTRACT_JS = r"""
                 href: href.slice(0, MAX_HREF)});
   }
 
+  // Things that can be pressed and are not links. in_form is the structural
+  // fact that decides whether pressing one sends something: a page chooses
+  // what its buttons say and can call "post comment" anything at all, but it
+  // cannot make a button inside a form not be inside a form.
+  const controls = [];
+  for (const el of document.querySelectorAll(
+        'button, input[type=submit], input[type=button], input[type=image], [role=button], summary')) {
+    if (controls.length >= MAX_CONTROLS) break;
+    if (!shown(el)) continue;
+    const text = (el.innerText || el.value || el.getAttribute('aria-label') || label(el) || '').trim();
+    controls.push({ref: 'C' + (controls.length + 1), text: text.slice(0, 120),
+                   kind: (el.tagName.toLowerCase() === 'input' ? (el.type || 'button') : el.tagName.toLowerCase()),
+                   in_form: !!el.closest('form')});
+  }
+
   const fields = [];
+  let composing = false;
   for (const el of document.querySelectorAll('input, textarea, select')) {
     if (fields.length >= MAX_FIELDS) break;
     if (el.type === 'hidden') {
@@ -229,22 +304,48 @@ EXTRACT_JS = r"""
       continue;
     }
     if (!shown(el)) continue;
+    const kind = (el.type || el.tagName.toLowerCase() || 'text').toLowerCase();
+    if (el.tagName.toLowerCase() === 'textarea' && (el.value || '').trim()) composing = true;
     fields.push({
       ref: 'F' + (fields.length + 1),
       label: label(el),
-      kind: (el.type || el.tagName.toLowerCase() || 'text').toLowerCase(),
+      kind: el.tagName.toLowerCase() === 'textarea' ? 'textarea' : kind,
       autocomplete: (el.getAttribute('autocomplete') || '').toLowerCase(),
       required: !!el.required,
     });
   }
 
+  const headings = [];
+  for (const h of document.querySelectorAll('h1, h2, h3')) {
+    if (headings.length >= 40) break;
+    if (!shown(h)) continue;
+    const t = (h.innerText || '').trim();
+    if (t) headings.push(h.tagName.toLowerCase() + ': ' + t.slice(0, 160));
+  }
+
+  // The visible viewport, as text: block-level elements that intersect it.
+  const seen = new Set(); const onScreen = [];
+  for (const el of document.querySelectorAll('h1,h2,h3,h4,p,li,td,th,dd,dt,blockquote,pre,label,summary,figcaption')) {
+    if (onScreen.length >= 120) break;
+    if (!shown(el) || !inView(el)) continue;
+    const t = (el.innerText || '').trim();
+    if (!t || seen.has(t)) continue;
+    seen.add(t); onScreen.push(t.slice(0, 400));
+  }
   const body = document.body;
+  const docH = Math.max(body ? body.scrollHeight : 0, document.documentElement.scrollHeight || 0);
   return {
     url: document.location.href,
     title: document.title || '',
     text: body ? (body.innerText || '') : '',
     links: links,
+    controls: controls,
     fields: fields,
+    headings: headings,
+    on_screen: onScreen.join('\n'),
+    below_fold: docH > (window.scrollY || 0) + vh + 40,
+    composing: composing,
   };
 }
-""" % {"max_links": MAX_LINKS, "max_fields": MAX_FIELDS, "max_href": MAX_HREF}
+""" % {"max_links": MAX_LINKS, "max_fields": MAX_FIELDS, "max_controls": MAX_CONTROLS,
+       "max_href": MAX_HREF}

@@ -430,3 +430,17 @@ browser:
   # persistent: true the better path is that Paul signs in once himself in the
   # Browser tab and the agent rides the session, never touching the secret.
   allow_secrets: false
+
+  # Paul's standing rule, and the one thing no grant lifts: anything that
+  # would SAY something -- post, comment, reply, send, submit a form, buy,
+  # book, sign up -- waits for him as a proposal. Decided by the browser
+  # (publish.py) from what the action DOES: a form submission, a press inside
+  # a form, a press on a page with text composed in a box. It fails closed.
+  # There is no switch for it here on purpose.
+
+  # What the browser was used for, by whom, with what outcome, and every
+  # decision he makes on a browse proposal. Agent-side; the browser's uid
+  # cannot read it. Feeds the daily debrief and the Debrief card in the tab.
+  journal: /var/lib/jarvis/browser-journal.jsonl
+  # Local hour (notify.timezone) after which the day's debrief is sent once.
+  debrief_hour: 21

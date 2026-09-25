@@ -40,6 +40,7 @@ class TaskType(Enum):
     BROWSE_READ = "browse_read"
     BROWSE_ACT = "browse_act"
     BROWSE_MOVE = "browse_move"
+    BROWSE_DEBRIEF = "browse_debrief"
 
 
 # Boot-task profiles: what the agent should look at first depends on

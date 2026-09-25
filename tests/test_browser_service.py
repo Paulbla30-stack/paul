@@ -46,7 +46,7 @@ class FakeDriver:
         from jarvis.browser.page import Page
         return Page(url="https://e.test/b", title="t", text="body")
 
-    def act(self, kind, ref="", text="", approved=()):
+    def act(self, kind, ref="", text="", approved=(), operator=False):
         self._maybe("act")
         from jarvis.browser.page import Page
         return Page(url="https://e.test/", title="t", text="body")

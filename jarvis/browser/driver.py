@@ -34,7 +34,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
 
-from jarvis.browser import guard, trust
+from jarvis.browser import guard, publish, trust
 from jarvis.browser.page import EXTRACT_JS, Page
 
 DEFAULT_TIMEOUT_MS = 20000
@@ -113,6 +113,24 @@ class BrowserUnavailable(RuntimeError):
     """Chromium or Playwright is not installed. Says which, and never guesses."""
 
 
+class NeedsApproval(PermissionError):
+    """Not a refusal: a thing the agent may do once Paul has said yes.
+
+    Two gates raise it and the caller has to be able to tell them apart from
+    each other and from a plain refusal, because they become different cards:
+
+      gate="origin"   the browser stays signed in and this site is not yet
+                      approved for acting (trust.py)
+      gate="publish"  this action would SAY something -- post, send, submit,
+                      buy -- and Paul's standing rule is that those wait for
+                      him whatever else has been granted (publish.py)
+    """
+
+    def __init__(self, gate: str, detail: str):
+        self.gate, self.detail = gate, detail
+        super().__init__(f"needs approval ({gate}): {detail}")
+
+
 class Driver:
     """One browser, one page, driven by the service above it.
 
@@ -140,6 +158,10 @@ class Driver:
         # the same kind of act and should not be opened by the same switch.
         self.allow_secrets = bool(allow_secrets)
         self.downloads = []
+        # Multi-line fields the agent has typed into since the last navigation.
+        # The page reports composed text it can see; this covers the case
+        # where the agent typed and the page's own report is stale.
+        self._typed_composing = set()
         self._lock = threading.RLock()
         # Everything that touches Playwright runs on this one thread, and the
         # single worker is the whole point rather than a performance choice.
@@ -321,6 +343,7 @@ class Driver:
         url = guard.check(url)
         with self._lock:
             self._start()
+            self._typed_composing.clear()
             status = None
             try:
                 response = self._page.goto(url, wait_until="domcontentloaded",
@@ -374,6 +397,8 @@ class Driver:
             if kind not in self.MOVES:
                 raise ValueError(f"not a move: {kind!r}")
             self._start()
+            if kind != "scroll":
+                self._typed_composing.clear()
             if kind == "scroll":
                 step = int(amount or 600)
                 self._page.mouse.wheel(0, step)
@@ -392,21 +417,29 @@ class Driver:
             return self._extract()
 
     def _act(self, kind: str, ref: str = "", text: str = "",
-             approved=()) -> Page:
+             approved=(), operator: bool = False) -> Page:
         """Click, type, submit, press a key, choose from a dropdown.
 
-        Three fences, in order, and they answer different questions.
+        Four fences, in order, and they answer different questions.
 
         1. **Is this the kind of thing this browser does at all?** A secret
            field is not typed into and a form on a page holding one is not
-           submitted -- unless the operator has separately switched that on,
-           which is a different decision from letting the agent act.
-        2. **May it act on THIS site?** trust.py. With a clean profile the
-           answer is always yes, because nothing is signed in and there is no
-           identity to borrow. With a profile that stays signed in, each origin
-           is approved once by Paul.
-        3. **Did the page move somewhere it should not have?** The guard, on
+           submitted -- unless the operator has separately switched that on.
+           This one applies to Paul too.
+        2. **May it act on THIS site?** trust.py. Clean profile: always yes.
+           Signed-in profile: each origin approved once by Paul.
+        3. **Would this SAY something?** publish.py. Paul's standing rule:
+           posting, sending, submitting, buying waits for him, whatever else
+           has been granted. Fails closed -- an action is publishing unless it
+           is recognisably not.
+        4. **Did the page move somewhere it should not have?** The guard, on
            the address it landed on.
+
+        ``operator`` is Paul driving the tab himself. Gates 2 and 3 exist to
+        keep the agent from acting AS him or FOR him without asking; when he
+        is the one pressing the button there is nobody to ask, so they do not
+        apply. Gate 1 does: it is a property of the browser, not a judgement
+        about who is asking.
 
         All of it before Chromium is touched, except the last, which cannot be.
         """
@@ -416,41 +449,69 @@ class Driver:
             kind = (kind or "").strip().lower()
             if kind not in self.ACTIONS:
                 raise ValueError(f"not an action: {kind!r}")
+            ref = (ref or "").strip()
 
-            target = self._last.field_by_ref(ref) if ref else None
+            field = self._last.field_by_ref(ref) if ref.startswith("F") else None
+            control = self._last.control(ref) if ref.startswith("C") else None
+            link = self._last.link(ref) if ref.startswith("L") else None
             if kind in ("type", "select"):
-                if target is None:
+                if field is None:
                     raise ValueError(f"no field {ref!r} on the page that was read")
-                if target.is_secret and not self.allow_secrets:
+                if field.is_secret and not self.allow_secrets:
                     raise PermissionError(
                         "that field is a secret and filling those is not "
                         "switched on (browser.allow_secrets)")
+            if kind == "click" and control is None and link is None:
+                raise ValueError(f"no control or link {ref!r} on the page that was read")
+            if kind == "press" and field is None and control is None:
+                raise ValueError(f"no field or control {ref!r} to press a key on")
 
-            verdict, why = trust.decide(
-                self._last.url, self.persistent, approved,
-                has_secret=self._last.has_password,
-                secrets_unlocked=self.allow_secrets)
-            if verdict != trust.ALLOW:
-                raise PermissionError(why)
+            if not operator:
+                verdict, why = trust.decide(
+                    self._last.url, self.persistent, approved,
+                    has_secret=self._last.has_password,
+                    secrets_unlocked=self.allow_secrets)
+                if verdict == trust.NEEDS_APPROVAL:
+                    raise NeedsApproval("origin", why)
+                if verdict != trust.ALLOW:
+                    raise PermissionError(why)
+
+                composed = bool(self._last.composing) or bool(self._typed_composing)
+                element_text = (control.text if control else link.text if link else "")
+                verdict, why = publish.classify(
+                    kind, element_text=element_text,
+                    in_form=bool(control and control.in_form),
+                    page_has_composed_text=composed,
+                    field_kind=(field.kind if field else ""))
+                if verdict == publish.NEEDS_APPROVAL:
+                    raise NeedsApproval("publish", why)
+            elif self._last.has_password and not self.allow_secrets and kind == "submit":
+                raise PermissionError(
+                    "the page holds a password field; this browser never "
+                    "submits a form on a page that does (browser.allow_secrets)")
 
             self._start()
-            selectors = {"click": "a, button, input[type=submit], [role=button]",
-                         "type": "input, textarea, select",
-                         "select": "select",
-                         "press": "input, textarea, select, button, a",
-                         "submit": "form"}
-            index = self._index_of(ref) if ref else 0
-            handle = self._page.locator(selectors[kind]).nth(index)
+            controls_sel = "button, input[type=submit], input[type=button], input[type=image], [role=button], summary"
+            fields_sel = "input:not([type=hidden]), textarea, select"
             if kind == "click":
+                handle = (self._page.locator(controls_sel).nth(self._index_of(ref)) if control
+                          else self._page.locator("a[href]").nth(self._index_of(ref)))
                 handle.click(timeout=self.timeout_ms)
             elif kind == "type":
-                handle.fill(text or "", timeout=self.timeout_ms)
+                self._page.locator(fields_sel).nth(self._index_of(ref)).fill(
+                    text or "", timeout=self.timeout_ms)
+                if field.kind == "textarea":
+                    self._typed_composing.add(ref)
             elif kind == "select":
-                handle.select_option(text or "", timeout=self.timeout_ms)
+                self._page.locator(fields_sel).nth(self._index_of(ref)).select_option(
+                    text or "", timeout=self.timeout_ms)
             elif kind == "press":
-                handle.press(text or "Enter", timeout=self.timeout_ms)
+                sel = fields_sel if field else controls_sel
+                self._page.locator(sel).nth(self._index_of(ref)).press(
+                    text or "Enter", timeout=self.timeout_ms)
             else:
-                handle.evaluate("f => f.requestSubmit ? f.requestSubmit() : f.submit()")
+                self._page.locator("form").nth(self._index_of(ref) if ref else 0).evaluate(
+                    "f => f.requestSubmit ? f.requestSubmit() : f.submit()")
             try:
                 self._page.wait_for_load_state("domcontentloaded",
                                                timeout=self.timeout_ms)
@@ -502,9 +563,10 @@ class Driver:
     def read(self) -> Page:
         return self._on_pump(self._read)
 
-    def act(self, kind: str, ref: str = "", text: str = "", approved=()) -> Page:
+    def act(self, kind: str, ref: str = "", text: str = "", approved=(),
+            operator: bool = False) -> Page:
         """Click, type, submit, press or select. The rung is already cleared."""
-        return self._on_pump(self._act, kind, ref, text, approved)
+        return self._on_pump(self._act, kind, ref, text, approved, operator)
 
     def move(self, kind: str, amount: int = 0) -> Page:
         """Back, forward, reload or scroll. Reading, not acting."""

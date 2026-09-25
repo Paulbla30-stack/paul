@@ -170,3 +170,102 @@ class TestHealthIsHonestWhenItIsDown(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# ---- posting needs approval, and Paul pressing it himself does not --------
+
+class TestPostingWaitsForPaul(unittest.TestCase):
+    """The hard rule, at the driver: above the grant, before the browser."""
+
+    def setUp(self):
+        from jarvis.browser.page import Control
+        self.driver = Driver()
+        self.driver._last = Page(
+            url="https://forum.test/thread", title="t", text="b",
+            links=(Link("L1", "Next page", "https://forum.test/thread?page=2"),),
+            fields=(Field(ref="F1", label="Your reply", kind="textarea"),),
+            controls=(Control("C1", "Post reply", "button", in_form=True),
+                      Control("C2", "Show 10 more", "button", in_form=False)))
+
+    def test_a_submit_raises_needs_approval_with_the_publish_gate(self):
+        from jarvis.browser.driver import NeedsApproval
+        with self.assertRaises(NeedsApproval) as caught:
+            self.driver.act("submit")
+        self.assertEqual(caught.exception.gate, "publish")
+
+    def test_pressing_a_button_inside_a_form_waits(self):
+        from jarvis.browser.driver import NeedsApproval
+        with self.assertRaises(NeedsApproval):
+            self.driver.act("click", "C1")
+
+    def test_pressing_a_button_outside_a_form_does_not_wait_here(self):
+        """Fails for want of a browser, not by refusal: the gate let it through."""
+        from jarvis.browser.driver import NeedsApproval
+        with self.assertRaises(Exception) as caught:
+            self.driver.act("click", "C2")
+        self.assertNotIsInstance(caught.exception, NeedsApproval)
+        self.assertNotIsInstance(caught.exception, PermissionError)
+
+    def test_needs_approval_is_a_permission_error_but_a_distinct_one(self):
+        """The service must be able to tell 'ask Paul' from 'never'."""
+        from jarvis.browser.driver import NeedsApproval
+        self.assertTrue(issubclass(NeedsApproval, PermissionError))
+
+    def test_it_is_raised_before_the_browser_is_started(self):
+        from jarvis.browser.driver import NeedsApproval
+        started = []
+        self.driver._start = lambda: started.append(1)
+        with self.assertRaises(NeedsApproval):
+            self.driver.act("submit")
+        self.assertEqual(started, [])
+
+    def test_paul_pressing_it_himself_is_not_asked(self):
+        """operator=True: there is nobody to ask. Fails only for want of a browser."""
+        from jarvis.browser.driver import NeedsApproval
+        with self.assertRaises(Exception) as caught:
+            self.driver.act("click", "C1", operator=True)
+        self.assertNotIsInstance(caught.exception, NeedsApproval)
+
+    def test_operator_does_not_lift_the_secret_refusal(self):
+        """That one is a property of the browser, not a judgement about who asks."""
+        self.driver._last = a_page(fields=[SECRET])
+        with self.assertRaises(PermissionError) as caught:
+            self.driver.act("type", "F1", "hunter2", operator=True)
+        from jarvis.browser.driver import NeedsApproval
+        self.assertNotIsInstance(caught.exception, NeedsApproval)
+
+    def test_typing_into_a_textarea_arms_the_page(self):
+        """After composing, even a plain button waits."""
+        from jarvis.browser.driver import NeedsApproval
+        self.driver._typed_composing.add("F1")
+        with self.assertRaises(NeedsApproval) as caught:
+            self.driver.act("click", "C2")
+        self.assertIn("composed", caught.exception.detail)
+
+    def test_navigating_disarms_it(self):
+        from unittest import mock
+        from jarvis.browser import driver as _drv
+        self.driver._typed_composing.add("F1")
+        self.driver._start = lambda: None
+        class _P:
+            url = "https://forum.test/other"
+            def goto(self, *a, **k): return None
+        self.driver._page = _P()
+        self.driver._extract = lambda status=None: self.driver._last
+        # forum.test has no DNS; the guard is not what this test is about.
+        with mock.patch.object(_drv.guard, "check", lambda url: url):
+            self.driver._open("https://forum.test/other")
+        self.assertEqual(self.driver._typed_composing, set())
+
+
+class TestOriginTrustAtTheDriver(unittest.TestCase):
+
+    def test_an_unapproved_site_while_signed_in_waits_with_the_origin_gate(self):
+        from jarvis.browser.driver import NeedsApproval
+        from jarvis.browser.page import Control
+        d = Driver(persistent=True)
+        d._last = Page(url="https://bank.test/", title="t", text="b",
+                       controls=(Control("C1", "Show more", in_form=False),))
+        with self.assertRaises(NeedsApproval) as caught:
+            d.act("click", "C1", approved=[])
+        self.assertEqual(caught.exception.gate, "origin")

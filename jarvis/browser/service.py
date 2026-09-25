@@ -25,7 +25,7 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from jarvis.browser import guard
-from jarvis.browser.driver import BrowserUnavailable, Driver
+from jarvis.browser.driver import BrowserUnavailable, Driver, NeedsApproval
 
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8477
@@ -73,7 +73,8 @@ class BrowserService:
                 return 200, self.driver.act(str(body.get("kind") or ""),
                                             str(body.get("ref") or ""),
                                             str(body.get("text") or ""),
-                                            body.get("approved") or ()).as_dict()
+                                            body.get("approved") or (),
+                                            bool(body.get("operator"))).as_dict()
             if method == "POST" and path == "/move":
                 return 200, self.driver.move(str(body.get("kind") or ""),
                                              int(body.get("amount") or 0)).as_dict()
@@ -84,6 +85,11 @@ class BrowserService:
             # 403 rather than 400: this is a refusal, and the agent's own
             # refusal vocabulary should be able to tell the two apart.
             return 403, {"error": str(why), "reason": why.reason, "url": why.url}
+        except NeedsApproval as why:
+            # Still 403 -- it did not happen -- but with a reason the agent
+            # turns into a card for Paul rather than a failure to learn from.
+            return 403, {"error": str(why), "reason": "needs-approval",
+                         "gate": why.gate, "detail": why.detail}
         except PermissionError as why:
             return 403, {"error": str(why), "reason": "refused by the browser"}
         except BrowserUnavailable as why:

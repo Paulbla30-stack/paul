@@ -105,6 +105,27 @@ def envelope(page: dict, limit: int = MAX_TEXT_TO_MODEL,
     if clipped:
         tail.append(f"[TRUNCATED: {len(text)} characters on the page, "
                     f"{limit} shown. This is part of the page, not all of it.]")
+    heads = page.get("headings") or []
+    if heads:
+        tail.append("headings on this page:")
+        tail.extend(f"  {h}" for h in heads[:20])
+    seen = str(page.get("on_screen") or "").strip()
+    if seen:
+        tail.append("ON THE SCREEN RIGHT NOW (the rest is further down the page"
+                    + ("; there is more below" if page.get("below_fold") else "")
+                    + "):")
+        tail.append(defuse(seen[:2500]))
+    ctrls = page.get("controls") or []
+    if ctrls:
+        tail.append(f"buttons and controls ({min(len(ctrls), 30)} of {len(ctrls)}), "
+                    "press one by its ref -- anything that would send or post "
+                    "waits for Paul:")
+        for item in ctrls[:30]:
+            mark = " [in a form]" if item.get("in_form") else ""
+            tail.append(f"  {item.get('ref')}  {' '.join(str(item.get('text') or '').split())[:60] or '(unlabelled)'}{mark}")
+    if page.get("composing"):
+        tail.append("note: there is text composed in a box on this page. The next "
+                    "press could send it, so it will wait for Paul.")
     rows = page.get("links") or []
     if rows:
         tail.append(f"links on this page ({min(len(rows), links)} of {len(rows)}), "
@@ -154,6 +175,8 @@ class BrowserView:
         from jarvis.browser import trust as _trust
         self.approved = _trust.normalise_approved(approved)
         self.persistent = bool(persistent)
+        self.journal = None            # set by build_view; None means unrecorded
+        self.debrief_hour = 21
 
     # ---- the wire -------------------------------------------------------
 
@@ -217,10 +240,12 @@ class BrowserView:
     def read(self) -> dict:
         return self._page(self._call("GET", "/read"))
 
-    def act(self, kind: str, ref: str = "", text: str = "") -> dict:
+    def act(self, kind: str, ref: str = "", text: str = "",
+            operator: bool = False) -> dict:
         return self._page(self._call("POST", "/act",
                                      {"kind": kind, "ref": ref, "text": text,
-                                      "approved": sorted(self.approved)}))
+                                      "approved": sorted(self.approved),
+                                      "operator": bool(operator)}))
 
     def move(self, kind: str, amount: int = 0) -> dict:
         return self._page(self._call("POST", "/move",
@@ -229,6 +254,150 @@ class BrowserView:
     def reset(self) -> dict:
         self.last = {}
         return self._call("POST", "/reset")
+
+
+DEFAULT_JOURNAL = "/var/lib/jarvis/browser-journal.jsonl"
+MAX_JOURNAL_BYTES = 8 * 1024 * 1024
+DAY_S = 86400
+
+
+class BrowserJournal:
+    """What the browser was used for, by whom, and what came of it.
+
+    Paul's ask, 23 September 2026: the full experience "under approval with
+    daily debrief of what went well and what didn't. Where I had to correct."
+
+    Append-only JSONL on the agent's side of the fence -- the browser's uid
+    cannot read it -- and bounded, because a journal is for reading back and
+    an unbounded one is not. Every browse action lands here: the agent's, with
+    its outcome; Paul's own, marked as his; and every decision he makes on a
+    browse proposal, which is what "where I had to correct" means in data.
+    """
+
+    def __init__(self, path: str = DEFAULT_JOURNAL, clock=time.time,
+                 logger: Optional[logging.Logger] = None):
+        self.path = path
+        self.clock = clock
+        self.log = logger or logging.getLogger("jarvis.browse.journal")
+
+    def record(self, did: str, url: str = "", outcome: str = "ok", *,
+               by: str = "agent", reason: str = "", gate: str = "",
+               kind: str = "") -> dict:
+        entry = {"ts": self.clock(), "did": str(did)[:200], "url": str(url)[:500],
+                 "outcome": outcome, "by": by, "kind": kind}
+        if reason:
+            entry["reason"] = str(reason)[:300]
+        if gate:
+            entry["gate"] = gate
+        try:
+            import json as _json
+            import os as _os
+            _os.makedirs(_os.path.dirname(self.path) or ".", exist_ok=True)
+            with open(self.path, "a", encoding="utf-8") as fh:
+                fh.write(_json.dumps(entry) + "\n")
+            self._trim()
+        except OSError as exc:
+            self.log.debug("browser journal not written: %s", exc)
+        return entry
+
+    def _trim(self):
+        """Keep the newest MAX_JOURNAL_BYTES. Old days are the debrief's past."""
+        import os as _os
+        try:
+            if _os.path.getsize(self.path) <= MAX_JOURNAL_BYTES:
+                return
+            with open(self.path, "rb") as fh:
+                fh.seek(-MAX_JOURNAL_BYTES // 2, 2)
+                keep = fh.read().split(b"\n", 1)[-1]
+            with open(self.path, "wb") as fh:
+                fh.write(keep)
+        except OSError:
+            pass
+
+    def recent(self, since_s: float = DAY_S) -> list:
+        import json as _json
+        cutoff = self.clock() - since_s
+        out = []
+        try:
+            with open(self.path, encoding="utf-8") as fh:
+                for line in fh:
+                    try:
+                        row = _json.loads(line)
+                    except ValueError:
+                        continue
+                    if float(row.get("ts") or 0) >= cutoff:
+                        out.append(row)
+        except OSError:
+            return []
+        return out
+
+    def debrief(self, since_s: float = DAY_S) -> dict:
+        """What went well, what did not, and where Paul had to correct."""
+        rows = self.recent(since_s)
+        agent = [r for r in rows if r.get("by") == "agent"]
+        mine = [r for r in rows if r.get("by") == "operator"]
+        visited, counts = [], {}
+        for r in agent:
+            if r.get("did", "").startswith(("opened", "followed", "back", "forward", "reload")) and r.get("url"):
+                u = r["url"]
+                if u not in visited:
+                    visited.append(u)
+            counts[r.get("outcome", "?")] = counts.get(r.get("outcome", "?"), 0) + 1
+        waited = [r for r in agent if r.get("outcome") == "needs-approval"]
+        refused = [r for r in agent if r.get("outcome") == "refused"]
+        errors = [r for r in agent if r.get("outcome") == "error"]
+        decisions = [r for r in rows if r.get("kind") == "decision"]
+        corrected = [r for r in decisions if r.get("outcome") == "declined"]
+        return {
+            "since_s": since_s,
+            "actions": len(agent),
+            "pages_visited": len(visited),
+            "top_pages": visited[:12],
+            "outcomes": counts,
+            "waited_for_paul": [{"did": r["did"], "url": r.get("url"), "why": r.get("reason"),
+                                 "gate": r.get("gate")} for r in waited[-20:]],
+            "refused": [{"did": r["did"], "url": r.get("url"), "why": r.get("reason")}
+                        for r in refused[-20:]],
+            "errors": [{"did": r["did"], "url": r.get("url"), "why": r.get("reason")}
+                       for r in errors[-10:]],
+            "decisions": [{"verdict": r["outcome"], "what": r["did"], "why": r.get("reason")}
+                          for r in decisions[-20:]],
+            "corrections": len(corrected),
+            "operator_actions": len(mine),
+        }
+
+    @staticmethod
+    def render(d: dict) -> str:
+        """The debrief as Paul reads it. Plain, and honest about nothing."""
+        hours = int(round(float(d.get("since_s") or DAY_S) / 3600))
+        lines = [f"Browser debrief, last {hours}h."]
+        if not d.get("actions") and not d.get("operator_actions"):
+            lines.append("Nothing. The browser was not used.")
+            return "\n".join(lines)
+        lines.append(f"{d['actions']} action(s) by the agent across {d['pages_visited']} page(s); "
+                     f"{d['operator_actions']} by you.")
+        if d.get("top_pages"):
+            lines.append("Went to: " + "; ".join(d["top_pages"][:8]))
+        w = d.get("waited_for_paul") or []
+        if w:
+            lines.append(f"Waited for you {len(w)} time(s):")
+            lines.extend(f"  - {x['did']} on {x.get('url') or '?'}: {x.get('why')}" for x in w[:8])
+        dec = d.get("decisions") or []
+        if dec:
+            lines.append(f"You decided {len(dec)}; corrected (declined) {d.get('corrections', 0)}:")
+            lines.extend(f"  - {x['verdict']}: {x['what']}" + (f" -- {x['why']}" if x.get('why') else "")
+                         for x in dec[:8])
+        r = d.get("refused") or []
+        if r:
+            lines.append(f"Refused by the browser's own fences {len(r)} time(s):")
+            lines.extend(f"  - {x['did']}: {x.get('why')}" for x in r[:5])
+        e = d.get("errors") or []
+        if e:
+            lines.append(f"Did not work {len(e)} time(s):")
+            lines.extend(f"  - {x['did']}: {x.get('why')}" for x in e[:5])
+        if not w and not r and not e:
+            lines.append("Nothing needed you and nothing was refused.")
+        return "\n".join(lines)
 
 
 def build_view(config: Optional[dict] = None,
@@ -243,10 +412,16 @@ def build_view(config: Optional[dict] = None,
     cfg = cfg if isinstance(cfg, dict) else {}
     if not cfg.get("enabled"):
         return None
-    return BrowserView(host=str(cfg.get("host") or DEFAULT_HOST),
+    view = BrowserView(host=str(cfg.get("host") or DEFAULT_HOST),
                        port=int(cfg.get("port") or DEFAULT_PORT),
                        token_file=str(cfg.get("token_file") or DEFAULT_TOKEN_FILE),
                        timeout=float(cfg.get("timeout_s") or DEFAULT_TIMEOUT_S),
                        approved=cfg.get("approved_origins") or (),
                        persistent=bool(cfg.get("persistent")),
                        logger=logger)
+    view.journal = BrowserJournal(str(cfg.get("journal") or DEFAULT_JOURNAL), logger=logger)
+    try:
+        view.debrief_hour = int(cfg.get("debrief_hour", 21))
+    except (TypeError, ValueError):
+        view.debrief_hour = 21
+    return view

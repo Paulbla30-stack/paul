@@ -353,3 +353,57 @@ def test_a_download_cannot_choose_where_it_lands():
     from jarvis.browser.driver import Driver
     src = textwrap.dedent(inspect.getsource(Driver._keep_download))
     assert "basename" in src and "realpath" in src
+
+
+# --- Paul's hard rule: posting waits for him, above the grant -----------------
+
+def test_a_form_submission_waits_for_the_operator_whatever_is_granted():
+    """'if jarvis wants to post on something he get approval first.'
+
+    Not a refusal and not a grant question: the browser answers needs-approval
+    and the executor turns it into a card. Asserted at the classifier, at the
+    driver, and by reading that the driver consults it before Chromium starts.
+    """
+    from jarvis.browser import publish
+    assert publish.classify("submit")[0] == publish.NEEDS_APPROVAL
+    assert publish.classify("click", element_text="Next", in_form=True)[0] == publish.NEEDS_APPROVAL
+    assert publish.classify("click", element_text="Go", page_has_composed_text=True)[0] == publish.NEEDS_APPROVAL
+
+
+def test_the_posting_rule_fails_closed_on_a_key_press():
+    from jarvis.browser import publish
+    assert publish.classify("press")[0] == publish.NEEDS_APPROVAL
+
+
+def test_the_driver_asks_before_the_browser_is_touched():
+    from jarvis.browser.driver import Driver
+    src = textwrap.dedent(inspect.getsource(Driver._act))
+    tree = ast.parse(src)
+    starts = [n.lineno for n in ast.walk(tree)
+              if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+              and n.func.attr == "_start"]
+    asks = [n.lineno for n in ast.walk(tree)
+            if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+            and n.func.attr == "classify"]
+    assert asks and starts, "act() no longer both asks and starts"
+    assert max(asks) < min(starts), "the posting check now runs after the browser is started"
+
+
+def test_the_operator_flag_never_lifts_the_secret_refusal():
+    """operator=True skips the two 'do not act as him' gates and nothing else."""
+    from jarvis.browser.driver import Driver, NeedsApproval
+    from jarvis.browser.page import Field, Page
+    d = Driver()
+    d._last = Page(url="https://e.test/", title="t", text="b",
+                   fields=(Field(ref="F1", label="Password", kind="password"),))
+    with pytest.raises(PermissionError) as caught:
+        d.act("type", "F1", "x", operator=True)
+    assert not isinstance(caught.value, NeedsApproval)
+
+
+def test_a_waiting_action_is_never_retried_as_a_failure():
+    """reflect() files a card and returns; it must not count as a brain failure."""
+    from jarvis.agent import core
+    src = textwrap.dedent(inspect.getsource(core.AgentCore.reflect))
+    assert "needs_approval" in src
+    assert "_record_browse_proposal" in src

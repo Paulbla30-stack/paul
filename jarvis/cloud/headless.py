@@ -440,6 +440,17 @@ class HeadlessRunner:
                     health = view.health()
                     return self._send(200, {"enabled": True, "health": health,
                                             "page": view.last or {}})
+                if path == "/browse/debrief":
+                    view = getattr(runner.agent, "browser", None)
+                    journal = getattr(view, "journal", None)
+                    if journal is None:
+                        return self._send(200, {"enabled": False, "text": "The browser journal is off."})
+                    try:
+                        hours = max(1, min(168, int((query.split("hours=") + ["24"])[1].split("&")[0] or 24)))
+                    except (TypeError, ValueError):
+                        hours = 24
+                    got = journal.debrief(hours * 3600)
+                    return self._send(200, {"enabled": True, **got, "text": journal.render(got)})
                 if path == "/browse/shot":
                     view = getattr(runner.agent, "browser", None)
                     if view is None:
@@ -629,13 +640,25 @@ class HeadlessRunner:
                     elif what == "follow":
                         got = view.follow(str(payload.get("ref") or ""))
                     elif what == "act":
+                        # operator=True: this is Paul pressing the button
+                        # himself, so the two gates that exist to keep the
+                        # agent from acting AS him or FOR him without asking
+                        # do not apply. The browser's own refusals still do.
                         got = view.act(str(payload.get("kind") or ""),
                                        str(payload.get("ref") or ""),
-                                       str(payload.get("text") or ""))
+                                       str(payload.get("text") or ""),
+                                       operator=True)
                     elif what == "reset":
                         got = view.reset()
                     else:
                         return self._send(404, {"error": f"no route /browse/{what}"})
+                    journal = getattr(view, "journal", None)
+                    if journal is not None and what != "reset":
+                        ok = not (isinstance(got, dict) and got.get("error"))
+                        journal.record(f"{what} {payload.get('url') or payload.get('ref') or payload.get('kind') or ''}".strip(),
+                                       (got.get("url") if isinstance(got, dict) else "") or "",
+                                       "ok" if ok else "error", by="operator",
+                                       reason="" if ok else str(got.get("error"))[:200])
                     if isinstance(got, dict) and got.get("error"):
                         return self._send(502, got)
                     return self._send(200, got)

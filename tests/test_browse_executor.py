@@ -222,3 +222,57 @@ class TestThePageBodyIsNotPutInMemory(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestWaitingForPaulIsNotAFailure(unittest.TestCase):
+    """needs-approval from the browser becomes a card, never a retry."""
+
+    def test_the_result_says_it_waits_and_names_the_gate(self):
+        view = FakeView({"error": "needs approval (publish): submitting a form sends something",
+                         "reason": "needs-approval", "gate": "publish",
+                         "detail": "submitting a form sends something to the site"})
+        got = executor(view).execute(task(TaskType.BROWSE_ACT, kind="submit"))
+        self.assertFalse(got["success"])
+        self.assertTrue(got["needs_approval"])
+        self.assertEqual(got["gate"], "publish")
+        self.assertIn("waiting for Paul", got["error"])
+
+    def test_it_is_written_to_the_journal_as_waiting(self):
+        import tempfile, os
+        from jarvis.agent.browse import BrowserJournal
+        view = FakeView({"error": "x", "reason": "needs-approval", "gate": "publish",
+                         "detail": "would post"})
+        view.journal = BrowserJournal(os.path.join(tempfile.mkdtemp(), "j.jsonl"))
+        view.last = {"url": "https://forum.test/"}
+        executor(view).execute(task(TaskType.BROWSE_ACT, kind="submit"))
+        rows = view.journal.recent()
+        self.assertEqual(rows[0]["outcome"], "needs-approval")
+        self.assertEqual(rows[0]["gate"], "publish")
+
+    def test_a_good_action_is_journalled_as_ok(self):
+        import tempfile, os
+        from jarvis.agent.browse import BrowserJournal
+        view = FakeView()
+        view.journal = BrowserJournal(os.path.join(tempfile.mkdtemp(), "j.jsonl"))
+        executor(view).execute(task(TaskType.BROWSE_OPEN, url="https://example.com/a"))
+        self.assertEqual(view.journal.recent()[0]["outcome"], "ok")
+
+
+class TestTheDebriefTool(unittest.TestCase):
+
+    def test_it_reads_the_journal_back(self):
+        import tempfile, os
+        from jarvis.agent.browse import BrowserJournal
+        view = FakeView()
+        view.journal = BrowserJournal(os.path.join(tempfile.mkdtemp(), "j.jsonl"))
+        view.journal.record("opened https://a.test/", "https://a.test/", "ok")
+        got = executor(view).execute(task(TaskType.BROWSE_DEBRIEF, hours=24))
+        self.assertTrue(got["success"])
+        self.assertEqual(got["output"]["actions"], 1)
+        self.assertIn("1 action(s)", got["output"]["text"])
+
+    def test_without_a_journal_it_says_so(self):
+        view = FakeView()
+        view.journal = None
+        got = executor(view).execute(task(TaskType.BROWSE_DEBRIEF))
+        self.assertFalse(got["success"])

@@ -246,12 +246,21 @@ TOOLS = (
     # what it would refuse, and they are in code rather than in a policy
     # document for the reason it gave: "if the capability exists, it will
     # eventually be triggered. Fence it at birth."
-    Tool("browse_act", "Act on the page you last read: click, type into a "
-                       "field, choose from a dropdown, press a key, or submit a "
-                       "form. This one changes something at the other end. "
-                       "Whether you may do it, or only ask, depends on what Paul "
-                       "has opened -- and where the browser stays signed in, on "
-                       "whether he has approved that particular site.",
+    # Paul's standing rule, 23 September 2026, given in the same breath as
+    # widening everything else: "if jarvis wants to post on something he get
+    # approval first. This is just a safety precaution." It sits ABOVE the
+    # grant. browse_act being open means the agent may press "next page"
+    # without asking; it does not mean it may leave a comment. The browser
+    # itself decides which is which (publish.py, fail-closed) and answers
+    # needs-approval, which the executor turns into a card for him.
+    Tool("browse_act", "Act on the page you last read: click a control (C1..) "
+                       "or link (L1..), type into a field (F1..), choose from a "
+                       "dropdown, press a key, or submit a form. Reading and "
+                       "moving are free. Anything that would SAY something -- "
+                       "post, comment, reply, send, submit, buy, book, sign up "
+                       "-- is recorded as a proposal for Paul and waits for him, "
+                       "whatever else you have been granted. Fill the form in, "
+                       "then say what you are ready to send and why.",
          effect=CHANGE, min_rung=PROPOSER,
          arguments={**_DESC,
                     "kind": {"type": "string",
@@ -264,6 +273,18 @@ TOOLS = (
                                             "For select: the option. For press: "
                                             "the key, Enter by default."}},
          required=("kind",)),
+    # What the browser was used for, read back. Reporting, so every rung may
+    # ask; Paul asked for "daily debrief of what went well and what didn't,
+    # where I had to correct", and the agent should be able to give it when
+    # asked as well as on the clock.
+    Tool("browse_debrief", "What you did in the browser recently: pages, "
+                           "actions, what waited for Paul, what he approved or "
+                           "declined, what was refused. Use it to answer 'what "
+                           "did you do online today'.",
+         reporting=True,
+         arguments={**_DESC,
+                    "hours": {"type": "integer",
+                              "description": "How far back, 1 to 168. 24 by default."}}),
     Tool("maintenance", "Perform routine upkeep of this machine.",
          effect=CHANGE, arguments=dict(_DESC)),
     Tool("shell_command", "Run one POSIX sh command. Subject to the deny-list, "
