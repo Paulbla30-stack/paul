@@ -1,0 +1,79 @@
+#cloud-config
+# Jarvis user data: plan with an open-weight model on Amazon Bedrock.
+# No API key: the instance role calls Bedrock (terraform -var llm_provider=bedrock).
+
+jarvis:
+  agent:
+    name: paul-life-agent
+
+  goals:
+    - description: Keep the root filesystem under 80% used
+      priority: 2
+    - description: Report security posture once per hour and note anything new
+      priority: 5
+
+  cloud:
+    cycle_interval: 30
+    status_port: 8471
+
+  llm:
+    enabled: true
+    provider: bedrock
+
+    # Qwen3-235B-A22B, from the Bedrock CATALOG, billed per token.
+    #
+    # Apache 2.0, and Mixture-of-Experts: 235B of weights but only 22B active
+    # per token, so it is far quicker than the parameter count suggests. It is
+    # the largest genuinely open-weight model in the catalog. Larger ones exist
+    # (Mistral Large 3 at 675B) but under licences that are not open.
+    #
+    # Two changes happened together here, and they are worth keeping apart.
+    #
+    # The first was leaving Custom Model Import. Import does not bill per
+    # token; it bills per Custom Model Unit per MINUTE that a copy is warm, and
+    # 32B of weights is four units, so an idle agent that touched the model
+    # every few minutes paid for every minute of the day:
+    #
+    #   imported 32B, warm around the clock   ~7,174 USD/month
+    #   imported 32B, with the vigil asleep     ~707 USD/month
+    #   catalog 32B, per token, same cadence      ~1.60 USD/month
+    #   catalog 235B, per token, same cadence     ~2.35 USD/month
+    #
+    # The second was the size. Once billing is per token an MoE model costs
+    # about what its active parameters cost, so seven times the weights came
+    # to roughly sixty pence a month more.
+    #
+    # It earns that. On the scenario this agent exists for -- root filesystem
+    # at 91% against a goal of 80% -- the 32B proposed a fix without looking,
+    # while the 235B chose inspect_path first, reasoning that "to understand
+    # the cause, I need to inspect the largest directories", and wrote the
+    # cleaner durable note: "Root filesystem usage increased from 19% to 91%
+    # in one day". It also declined to raise a sixth identical security scan
+    # where the 32B chose to notify the operator about nothing. The cost is
+    # latency: about 1.9 s per plan against 1.1 s.
+    #
+    # What a catalog model gives up against an import is a private copy that
+    # cannot be versioned or deprecated under you. That is real for a system
+    # meant to be reproducible later, and it is not worth 700 USD a month at a
+    # hundred plans a day. The import ARNs below are how to go back.
+    model: qwen.qwen3-235b-a22b-2507-v1:0
+    family: Qwen3-235B-A22B  # told to the model as fact; see llm.family in config-aws.yaml
+    # context_window left unset on purpose: a wrong number is worse than none.
+
+    # Alternatives, in the order they were considered:
+    #   qwen.qwen3-32b-v1:0                                                # same family, dense, quicker and slightly weaker
+    #   qwen.qwen3-vl-235b-a22b                                            # as above plus vision (image in), ~5.90 USD/month
+    #   openai.gpt-oss-120b-1:0                                            # Apache 2.0, same price as the 32B
+    #   deepseek.v3.2                                                      # MIT, ~6.36 USD/month
+    #   arn:aws:bedrock:us-west-2:485964361844:imported-model/jfu3j2ssmqvx  # the private Qwen3-32B copy; see the costs above
+    #   arn:aws:bedrock:us-west-2:485964361844:imported-model/xxnmq5w0nsck  # Qwen2.5-7B, one unit, but two generations older
+
+    # Per-token billing means this budget now caps spend directly rather than
+    # capping how often a warm copy is touched. At the measured 2,642 input and
+    # 128 output tokens per plan, 120 calls is about 1.7 US cents an hour.
+    max_calls_per_hour: 120
+
+    bedrock:
+      thinking: off          # Qwen3: answer directly; plans are always asked without <think>
+    shell:
+      enabled: true

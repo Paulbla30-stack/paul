@@ -1,0 +1,174 @@
+[Unit]
+Description=Jarvis browser (headless Chromium, fenced, loopback only)
+Documentation=https://github.com/Paulbla30-stack/paul
+After=network-online.target
+Wants=network-online.target
+# The agent does not require this. A browser that will not start is a tab that
+# says so; it is not a reason for the agent not to come up.
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=jarvis-browser
+Group=jarvis-browser
+Environment=PYTHONPATH=/usr/lib/jarvis
+Environment=PYTHONUNBUFFERED=1
+Environment=HOME=/var/lib/jarvis-browser
+Environment=XDG_CONFIG_HOME=/var/lib/jarvis-browser
+Environment=PLAYWRIGHT_BROWSERS_PATH=/opt/jarvis-browsers
+EnvironmentFile=-/etc/default/jarvis-browser
+RuntimeDirectory=jarvis-browser
+RuntimeDirectoryMode=0750
+StateDirectory=jarvis-browser
+StateDirectoryMode=0700
+
+# The token. Written into the unit's own runtime directory on every start, so
+# it is new each time the browser restarts and never lives on disk across a
+# reboot. Root -- which is what the agent runs as -- can read it; nothing else
+# on the box can.
+ExecStartPre=/bin/sh -c 'umask 077; head -c 32 /dev/urandom | od -An -tx1 | tr -d " \\n" > /run/jarvis-browser/token'
+# Pinned, not `env python3`. On this AMI /usr/bin/python3 is 3.9 and the agent
+# runs on 3.11; a browser service on a different interpreter from the agent is
+# a second set of installed packages to keep in step, and the first symptom
+# would be an import error at boot rather than anything that reads as a
+# version problem. /etc/default/jarvis-browser can override it.
+Environment=JARVIS_BROWSER_PYTHON=/usr/bin/python3.11
+ExecStart=/bin/sh -c 'exec "$JARVIS_BROWSER_PYTHON" -m jarvis.browser.service --host 127.0.0.1 --port 8477'
+Restart=always
+RestartSec=5
+KillSignal=SIGTERM
+TimeoutStopSec=20
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=jarvis-browser
+
+# ---- memory -----------------------------------------------------------------
+# This box is a t3.small: 1.9 GB, of which the agent and the system were using
+# about 350 MB when this was written. One Chromium tab on a heavy page can take
+# more than half the machine.
+#
+# Without these two lines the kernel's OOM killer chooses between the browser
+# and the agent when memory runs out, and it does not reliably prefer the
+# browser. jarvis.service carries OOMScoreAdjust=-500; this carries +900. The
+# pair is the actual decision: a page Paul opened may kill the browser and must
+# never kill the operating system he is running.
+MemoryHigh=700M
+MemoryMax=900M
+OOMScoreAdjust=900
+# Chromium spawns a renderer per site plus a GPU and a network process.
+TasksMax=512
+LimitNOFILE=8192
+
+# ---- where it may connect ---------------------------------------------------
+# link-local is 169.254.0.0/16 and fe80::/10, which is the cloud metadata
+# service. A browser that can reach it can be told by any page it loads to
+# fetch this instance's role credentials, and that role sits underneath every
+# other control on this machine -- the rung, the deny-list, the ledger. It is
+# the one fence whose failure cannot be recovered from.
+#
+# jarvis/browser/guard.py refuses the same addresses before the request is
+# made, and refuses loopback and the private ranges as well. Loopback is not
+# denied here because the service's own API listens on it. Two layers, one in
+# code and one in the kernel, because the code layer has a gap between
+# resolving a name and connecting to it and this one does not.
+IPAddressAllow=any
+IPAddressDeny=link-local
+IPAddressDeny=multicast
+IPAddressDeny=10.0.0.0/8
+IPAddressDeny=172.16.0.0/12
+IPAddressDeny=192.168.0.0/16
+IPAddressDeny=100.64.0.0/10
+IPAddressDeny=fc00::/7
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+
+# ---- what it can see ---------------------------------------------------------
+# Two boundaries, and they do different jobs.
+#
+# Chromium's own sandbox (see driver.py: --no-sandbox is NOT passed) puts each
+# renderer -- the part that parses hostile HTML and JavaScript -- in its own
+# user namespace under a seccomp filter. That is the boundary around the
+# untrusted work, and it is the one that stops a browser exploit becoming a
+# shell.
+#
+# Everything below is the boundary around Chromium itself, for the case where
+# the first one fails. Paul asked for the sandbox when he widened what the
+# agent may do in the browser: full control inside, tighter walls around.
+#
+# The agent's ledger, its memory, its key and its token. A page that owns this
+# process has owned a process that cannot read any of them.
+InaccessiblePaths=/var/lib/jarvis
+InaccessiblePaths=/etc/jarvis
+InaccessiblePaths=/run/jarvis
+InaccessiblePaths=/root
+# NoNewPrivileges blocks the OLD setuid sandbox helper, not the namespace one
+# Chromium actually uses, so it costs nothing here.
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+# Other processes are not this one's business. Without it, a renderer that got
+# out could at least read /proc and learn what else runs on the box.
+ProtectProc=invisible
+ProcSubset=pid
+PrivateIPC=yes
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=no
+RemoveIPC=yes
+# Empty. Chromium's sandbox needs no capability at all to build a user
+# namespace, which is exactly why that design replaced the setuid one.
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+# Namespaces, and why this is an allow rather than a deny. Chromium's sandbox
+# IS namespaces: each renderer goes into its own user, pid, ipc and network
+# namespace, and a blanket RestrictNamespaces=yes would switch the sandbox off
+# while looking like hardening. So the four it needs are permitted and the
+# rest are not.
+# An allow-list: only these five may be created, so cgroup and uts cannot.
+# (`net.ipv4` was here briefly and is not a namespace type -- systemd logged
+# "Failed to parse namespace type string, ignoring" and dropped the WHOLE
+# line, which would have left every namespace permitted while the file read
+# as if it were restricted. A hardening directive that fails by doing nothing
+# is worth verifying rather than reading.)
+RestrictNamespaces=user pid ipc net mnt
+SystemCallArchitectures=native
+# SystemCallFilter is deliberately ABSENT, and this is a trade rather than an
+# omission. Measured on the box, bisecting one property at a time, watching
+# whether a live renderer got its own user namespace:
+#
+#   baseline                            renderer userns = user:[4026532205]
+#   + ProtectProc/ProcSubset            renderer userns = user:[4026532206]
+#   + RestrictNamespaces                renderer userns = user:[4026532205]
+#   + SystemCallFilter=@system-service  no renderer at all
+#
+# @system-service on systemd 252 stops Chromium before it can start a renderer.
+# Adding seccomp, clone3, unshare, userfaultfd, membarrier and the pidfd calls
+# back by name did not recover it, and guessing further is guessing.
+#
+# The two filters are not equivalent and it is worth being exact about which
+# was kept. systemd's would sit on the browser process. Chromium's sits on
+# each renderer -- the process that actually parses hostile HTML, CSS, images
+# and JavaScript -- in its own user namespace, and is written for that job. A
+# blanket filter that prevents the targeted one from being installed leaves
+# the untrusted work less protected, not more. So the targeted one wins.
+#
+# Everything else in this section stands: namespaces restricted, no
+# capabilities, /proc invisible, no new privileges.
+SystemCallErrorNumber=EPERM
+
+# Chromium needs a writable place for the profile, the downloads and its own
+# scratch. Everything else on the filesystem is read-only or invisible.
+ReadWritePaths=/var/lib/jarvis-browser
+ReadWritePaths=/run/jarvis-browser
+
+[Install]
+WantedBy=multi-user.target

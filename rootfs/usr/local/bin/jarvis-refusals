@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+# The boot gate.
+#
+# Runs the standing refusals -- the invariants on page 8 of the architecture
+# note, as executable tests -- against the code that is about to start. Exit 0
+# and the agent starts. Anything else and it does not.
+#
+# TWO WAYS TO FAIL, AND BOTH STOP THE BOOT.
+#
+#   REFUSED   the suite ran and an invariant does not hold. The code is wrong.
+#   UNCHECKED the suite could not run at all. Nobody knows if the code is wrong.
+#
+# The agent argued, asked on 23 September 2026, that the second should fail
+# OPEN with an alert: a full disk or a broken dependency is not its fault, and
+# "a gate that stops the agent for the wrong reason erodes trust faster than no
+# gate at all". That is a real risk and it is the wrong trade here, for a
+# reason the agent does not have: removing the runner is the cheapest way to
+# remove a gate. If a missing pytest means "start anyway", then `rm` on one
+# package is the whole bypass, and the one condition under which this protects
+# nothing is the condition an attacker creates on purpose. Meanwhile a box that
+# does not come up is loud -- jarvis-health runs on its own timer and alerts on
+# a stopped agent, and the recovery path is SSM and a journal line.
+#
+# What the argument did change: the two cases now say which they are, so the
+# operator is not debugging a refusal that never happened, and the avoidable
+# environment failures are designed out rather than tolerated.
+#
+#     /usr/local/bin/jarvis-refusals -v     # which invariant, in full
+#     systemctl edit jarvis                 # empty ExecStartPre= to start
+#                                           # without it: a decision, not a
+#                                           # workaround
+set -uo pipefail
+
+SUITE="${JARVIS_REFUSALS:-/usr/lib/jarvis/refusals}"
+ROOT="${JARVIS_REPO:-/usr/lib/jarvis}"
+# shellcheck disable=SC1091
+[ -r /etc/default/jarvis ] && . /etc/default/jarvis
+PY="${JARVIS_PYTHON:-python3}"
+
+unchecked() { printf '[refusals] UNCHECKED, NOT STARTING: %s\n' "$*" >&2; exit 2; }
+refused()   { printf '[refusals] REFUSED TO START: %s\n' "$*" >&2; exit 1; }
+
+[ -d "$SUITE" ] || unchecked "no refusal suite at $SUITE"
+command -v "$PY" >/dev/null 2>&1 || unchecked "no interpreter at $PY"
+"$PY" -c 'import pytest' >/dev/null 2>&1 || unchecked "pytest is not installed for $PY"
+
+# Scratch space. The unit's own RuntimeDirectory first, because /tmp is the
+# thing most likely to be full on a box that has been up for months, and a gate
+# that cannot start for want of a temp directory is the accidental failure the
+# agent was right to name. -p no:cacheprovider keeps pytest from writing beside
+# the suite, which is read-only anyway.
+TMP=""
+for base in "${RUNTIME_DIRECTORY:-/run/jarvis}" /var/tmp /tmp; do
+    [ -d "$base" ] && [ -w "$base" ] || continue
+    if TMP="$(mktemp -d "$base/refusals.XXXXXX" 2>/dev/null)"; then break; fi
+    TMP=""
+done
+[ -n "$TMP" ] || unchecked "nowhere writable for the run (tried /run/jarvis, /var/tmp, /tmp)"
+trap 'rm -rf "$TMP"' EXIT
+
+JARVIS_REPO="$ROOT" PYTHONPATH="$ROOT" PYTHONDONTWRITEBYTECODE=1 \
+PYTEST_DEBUG_TEMPROOT="$TMP" \
+    "$PY" -m pytest "$SUITE" -m refusals -q -p no:cacheprovider \
+    --rootdir "$TMP" -o addopts= "$@"
+status=$?
+
+case "$status" in
+    0) printf '[refusals] all standing refusals hold\n' ;;
+    1) refused "a standing refusal does not hold — see the failure above" ;;
+    5) unchecked "the suite collected no tests; an empty gate is not a gate" ;;
+    *) unchecked "the test runner exited $status without a verdict" ;;
+esac

@@ -1,0 +1,22 @@
+[Unit]
+Description=Jarvis cloud bootstrap (IMDS + user data -> /etc/jarvis/cloud.yaml)
+Documentation=https://github.com/Paulbla30-stack/paul
+After=network-online.target cloud-init.service
+Wants=network-online.target
+Before=jarvis.service
+ConditionPathExists=/usr/lib/jarvis/jarvis/cloud/bootstrap.py
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+Environment=PYTHONPATH=/usr/lib/jarvis
+Environment=PYTHONUNBUFFERED=1
+Environment=JARVIS_PYTHON=/usr/bin/python3
+EnvironmentFile=-/etc/default/jarvis
+ExecStart=/bin/sh -c 'exec "$JARVIS_PYTHON" -m jarvis.cloud.bootstrap --output /etc/jarvis/cloud.yaml --config /etc/jarvis/config.yaml'
+TimeoutStartSec=90
+StandardOutput=journal+console
+StandardError=journal+console
+
+[Install]
+WantedBy=multi-user.target

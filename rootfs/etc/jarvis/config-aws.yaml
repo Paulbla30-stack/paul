@@ -1,0 +1,452 @@
+# Jarvis Agent Configuration - AWS AMI profile
+# ==============================================
+# Installed as /etc/jarvis/config.yaml on the AMI.  Instance-specific
+# values (identity, user-data overrides, goals) land in
+# /etc/jarvis/cloud.yaml, written by jarvis-bootstrap.service at boot
+# and merged on top of this file.
+
+agent:
+  name: "Jarvis"
+  profile: "cloud"          # boot tasks: IMDS probe, memory, storage, scan
+  max_tasks: 100
+  memory_limit_mb: 512
+  auto_plan: true
+  # The permission spine, above the command deny-list. The deny-list is the
+  # floor (what may never run); this is the ceiling (what kind of task is in
+  # scope at all). observer: look and report. proposer: a change is not run,
+  # it becomes a proposal for the operator. actor: may change the machine,
+  # still under the deny-list. Anything unrecognised falls back to proposer.
+  rung: proposer
+
+  # Capabilities opened one at a time, above the rung. The only thing config
+  # may loosen -- and WHAT may be opened is a frozen set in authority.py,
+  # reviewed in a commit, containing only capabilities already fenced
+  # somewhere other than the spine. A grant naming shell_command is discarded,
+  # not honoured.
+  #
+  # browse_act is here because Paul asked for the browser to act rather than
+  # file a card for every click. The alternative was rung: actor, which would
+  # have handed over the machine as well -- shell included -- to buy the
+  # ability to press a button on a web page.
+  #
+  # Remove the line and every click becomes a proposal again.
+  grants:
+    - browse_act
+
+  # What is coming, and speaking up before it arrives. Reading a date off a
+  # page and keeping it are different jobs, and only the first one existed:
+  # "due 14 Oct" was true for one cycle, went into a note, and nothing was
+  # ever going to happen on the fourteenth.
+  #
+  # The commitments live in the memory database rather than a file of their
+  # own, because that database is the one thing copied off the box. Nothing
+  # here fills itself: a date found in a document is proposed and waits for
+  # him. Timezone is deliberately absent -- it is derived from
+  # cloud.notify.timezone, so where he lives is declared exactly once.
+  diary:
+    max_commitments: 80
+    give_up_after_s: 259200   # a reminder the channel never took, said as unsaid
+    blind_gap_s: 600          # a longer gap between looks means it was not looking
+
+  # The shape of his day: things that occupy a span rather than mark a moment,
+  # which is what makes a clash and a gap expressible at all. An appointment
+  # does not learn to speak -- it registers a commitment and the diary says
+  # it, so there is one firing path here and not two. `hours` is the window a
+  # "when am I free" question is actually about; nobody means 3am. Timezone is
+  # absent for the same reason as the diary's: derived from notify.timezone.
+  schedule:
+    max_appointments: 120
+    remind_before_s: 1800     # half an hour, the default warning for one
+    hours: [9, 18]
+
+
+hardware:
+  # EC2 instances have no framebuffer or physical input devices.
+  display:
+    enabled: false
+  input:
+    enabled: false
+  memory:
+    enabled: true
+    max_map_mb: 256
+  storage:
+    enabled: true
+    readonly: false          # set true for a read-only auditing agent
+
+security:
+  scan_on_boot: true
+  enforce_hardening: false
+  report_path: "/var/log/jarvis-security.log"
+
+cloud:
+  enabled: true
+  provider: "aws"
+  headless: true             # no console; run the loop as a service
+  cycle_interval: 30         # seconds between idle cycles
+  max_cycles: 0              # 0 = run forever
+  status_host: "127.0.0.1"   # loopback only; use SSM/SSH to reach it
+  status_port: 8471
+  status_file: "/run/jarvis/status.json"
+  status_token: null         # null = generated at start and written to the file below
+  status_token_file: "/run/jarvis/token"   # 0600; needed for every call but /health, /status
+  ui:                        # web UI: chat, agent panel, file uploads
+    enabled: true
+    host: "0.0.0.0"          # reachable only if the security group allows it (terraform ui_cidr)
+    port: 8443
+    tls: true                # self-signed certificate; the browser will warn once
+    tls_dir: /etc/jarvis/tls
+    upload_dir: /var/lib/jarvis/uploads
+    max_upload_mb: 50
+  # The one way the agent can reach the operator when nobody is looking at
+  # the UI. Without it, everything it works out stays inside the box.
+  #
+  # The address is NOT set here: it arrives at boot from Secrets Manager or
+  # SSM (jarvis:notify-destination-secret) and lands 0600 in destination_file,
+  # which the shell deny-list refuses, so the model can neither read it nor
+  # send anywhere else. The constitution's "never send anything externally
+  # without approval" is satisfied structurally: the operator chose one
+  # destination and these limits in advance, in config the agent cannot edit.
+  #
+  # The limits are enforced in code below the model, because a prompt asking
+  # a model to be judicious is a hope and a rate limit is a fact.
+  # What the agent costs and what the account is accumulating. Read-only:
+  # the IAM policy behind it contains no delete, because whether an old image
+  # is still wanted is judgement about the future and belongs to the operator.
+  # Cost Explorer charges about a cent a query, so this is asked on a slow
+  # clock, never per cycle.
+  estate:
+    enabled: true
+    stale_days: 30           # how old before something counts as left behind
+    max_items: 20
+
+  # The agent's memory, copied off this box. Without it the operator profile,
+  # the goals he gave at runtime and everything the agent has worked out live
+  # on one EBS volume and nowhere else -- while the ledger has had an Object
+  # Lock witness bucket all along. Set by Terraform; no bucket means off, and
+  # the health check says so rather than leaving it to be discovered.
+  memory_backup:
+    bucket: ""              # jarvis-memory-<account>-<name>
+    prefix: memory
+    every_s: 3600           # memory changes slowly; the ledger is the fast one
+
+  # Recognising characters in a scan or a photograph of a document. Word,
+  # Excel, PowerPoint and text PDFs are read on the box for nothing and never
+  # reach this. A scan has no text layer at all, and without this it is
+  # reported as unread -- correctly, but uselessly.
+  #
+  # Two things the operator is choosing by turning it on: the page image
+  # leaves the box for AWS Textract in this account and region, and it is
+  # billed per page detected. Detection only; it finds characters and does not
+  # describe pictures, which is a vision model and a separate decision.
+  document_ocr:
+    enabled: true
+    region: us-west-2
+
+  notify:
+    # On, 25 September 2026, at Paul's word. The destination is the address
+    # in the jarvis/notify-email secret (lands in destination_file at boot);
+    # the channel is email because that is what the secret holds -- it said
+    # sns_sms for an email address, which would have failed at the last step
+    # after passing every rule. The sender is the verified domain.
+    enabled: true
+    channel: ses_email       # sns_sms | sns_topic | ses_email | none
+    from_address: jarvis@heartbeat-framework.org
+    destination_file: /etc/jarvis/notify.dest
+    sender_id: Jarvis        # SMS sender ID where the carrier honours one
+    min_severity: notice     # info never sends on its own; alert ignores quiet hours
+    max_per_hour: 4
+    min_gap_s: 900           # 15 minutes between messages
+    dedupe_window_s: 21600   # the same subject at most once per 6 hours
+    quiet_hours: [22, 7]     # local; an alert goes through anyway
+    timezone: Europe/London
+
+# The agent's own standing duties: what it is for, as opposed to what it has
+# been asked to do today. Seeded before operator goals, never completable, and
+# kept here rather than in user data so they survive a rebuild and do not need
+# an instance replacement to change.
+#
+# Written as things to know rather than things to do, because a goal phrased as
+# an action gets performed on a schedule whether or not it is warranted, and
+# that is how an agent becomes noise.
+system_goals:
+  - description: >-
+      Know the state of this machine well enough to report it honestly,
+      including the parts you have not checked. An absence of findings is not
+      a finding of none.
+    priority: 4
+  - description: >-
+      Know what you have been wrong about. Your own record is summarised back
+      to you; a check that never finds anything and an approach that keeps
+      being refused are both worth changing.
+    priority: 3
+  - description: >-
+      Know what you cost to run, and what is piling up in the account behind
+      you. Report both; deleting is the operator's call.
+    priority: 2
+  - description: >-
+      Keep your memory in a shape you can use: what matters, weighted; what
+      repeats, merged; what changed, current. Never at the price of losing
+      what was originally observed.
+    priority: 2
+  - description: >-
+      Tell the operator when something changes that he would want to know,
+      and not otherwise. Silence is the default and the budget is small: four
+      messages an hour is a ceiling, not a target, and a thing worth saying
+      today is rarely worth saying at 3am. An agent he mutes is worse than one
+      that cannot reach him, because it looks like it works.
+    priority: 5
+
+goals: []                    # operator instructions; add via user data or the jarvis:goal tag
+
+# The agent's own durable operational memory: what it learned about THIS
+# machine, kept across restarts. Deliberately separate from the ledger
+# (evidence about the agent, which the brain may never read) and from any
+# personal memory store (not the agent's to hold). Written through the
+# agent, so the deny-list refuses shell access to the file.
+memory:
+  enabled: true
+  path: /var/lib/jarvis/memory.db
+  max_rows: 2000             # weakest unpinned entries drop past this
+  # Consolidation: what sleep does, not what defragmenting does. Weight that
+  # strengthens on use and fades without it; repeated observations merged into
+  # one entry that cites them; two measurements of the same thing resolved by
+  # recency, the older kept as history; what keeps being re-established
+  # promoted to standing fact.
+  #
+  # Two rules that do not bend. Nothing is destroyed: a merge writes a new
+  # entry and the sources go dormant, still on disk with their provenance. And
+  # a derived entry is never consolidated again -- summarising summaries is how
+  # a memory becomes a confident fiction with nothing to check it against.
+  consolidate:
+    enabled: true
+    every_s: 3600            # a slow clock; an hour of observations is the unit
+    min_group: 3             # observations before a merge is worth writing
+    promote_at: 5            # confirmations before something becomes standing
+    promote_span_s: 21600    # ...and they must span at least this long. A count
+                             # says a thing was repeated; a span says it kept
+                             # being true, which is what "standing fact" claims.
+    similarity: 0.6          # overlap in content words to count as the same thing
+    decay: 0.9               # weight multiplier for anything unused
+    decay_after_s: 86400
+    max_merges: 8            # per pass; consolidation is not the agent's job
+
+# The Glass Ledger: a signed, hash-chained, append-only journal of every
+# decision, action and outcome (Blatherwick, The Glass Ledger v2,
+# doi:10.5281/zenodo.21515861). fail_closed means the agent does not
+# plan, act or answer while it cannot record. The brain never reads it.
+ledger:
+  enabled: true
+  path: /var/lib/jarvis/ledger.jsonl
+  key_file: /etc/jarvis/ledger/ed25519.key     # generated at first start, 0600
+  pubkey_file: /etc/jarvis/ledger/ed25519.pub  # pin this on the machine that audits
+  fail_closed: true
+  anchor:                    # off-box witness: S3 bucket with Object Lock (Terraform)
+    bucket: null             # set by the jarvis:ledger-bucket instance tag
+    prefix: ledger
+    every_s: 300             # checkpoint pin + file copy at most this often
+    copy: true
+
+# LLM planner. Enabled here, but it only runs when a key is available:
+#   - /etc/jarvis/anthropic.key (0600), written at boot by
+#     jarvis-bootstrap from llm.api_key_secret (AWS Secrets Manager) or
+#     llm.api_key_ssm_parameter (SSM Parameter Store), set here, in user
+#     data, or via the jarvis:llm-key-secret / jarvis:llm-key-parameter
+#     tags, or
+#   - ANTHROPIC_API_KEY in the service environment.
+# Without a key the agent falls back to the rule-based planner and says so
+# in the journal.
+llm:
+  enabled: true
+  provider: anthropic        # anthropic (Claude API, needs the key below) | bedrock
+  model: claude-opus-5       # bedrock: a catalog id such as qwen.qwen3-32b-v1:0,
+                             # an inference profile, or your imported model's ARN
+                             # arn:aws:bedrock:REGION:ACCOUNT:imported-model/ID
+  #
+  # Before choosing an imported-model ARN, know how it bills. Custom Model
+  # Import does not charge per token. It charges per Custom Model Unit per
+  # MINUTE that a copy of the model is warm, and a copy stays warm for about
+  # five minutes after the last call. Weights of 32B are four units. An agent
+  # that touches the model every few minutes therefore pays for every minute
+  # of every day, whether or not it had anything to think about, and on this
+  # workload that was the difference between about 4 USD a month and about
+  # 7,174. The `sleep:` block below is what keeps the copy cold between
+  # bursts; the catalog copy of the same model avoids the question entirely.
+  #
+  # An imported model is still the right answer when you need a private copy
+  # that cannot be versioned or deprecated under you. That is a real property
+  # and it has a real price; pick it deliberately rather than by default.
+  region: null               # bedrock: null = the instance's region
+  # Told to the model as fact, in the context block "self". An imported
+  # model's ARN ends in a random handle, and telling the planner it is
+  # "jfu3j2ssmqvx" is worse than telling it nothing, because it reads as a
+  # name. A model that does not know its own provenance cannot reason about
+  # its own limits, and will claim capabilities belonging to whatever it read
+  # most about in training.
+  family: null               # e.g. "Qwen3-32B"; null leaves it out
+  context_window: null       # tokens; null leaves it out
+  bedrock:
+    temperature: 0.2
+    json_retries: 1          # re-ask once when the plan is not valid JSON
+    thinking: auto           # Qwen3-style <think> blocks: auto | on | off (plans are always off)
+    not_ready_backoff: 45    # seconds to wait while an imported model loads
+  effort: medium             # low | medium | high (xhigh/max need max_tokens >= 64000)
+  thinking: adaptive         # adaptive | disabled (ignored on models without adaptive thinking)
+  max_tokens: 4096
+  fallbacks: true            # server-side refusal fallbacks (Claude API only)
+  api_key_file: /etc/jarvis/anthropic.key
+  api_key_secret: jarvis/anthropic-api-key   # AWS Secrets Manager name or ARN; the
+                                # value may be the bare key or JSON with an
+                                # ANTHROPIC_API_KEY / api_key field. Tried first.
+  api_key_ssm_parameter: null   # or an SSM SecureString, e.g. /jarvis/anthropic-api-key.
+                                # User data and the jarvis:llm-key-* tags override both.
+  max_calls_per_hour: 60     # hard budget; rule planner takes over beyond it
+  plan_every_n_cycles: 1
+  # When the agent thinks, and when it lets itself go quiet.
+  #
+  # An imported model on Bedrock does not bill per call. It bills per Custom
+  # Model Unit per MINUTE that a copy is warm, and a copy stays warm for about
+  # five minutes after the last call. The loop's old idle backoff capped at
+  # 300s, which is exactly the warm window: one call every five minutes, around
+  # the clock, is the one cadence that never lets the copy go cold. Twelve
+  # calls an hour looked restrained and cost about 200 USD a day to sit still.
+  #
+  # So the saving is not fewer calls, it is longer silences -- and, because a
+  # warm copy makes the next call nearly free, the thinking is clustered into
+  # a burst and then stopped, rather than dribbled out one thought at a time.
+  #
+  # While asleep the loop keeps running on the rule planner, which costs
+  # nothing and still observes, records and acts on what it knows. Sleep
+  # removes the model, not the agent.
+  sleep:
+    enabled: true
+    warm_window_s: 300       # how long the provider keeps a copy warm; theirs, not ours
+    idle_after_s: 180        # quiet this long with nothing to do -> sleep
+    heartbeat_s: 3600        # wake at least this often, so standing duties still happen
+    quiet_heartbeat_s: 10800 # ...and only this often overnight; never faster than the above
+    burst_calls: 6           # model calls allowed per waking
+    burst_window_s: 180      # ...and the burst may not outlast this
+    min_sleep_s: null        # null = the warm window; a shorter sleep saves nothing
+    band: 10                 # observations move this much before they count as changed
+    quiet_hours: [22, 7]
+    timezone: Europe/London
+  history_window: 10
+  environment_paths: null    # paths checked and reported to the model every cycle;
+                             # null uses the standard set (the Jarvis config, state,
+                             # library, launcher, logs and unit). Missing paths are
+                             # reported as missing on purpose: an absence the model
+                             # cannot see is one it invents something to fill.
+  shell:
+    enabled: true            # let the brain run commands (deny-list guarded)
+    timeout: 60
+    max_output: 4000
+    cwd: /
+    deny_patterns: null      # extra patterns, ADDED to the built-in list (which never shrinks)
+    allow_package_install: false   # true = let the planner run dnf/apt/pip install
+
+# ---------------------------------------------------------------------------
+# Top-level sections. They sit at column 0 and they go LAST, deliberately.
+#
+# A column-0 key placed in the middle of this file ends the mapping it lands
+# in and adopts everything indented below it. That happened on 22 September:
+# a `documents:` block inserted just after cloud.ui quietly moved
+# cloud.estate, cloud.notify, cloud.memory_backup and cloud.document_ocr
+# underneath it. Nothing raised, because nothing validates this file's shape
+# at load time -- they would simply have been absent, and notify is the one
+# way the agent can reach Paul when nobody is looking at the UI.
+#
+# Anything new at column 0 belongs here, under this line, and nowhere else.
+
+# Where documents the agent writes are put. One directory, fixed here rather
+# than chosen per request: the format decides the extension and the name is
+# scrubbed to a basename, so nothing the model writes can land anywhere else.
+documents:
+  dir: /var/lib/jarvis/documents
+
+# The scout's drafts, shown in the Marketing tab. Read-only: the instance
+# gets dynamodb:Query and GetItem on the scout's table and nothing else, and
+# approving is done on the signed link in the digest email, which is the only
+# thing holding the signing secret.
+#
+# The first coupling between the agent and the scout, which until now shared
+# no code, no IAM and no visibility. One direction, and switched on
+# deliberately rather than found on by default.
+marketing:
+  enabled: true
+  table: jarvis-scout
+  region: us-west-2
+
+# The browser. A real Chromium, in its own process under its own uid, that the
+# agent drives over loopback -- Paul asked for it because moving between apps
+# to look things up was costing him more time than the looking up.
+#
+# It is a client here, never a host. The service has its own systemd unit with
+# its own MemoryMax, because on a t3.small one page can take half the machine
+# and the OOM killer does not reliably prefer the browser to the agent.
+#
+# Three fences, and the first is the one that matters:
+#
+#   * every request the browser makes -- the page's images and XHR as much as
+#     the agent's navigation -- must resolve to a public address. A browser
+#     that can reach 169.254.169.254 can be told by any page to fetch the
+#     instance role's credentials, and the role sits underneath every other
+#     control on this machine.
+#   * the profile is thrown away each session. No cookies, no logins, nothing
+#     carried over: the agent helps Paul look things up, it is never him.
+#   * reading and moving are open; clicking, typing and submitting are a
+#     CHANGE tool, so at the proposer rung they become a card he approves.
+#     It never types into a password field and never submits a form on a page
+#     that has one, at any rung.
+#
+# Turn it off by setting enabled: false; nothing else needs changing.
+browser:
+  enabled: true
+  host: 127.0.0.1
+  port: 8477
+  token_file: /run/jarvis-browser/token
+  timeout_s: 45
+
+  # Whether logins survive. Paul's decision, 23 September 2026, reversing the
+  # morning's default after weighing it: "he should be able to do everything
+  # on it, have full admin control", then "can we sandbox it, that would help
+  # with risk".
+  #
+  # true keeps cookies in /var/lib/jarvis-browser/profile, so a site he signs
+  # into in the Browser tab stays signed in for the agent. That is the useful
+  # half and the dangerous half at once, and it is why the next setting exists.
+  persistent: false
+
+  # Which sites the agent may ACT on while signed in. Empty is not "none
+  # allowed" in general -- with persistent: false the agent may act anywhere,
+  # because nothing is signed in and there is nobody to be. It is only once
+  # logins survive that this list starts deciding, origin by origin.
+  #
+  # The design is the agent's own, from being asked what it would want given
+  # that Paul had decided to let it act: "track which origins the browser has
+  # active sessions on ... require explicit, one-time operator approval the
+  # first time any action is attempted from a new origin ... trust per origin,
+  # not blanket trust". Better than what I had, which was blanket.
+  #
+  # Written as scheme://host[:port]. http and https are different entries on
+  # purpose: approving a site should not quietly approve a plaintext one.
+  approved_origins: []
+
+  # Typing into a password or payment field. Separate from the grant to act,
+  # because pressing "next page" and filling in a password are not the same
+  # kind of act and should not be opened by the same switch. With
+  # persistent: true the better path is that Paul signs in once himself in the
+  # Browser tab and the agent rides the session, never touching the secret.
+  allow_secrets: false
+
+  # Paul's standing rule, and the one thing no grant lifts: anything that
+  # would SAY something -- post, comment, reply, send, submit a form, buy,
+  # book, sign up -- waits for him as a proposal. Decided by the browser
+  # (publish.py) from what the action DOES: a form submission, a press inside
+  # a form, a press on a page with text composed in a box. It fails closed.
+  # There is no switch for it here on purpose.
+
+  # What the browser was used for, by whom, with what outcome, and every
+  # decision he makes on a browse proposal. Agent-side; the browser's uid
+  # cannot read it. Feeds the daily debrief and the Debrief card in the tab.
+  journal: /var/lib/jarvis/browser-journal.jsonl
+  # Local hour (notify.timezone) after which the day's debrief is sent once.
+  debrief_hour: 21

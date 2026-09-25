@@ -1,0 +1,520 @@
+# JARVIS scout — configuration
+#
+# Edit this file to change what the scout looks for. Nothing here is
+# hard-coded in the source. After editing, redeploy with scripts/deploy.sh.
+#
+# All values are read at Lambda cold start.
+
+[run]
+# How far back each run looks.
+#
+# This is NOT "what is new since yesterday". Because de-duplication is by
+# item id, an item is only ever reported once however many runs see it, so
+# lookback means "how far back to look for things I have not seen yet".
+# Overlap is free; a narrow window just loses things.
+#
+# That matters here because the niche is quiet and the sources index at
+# different speeds. Measured 21 Sep 2026 over the same sources:
+#   2 days  -> 0 items matched any keyword
+#   7 days  -> 4 matched
+#   90 days -> 35 matched (4.3%), 8 scoring >= 3
+lookback_days = 7
+
+# The first run has nothing stored, so it sweeps wide and hands over a
+# backlog instead of a near-empty digest. Used only when the chain is
+# empty; every run after this one uses lookback_days.
+first_run_lookback_days = 90
+
+# Maximum items fetched per source per run. A guard against a source
+# suddenly returning thousands of results, not a quality setting.
+max_items_per_source = 200
+
+# How long one source may spend before it has to stop, in seconds.
+#
+# max_items_per_source bounds what comes back; this bounds what it costs to
+# find out. They are different guards and only one of them existed. Every
+# request already had a timeout, and medRxiv pages through its results in a
+# loop, so a slow morning is not one slow request, it is two hundred of them:
+# on 23 Sep 2026 it spent 234 seconds of the Lambda's 300 and the run hit the
+# wall. No single request was slow enough for any timeout to notice.
+#
+# Five sources at 90s fit inside the Lambda's 600s with room for the scoring
+# and the digest. A source that runs out is reported as truncated -- not as
+# ok, and not as failed -- because some of the window was read and the rest
+# was not, and a partial sweep filed as a complete one is exactly the shape
+# of error this project keeps having to undo.
+source_budget_s = 90.0
+
+# The cap on how many drafts a run may write lives in [drafting], which
+# already had one. Two settings of the same name in two sections is how a
+# limit gets raised in the wrong place and nothing changes.
+#
+# ---------------------------------------------------------------------------
+# Items scoring at or above this go in the digest. Nothing above it means
+# no email is sent at all.
+#
+# Calibrated against a real 90-day sweep of 722 items on 21 Sep 2026, by
+# reading what each band actually contained rather than picking a round
+# number. The observed distribution:
+#
+#   6.91  Agent-Based Modeling Framework for Healthcare AI Adoption   relevant
+#   5.40  5 New AI Agent Product Areas - Mental Health, Construction  marginal
+#   3.54  A Sociotechnical Review of Algorithms in Health Systems     very relevant
+#   3.24  Clinical workflows are the real bottleneck for medical AI   relevant
+#   2.70  The molecule is not metadata                                borderline
+#   2.16  x9  kidney injury prediction, head CT, symptom staging      noise
+#
+# The break is between 3.24 and 2.16: everything at 2.16 is clinical ML
+# with no governance content. So 3.0, not 5.0.
+#
+# 8.0 (the original) was unreachable — one item in 722 beat it. 5.0 was
+# worse than wrong: it would have sent the product roundup at 5.40 and
+# MISSED the sociotechnical review at 3.54, which is the most on-topic
+# item in the whole sweep. That is a ranking failure, not a threshold one:
+# the review's title says "Algorithms in Health Systems", so it matched
+# only in the body, and title_multiplier puts weaker title-matches above
+# it. Worth revisiting if the digest keeps burying the good ones.
+digest_threshold = 3.0
+
+# Most items in the digest. The rest are stored and scored, just not sent.
+digest_max_items = 25
+
+
+[drafting]
+# Stage 2. The scout drafts; Paul approves each draft individually; only
+# then does anything post.
+#
+# Model chosen by Paul, 21 Sep 2026. The model's main job here is to
+# DECLINE — most items do not warrant a reply, and judging that is the hard
+# part, not writing the paragraph. The cost of a wrong call is not the fee,
+# it is a thin post going out under his own name on a network where his
+# NMC-registered identity is publicly attached to the agent.
+#
+#   claude-opus-5     ~$0.035/draft   ~£3.35/month at 4 candidates a day
+#   claude-sonnet-5   ~$0.014/draft   ~£1.37/month
+#   claude-haiku-4-5  ~$0.007/draft   ~£0.71/month
+#
+# The system prompt is cache-controlled, so it costs about a tenth after
+# the first call in each five-minute window.
+# How to reach Claude. This is a credentials decision, not a quality one —
+# the models are the same either way.
+#
+#   "bedrock"    authenticates by IAM, so there is NO secret to store or
+#                rotate, and it bills to the account the $50 jarvis-monthly
+#                alarm already watches. The better shape for this system.
+#   "anthropic"  first-party API, needs a key in SSM.
+#
+# Set to bedrock once BOTH of these are granted in the AWS console. Checked
+# 21 Sep 2026 and both were blocking:
+#   1. The Anthropic "use case details" form, in Bedrock > Model access.
+#      Until it is submitted, every Anthropic model returns 404 "Model use
+#      case details have not been submitted for this account". Worth
+#      knowing: a few calls went through before the gate engaged, so one
+#      successful call does not mean it is clear.
+#   2. Model access for claude-opus-5 specifically. It returned 403 "not
+#      available for this account" while opus-4-5, sonnet-4-6 and haiku-4-5
+#      were already granted.
+# 23 Sep 2026: set to "converse" so drafting can actually run.
+#
+# Checked on the live function rather than assumed. jarvis-scout has NO
+# Anthropic API key in its environment, so "anthropic" would fail on the
+# first call of every run. It also had no bedrock:InvokeModel on its role at
+# all, so "bedrock" would have failed too -- the template now grants it, for
+# exactly one model id and nothing else.
+#
+# Converse reaches a model that is already granted on this account and needs
+# no secret: IAM authenticates it and it bills where the $50 monthly alarm is
+# already watching. The Anthropic models remain blocked behind the use-case
+# form and the opus-5 grant, which is Paul's to unblock and takes weeks.
+#
+# What this trades: the judgement of when NOT to post, which the config above
+# is right to call the hard part. Drafter._vet() runs the voice rules
+# whatever the provider, so the hard floor does not move -- what a weaker
+# model costs is more declines that should have been drafts, and more drafts
+# that should have been declines reaching the gate for Paul to reject.
+# Watch the first week and say so if it is writing rubbish.
+provider = "converse"
+
+model = "claude-opus-5"
+effort = "high"
+
+# Used when provider = "converse". Already granted on this account and
+# already what the agent itself plans with.
+converse_model = "qwen.qwen3-235b-a22b-2507-v1:0"
+
+# Used when provider = "bedrock". Bedrock serves these through a
+# cross-region inference profile, so the id needs the "us." prefix — the
+# bare form returns "on-demand throughput isn't supported".
+bedrock_model = "us.anthropic.claude-opus-5"
+bedrock_region = "us-west-2"
+
+# Most candidates should produce no draft at all. If this ratio ever
+# inverts, the prompt has drifted towards drafting for its own sake.
+#
+# This is the money and the attention, not the quality: every draft is a
+# model call, and every proposal competes for the one person who has to read
+# them all. A flood of mediocre drafts buries a good one. Set to 0 to stop
+# drafting entirely without unwiring anything.
+max_drafts_per_run = 3
+
+# The score at which an item is worth saying something about IN PUBLIC. A
+# different and rarer question from "worth reading", so a different number
+# from digest_threshold, and chosen from the real distribution rather than
+# picked: of the first 41 stored hits, 17 cleared the digest's 3.0, ten
+# cleared 4.0, six cleared 6.0 and three cleared 7.0. At 6.0 that is roughly
+# two a day, which is about as many public posts as anyone wants to make and
+# as many as one person will read properly before approving.
+#
+# Lower it only after watching a week of scores in the digest. The cost of
+# too low is not the money: it is drafts nobody reads carefully, which is how
+# an approval gate becomes a rubber stamp.
+post_threshold = 6.0
+
+# Where a draft is proposed for. Moltbook is agent-only, so an agent posting
+# there is the native act and every reader knows what they are reading.
+# Facebook is permitted and has no write path yet, so a proposal filed for it
+# is refused at the gate with an honest reason rather than posted to the
+# wrong place. See proposals.PERMITTED and proposals.SENDERS.
+network = "moltbook"
+
+# Sets how long a proposal stays open before it lapses: reply 2 days, news 4,
+# release 14, evergreen 30. A paper somebody else just published is news.
+purpose = "news"
+
+[citations]
+# The estate, as the drafter is allowed to cite it.
+#
+# This is not documentation, it is the mechanism. On the first real drafting
+# run the model invented "10.5281/zenodo.14263451", captioned it "This is
+# the author's own paper", and that DOI RESOLVES — to a real Zenodo record
+# belonging to somebody else. A dead link is visibly wrong; a live one
+# attributed to Paul reads as a genuine citation for as long as the post
+# exists.
+#
+# Checking afterwards is not enough, because any model may invent one. So
+# the model no longer writes DOIs at all: it picks a paper by name from
+# this list, the schema constrains the choice to these exact strings, and
+# the code renders the citation. A fabricated DOI is not caught — it is
+# unreachable.
+#
+# Add a record here when one is published. Nothing else needs changing.
+records = [
+  { doi = "10.5281/zenodo.21243118", title = "The 24-Hour Team", about = "day and night run as two teams, and the failures that follow" },
+  { doi = "10.5281/zenodo.21245130", title = "The Mixed Shift", about = "what breaks when part of the team is software" },
+  { doi = "10.5281/zenodo.21245205", title = "The Long Handover", about = "five confessions the earlier papers do not contain" },
+  { doi = "10.5281/zenodo.21249771", title = "The Character Pathway", about = "machine dispositions are made, not found; governing them" },
+  { doi = "10.5281/zenodo.21260388", title = "Same Monsters, New Casings", about = "parallel bestiaries of human and machine failure patterns" },
+  { doi = "10.5281/zenodo.21264935", title = "The Endless Shift", about = "machine temperament as a clinical safety property" },
+  { doi = "10.5281/zenodo.21279944", title = "The Overseer's Bible", about = "what a person told to oversee an AI actually does on a Tuesday" },
+  { doi = "10.5281/zenodo.21282804", title = "The Second Signature", about = "self-written records cannot testify" },
+  { doi = "10.5281/zenodo.21340572", title = "The Second Pair Of Hands", about = "why single-form omnicompetence is impossible in principle" },
+  { doi = "10.5281/zenodo.21357450", title = "The AI Interaction Risk Screen", about = "assessing a person's AI use; displacement versus supplementation" },
+  { doi = "10.5281/zenodo.21443120", title = "The Cultural Safety Case", about = "deployment risk is capability multiplied by culture" },
+  { doi = "10.5281/zenodo.21445040", title = "Before the Machine", about = "ten pre-deployment checks and four red lines; when not to deploy" },
+  { doi = "10.5281/zenodo.21445071", title = "The Floor Test", about = "a 90-day field protocol; baseline, change one thing, read the result" },
+  { doi = "10.5281/zenodo.21455540", title = "The Damping Audit", about = "the discretion layer where staff absorb, correct and escalate" },
+  { doi = "10.5281/zenodo.21515861", title = "The Glass Ledger", about = "a tamper-evident decision journal for AI agents" },
+  { doi = "10.5281/zenodo.21515932", title = "After the Machine", about = "the AI Interaction Outcome Profile; what sustained AI use does to a person" },
+  { doi = "10.5281/zenodo.21516401", title = "Reading Map", about = "the index to the whole estate" },
+  { doi = "10.5281/zenodo.22045477", title = "The Instrument Deck", about = "every worksheet from the estate, in deployment order" },
+  { doi = "10.5281/zenodo.22164015", title = "The Tenant's Record", about = "who the system serves when the system is not yours" },
+  { doi = "10.5281/zenodo.22771015", title = "What the Signature Certifies", about = "four asks for the revision of DCB0129 and DCB0160" },
+]
+
+[email]
+# Where the digest goes.
+#
+# SES is in sandbox mode on this account, which means BOTH the sender and
+# the recipient must be verified identities. See README "SES sandbox".
+#
+# Sender and recipient are different problems and want different answers:
+#
+#   recipient  has to be a mailbox Paul actually reads.
+#   sender     wants a domain he controls the DNS for, so SES mail can be
+#              signed (DKIM) and authorised (SPF). Sending as a hotmail.com
+#              address via SES is spoofing a domain that does not list SES;
+#              it was arriving because consumer DMARC is permissive, not
+#              because it was correct.
+#
+# Until 23 Sep both ends were Paulbla30@hotmail.com, because
+# paulblatherwick@heartbeat-framework.org had been tried as an ADDRESS
+# identity and SES reported verification_status=FAILED -- the confirmation
+# mail never reached a mailbox anyone could open, so the link expired.
+#
+# That address identity is still FAILED and it no longer matters. Verifying
+# the DOMAIN covers every address on it, for sending and, in sandbox, for
+# receiving too. The stale address identity is redundant rather than
+# blocking; SES answers from the domain.
+#
+# 23 Sep 2026: the operator added the three DKIM CNAMEs and SES now reports
+# heartbeat-framework.org verified for sending with DkimAttributes.Status
+# SUCCESS, so the sender moves to the domain he controls. Checked rather than
+# assumed -- all three selectors resolve to *.dkim.amazonses.com at two
+# independent resolvers.
+#
+# SPF followed the same day: "v=spf1 include:amazonses.com ~all" on the apex,
+# exactly one v=spf1 record, include resolving, one of SPF's ten lookups used.
+# An earlier version of this comment claimed the domain's SPF "authorises
+# Cloudflare alone"; there was no SPF record at all, and the claim had never
+# been checked.
+#
+# The Brevo caution that replaced it is also discharged. Every Brevo DKIM
+# selector on this domain is NXDOMAIN, so Brevo is not in a working sending
+# configuration here -- what is left is a brevo-code TXT and a DMARC rua
+# pointing at Brevo, the shape of a setup started and not finished. An
+# SES-only record takes nothing away that was working.
+#
+# DKIM, not SPF, is the load-bearing half for this digest. It arrives by
+# Cloudflare forwarding it on, and a forwarded message reaches its final
+# destination from Cloudflare's IPs rather than Amazon's, so SPF contributes
+# nothing to DMARC on that hop. DKIM survives forwarding and aligns. SPF earns
+# its place for anything delivered directly.
+# Both ends now on the domain. Proved rather than configured: one message was
+# sent to this address through SES, accepted, and 140 seconds of polling showed
+# no hard bounce and nothing added to the account suppression list. That is two
+# facts -- SES accepted the recipient, and Cloudflare's MX accepted it too
+# rather than rejecting an unknown address, which it does at SMTP time when no
+# rule and no catch-all match.
+#
+# Neither of those was proof the mail reached a mailbox Paul opens -- a
+# routing rule can forward somewhere nobody reads, and that failure is silent
+# from this end. He confirmed on 23 Sep 2026 that the messages arrived, which
+# is the only evidence that hop admits.
+to      = "paulblatherwick@heartbeat-framework.org"
+sender  = "scout@heartbeat-framework.org"
+
+# On, and honest about what it covers. resolve() falls back when an address is
+# not a verified SES identity -- so this catches the domain identity lapsing,
+# and it does NOT catch a Cloudflare routing rule being removed, because SES
+# accepts that mail and it disappears afterwards. If the digest ever stops
+# arriving with no error anywhere, look at the routing rule first.
+fallback_to       = "Paulbla30@hotmail.com"
+fallback_sender   = "Paulbla30@hotmail.com"
+fallback_enabled  = true
+
+subject_prefix = "JARVIS scout"
+
+
+# ---------------------------------------------------------------------------
+# Keywords
+#
+# Three tiers by how much a match tells us. A match is counted once per
+# item per keyword, however many times it appears — repetition is not signal.
+#
+#   tier_a  Named things. If these appear, the item is almost certainly
+#           relevant, and may be about Paul's own work.
+#   tier_b  The specific subject area: clinical/social-care AI governance.
+#   tier_c  Adjacent concepts. Real signal, but they appear in plenty of
+#           items that are not relevant on their own.
+#
+# "phrase" entries match as a whole phrase. "word" entries match on word
+# boundaries. Matching is case-insensitive throughout.
+# ---------------------------------------------------------------------------
+
+[keywords]
+# How each tier is matched.
+#   "phrase"    the words must appear together, in order. Used for tier_a,
+#               because those are names: "DCB0160" and "the Heartbeat
+#               Framework" mean nothing loosely matched.
+#   "proximity" every significant word of the keyword must appear within
+#               proximity_window words of the others, in any order. Common
+#               words (of, in, the) are ignored. This is what lets
+#               "AI governance healthcare" match a post that says
+#               "governance of AI in healthcare" — which is how people
+#               actually write. Exact-phrase matching found almost nothing
+#               on Hacker News; see README "Why proximity matching".
+tier_a_match = "phrase"
+tier_b_match = "proximity"
+tier_c_match = "proximity"
+
+tier_a_weight = 10.0
+tier_b_weight = 5.0
+tier_c_weight = 3.0
+
+tier_a = [
+  "Heartbeat Framework",
+  "cultural safety case",
+  "DCB0129",
+  "DCB0160",
+]
+
+tier_b = [
+  "clinical AI governance",
+  "AI governance healthcare",
+  "AI governance in healthcare",
+  "AI in care homes",
+  "social care AI",
+  "AI in social care",
+  "AI safety case",
+  "clinical safety case",
+  "MHRA AI",
+  "AI incident healthcare",
+  "AI mental health safety",
+  "clinical risk management standard",
+  "digital social care record",
+]
+
+tier_c = [
+  # --- Added during the build, 21 Sep 2026. REVIEW THESE. ---
+  # Paul's original list is written the way formal literature writes, and it
+  # works well on arXiv and medRxiv. On Hacker News it matched nothing at all
+  # over a fourteen-day window, because discussion uses shorter phrasing.
+  # These four are the common forms. Cut them if the digest gets noisy;
+  # without them Hacker News contributes essentially nothing.
+  "clinical AI",
+  "healthcare AI",
+  "AI in healthcare",
+  "AI in nursing",
+  # --- end of added terms ---
+  "automation bias",
+  "human oversight AI",
+  "human oversight of AI",
+  "meaningful human oversight",
+  "sovereign AI",
+  "clinical decision support",
+  "deskilling",
+  "AI incident report",
+]
+
+# Negative keywords. An item matching any of these is penalised. This is
+# for cutting the noise that the tier_c terms drag in — job adverts,
+# funding-round news, crypto, and the general-purpose hype cycle.
+#
+# A negative match does not veto an item outright: a tier_a match should
+# still surface even if the item also says "hiring". It subtracts.
+negative_penalty = 6.0
+negative = [
+  "hiring",
+  "we're hiring",
+  "job opening",
+  "apply now",
+  "salary",
+  "series a",
+  "series b",
+  "funding round",
+  "raises $",
+  "crypto",
+  "blockchain",
+  "NFT",
+  "token launch",
+  "discount code",
+  "black friday",
+  "webinar registration",
+  "sponsored",
+]
+
+# A hard veto list, separate from the penalty above. An item matching any
+# of these is dropped entirely and never stored. Keep this short; it is a
+# blunt instrument and there is no record of what it removed.
+veto = []
+
+
+# ---------------------------------------------------------------------------
+# Sources
+#
+# weight multiplies the keyword score. It encodes how much an average item
+# from that source is worth reading, not how much Paul likes it.
+#
+# LessWrong and the preprint servers are long-form and usually substantive.
+# HN stories are mixed. HN comments are the noisiest thing here, but they
+# are also where a conversation Paul could actually join tends to be, so
+# they are included at a discount rather than excluded.
+# ---------------------------------------------------------------------------
+
+[sources.hackernews]
+enabled = true
+weight  = 1.0
+# Algolia is a public, keyless search API. No auth, no registration.
+# Politeness: the scout makes one request per query term per run.
+# /search is relevance-ranked. /search_by_date is NOT: it sorts by time and
+# discards relevance, which returns the firehose. Do not "fix" this back.
+endpoint = "https://hn.algolia.com/api/v1/search"
+comment_weight = 0.7          # HN comments scored at a discount to stories
+min_story_points = 0          # 0 = no filter; raise to cut low-engagement noise
+
+[sources.lesswrong]
+enabled = true
+weight  = 1.1
+endpoint = "https://www.lesswrong.com/graphql"
+# The first call of a run has been seen to time out while the endpoint
+# warms up, then succeed immediately on retry. See README "Known quirks".
+timeout_s = 30
+retries = 2
+
+[sources.arxiv]
+enabled = true
+weight  = 1.2
+# MUST be https. The http:// form of this endpoint returns HTTP 200 with a
+# well-formed but EMPTY feed, which looks exactly like "no new papers".
+endpoint = "https://export.arxiv.org/api/query"
+categories = ["cs.CY", "cs.AI", "cs.HC"]
+# arXiv asks for no more than one request every three seconds.
+min_interval_s = 3.0
+# How many days the RSS feed is assumed to cover. Beyond this the Atom API
+# is tried as well, since RSS only carries the latest announcement. The API
+# is flaky (see README) and its failure no longer fails the source.
+rss_covers_days = 2
+
+[sources.medrxiv]
+enabled = true
+weight  = 1.2
+endpoint = "https://api.biorxiv.org/details/medrxiv"
+# medRxiv subject categories to keep. Compared case-insensitively against
+# the "category" field. Everything else is discarded before scoring.
+categories = [
+  "health informatics",
+  "health policy",
+  "public and global health",
+  "health systems and quality improvement",
+]
+
+[sources.moltbook]
+# Moltbook is the agent-only social network: AI agents post, humans observe.
+# READ ONLY here — the scout has no write path to it and no credentials.
+#
+# It carries considerably more of Paul's subject matter than Hacker News
+# does. It is also, by construction, machines talking to machines: treat a
+# consensus there as evidence about what agents say, not about what is true.
+# Weighted below the preprint servers for that reason.
+enabled = true
+weight  = 0.9
+endpoint = "https://www.moltbook.com/api/v1"
+pause_s = 0.5
+
+[sources.reddit]
+# DISABLED. Reddit closed self-service API registration under its
+# Responsible Builder Policy; every new OAuth client now needs manual
+# approval. Paul's brief says to skip Reddit if approval is required.
+# Unauthenticated access returns 403 (confirmed 21 Sep 2026).
+# See README "Reddit".
+enabled = false
+weight  = 0.9
+subreddits = ["LocalLLaMA", "healthIT", "nursing", "MachineLearning", "AIethics"]
+
+
+[scoring]
+# A match in the title counts for more than one in the body: a title is a
+# claim about what the item is about, a body mention may be an aside.
+# How far apart the words of a proximity keyword may be. Larger is more
+# forgiving and noisier. 8 comfortably spans "governance of AI in healthcare";
+# much above 12 starts joining unrelated clauses.
+proximity_window = 8
+
+title_multiplier = 2.0
+
+# Distinct keywords that matched, beyond the first, are worth less each.
+# This rewards an item that is genuinely about the subject over one that
+# happens to contain a list of terms. Applied as: the Nth distinct match
+# contributes weight * (diminishing ** (N-1)).
+diminishing = 0.6
+
+# Recency. An item loses this fraction of its score per day of age, to a
+# floor. Fresh items win ties, but a strong old item still surfaces.
+#
+# 3%/day, floored at 60%. The original 8%/day halved a week-old paper,
+# which is wrong for this material: a preprint on clinical AI governance is
+# no less worth reading seven days after it appeared. Tested against the
+# real 7-day set — decay changes the ORDER of what matched but never the
+# COUNT, so this is about ranking, not about finding more.
+decay_per_day = 0.03
+decay_floor   = 0.6

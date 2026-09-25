@@ -1,0 +1,356 @@
+"""Tests for memory consolidation.
+
+The store was a flat list: everything the same weight, kept until a row cap
+pushed the oldest out, handed to the model whole on every cycle. The operator's
+diagnosis was that we throw everything at it and expect it to organise it in
+flight. This is the pass that organises it first.
+
+Most of these tests are about what consolidation must NOT do, because an
+editorial act performed by the thing being edited needs rules it cannot talk
+its way around.
+"""
+
+import logging
+import os
+import tempfile
+import time
+import unittest
+
+from jarvis.agent.consolidate import (Consolidator, measurement_of, similarity,
+                                      keywords)
+from jarvis.agent.store import MemoryStore, NullStore
+
+LOG = logging.getLogger("test")
+
+
+class FakeLedger:
+    def __init__(self):
+        self.entries = []
+
+    def record(self, kind, body):
+        self.entries.append((kind, body))
+        return True
+
+
+class Base(unittest.TestCase):
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.store = MemoryStore(os.path.join(self.tmp.name, "m.db"), logger=LOG)
+        self.ledger = FakeLedger()
+
+    def tearDown(self):
+        self.store.close()
+        self.tmp.cleanup()
+
+    def consolidator(self, **cfg):
+        settings = {"min_group": 3, "similarity": 0.5, "promote_at": 5}
+        settings.update(cfg)
+        return Consolidator(self.store, LOG, settings, self.ledger)
+
+
+class TestNothingIsDestroyed(Base):
+    """The rule that does not bend. A model that can quietly erase its own
+    past is doing what the Glass Ledger exists to prevent, inside the one
+    store the ledger does not cover."""
+
+    def test_a_merge_keeps_every_source_on_disk(self):
+        for text in ("the security scan found no new findings this hour",
+                     "the security scan found no new findings again this hour",
+                     "the security scan reported no new findings this hour at all"):
+            self.store.remember(text)
+        before = self.store.stats()["entries"]
+        report = self.consolidator().run()
+        self.assertEqual(len(report["merged"]), 1)
+        # one new derived row, and not one original removed
+        self.assertEqual(self.store.stats()["entries"], before + 1)
+        merged = report["merged"][0]
+        self.assertEqual(len(merged["sources"]), 3)
+        for source_id in merged["sources"]:
+            row = self.store._query("SELECT * FROM memories WHERE id = ?",
+                                    (source_id,))[0]
+            self.assertEqual(row["state"], "dormant")
+            self.assertTrue(row["text"])
+
+    def test_a_contradiction_supersedes_and_keeps_the_history(self):
+        """How a thing changed is often the useful part."""
+        self.store.remember("the root filesystem is 8 GB")
+        time.sleep(0.01)
+        self.store.remember("the root filesystem is 20 GB")
+        report = self.consolidator().run()
+        self.assertEqual(len(report["superseded"]), 1)
+        event = report["superseded"][0]
+        self.assertEqual(event["current_value"], 20.0)
+        self.assertEqual(event["was"], [8.0])
+        live = [r["text"] for r in self.store.live(10)]
+        self.assertIn("the root filesystem is 20 GB", live)
+        self.assertNotIn("the root filesystem is 8 GB", live)
+        old = self.store._query("SELECT * FROM memories WHERE id = ?",
+                                (event["retired"][0],))[0]
+        self.assertEqual(old["state"], "superseded")
+
+
+class TestDerivedIsNeverConsolidatedAgain(Base):
+    """Summarising a summary, and then that, is how a memory becomes a
+    confident fiction with no provenance left."""
+
+    def test_a_merged_entry_is_not_an_input_to_the_next_pass(self):
+        for i in range(3):
+            self.store.remember(f"the security scan found no new findings run {i}")
+        first = self.consolidator().run()
+        self.assertEqual(len(first["merged"]), 1)
+        merged_id = first["merged"][0]["id"]
+        row = self.store._query("SELECT * FROM memories WHERE id = ?", (merged_id,))[0]
+        self.assertEqual(row["derived"], 1)
+        # feed it more of the same shape and run again
+        for i in range(3, 6):
+            self.store.remember(f"the security scan found no new findings run {i}")
+        second = self.consolidator().run()
+        for merge in second["merged"]:
+            self.assertNotIn(merged_id, merge["sources"])
+
+    def test_live_can_exclude_derived_entries(self):
+        self.store.remember_derived("a distilled thing", [1, 2, 3])
+        self.store.remember("an observed thing")
+        self.assertEqual(len(self.store.live(include_derived=True)), 2)
+        self.assertEqual(len(self.store.live(include_derived=False)), 1)
+
+
+class TestWeight(Base):
+
+    def test_use_strengthens_and_neglect_fades(self):
+        entry = self.store.remember("something worth keeping")
+        self.store.reinforce([entry["id"]], amount=0.5)
+        row = self.store.live(1)[0]
+        self.assertAlmostEqual(row["weight"], 1.5)
+        self.assertEqual(row["used"], 1)
+        # decay only touches what has not been used lately
+        self.assertEqual(self.store.decay(0.5, older_than_s=86400), 0)
+        self.assertEqual(self.store.decay(0.5, older_than_s=0), 1)
+        self.assertAlmostEqual(self.store.live(1)[0]["weight"], 0.75)
+
+    def test_pinned_memories_do_not_fade(self):
+        self.store.remember("a standing fact", pinned=True)
+        self.store.decay(0.1, older_than_s=0)
+        self.assertAlmostEqual(self.store.live(1)[0]["weight"], 1.0)
+
+    def test_pruning_drops_the_weakest_not_merely_the_oldest(self):
+        """Age alone would drop a hard-won fact from week one to make room
+        for this morning's sixth 'disk is fine', which is backwards."""
+        old = self.store.remember("a hard-won fact from week one")
+        self.store.reinforce([old["id"]], amount=3.0)
+        for i in range(12):
+            self.store.remember(f"routine chatter {i}")
+        self.store.prune(max_rows=10)
+        kept = [r["text"] for r in self.store.recent(20)]
+        self.assertIn("a hard-won fact from week one", kept)
+
+    def test_a_derived_entry_survives_pruning(self):
+        """It is the distilled form of memories already let go."""
+        derived = self.store.remember_derived("distilled", [1, 2, 3])
+        for i in range(20):
+            self.store.remember(f"chatter {i}")
+        self.store.prune(max_rows=10)
+        rows = self.store._query("SELECT * FROM memories WHERE id = ?",
+                                 (derived["id"],))
+        self.assertEqual(len(rows), 1)
+
+
+class TestPromotion(Base):
+    """Repeated is not the same as durable.
+
+    Run against the live agent's real memory, promotion by count alone wanted
+    to make standing facts of "no new security findings to act on; idling
+    until the next cycle" -- a status line the planner had written six times
+    in one session. A count says a thing was repeated. A span says it kept
+    being true, which is the claim "standing fact" actually makes.
+    """
+
+    def _age(self, memory_id, seconds):
+        """Backdate when this was first written, leaving the last sighting."""
+        self.store._db.execute("UPDATE memories SET first_ts = ts - ? WHERE id = ?",
+                               (float(seconds), memory_id))
+        self.store._db.commit()
+
+    def test_what_keeps_being_true_across_days_becomes_standing(self):
+        entry = self.store.remember("the planner is an imported Qwen3-32B on Bedrock")
+        for _ in range(5):
+            self.store.remember("the planner is an imported Qwen3-32B on Bedrock")
+        self._age(entry["id"], 3 * 86400)
+        report = self.consolidator().run()
+        self.assertEqual(len(report["promoted"]), 1)
+        self.assertTrue(self.store.live(5)[0]["pinned"])
+
+    def test_a_status_line_repeated_in_one_session_is_not_a_fact(self):
+        for _ in range(8):
+            self.store.remember("no new security findings; idling until the next cycle")
+        report = self.consolidator().run()
+        self.assertEqual(report["promoted"], [])
+        self.assertFalse(self.store.live(5)[0]["pinned"])
+
+    def test_something_seen_twice_is_not_promoted(self):
+        entry = self.store.remember("a passing observation")
+        self.store.remember("a passing observation")
+        self._age(entry["id"], 10 * 86400)
+        self.assertEqual(self.consolidator().run()["promoted"], [])
+
+
+class TestTheParsers(unittest.TestCase):
+
+    def test_measurements_are_recognised_with_their_units(self):
+        self.assertEqual(measurement_of("the root filesystem is 20 GB"),
+                         ("root filesystem", 20.0, "gb"))
+        self.assertEqual(measurement_of("disk usage at 84%"),
+                         ("disk usage", 84.0, "%"))
+        self.assertIsNone(measurement_of("the scan found nothing"))
+
+    def test_different_units_are_different_subjects(self):
+        """20GB and 20% are not two readings of one thing."""
+        a = measurement_of("the root filesystem is 20 GB")
+        b = measurement_of("the root filesystem is 20 %")
+        self.assertNotEqual(a[2], b[2])
+
+    def test_similarity_ignores_filler_words(self):
+        self.assertGreater(similarity("the security scan found no new findings",
+                                      "a security scan has found no new findings"), 0.7)
+        self.assertLess(similarity("the disk is nearly full",
+                                   "the planner is on Bedrock"), 0.2)
+        self.assertNotIn("the", keywords("the disk is full"))
+
+
+class TestItNeverBreaksTheLoop(Base):
+
+    def test_no_durable_memory_is_a_skip_not_a_crash(self):
+        c = Consolidator(NullStore(), LOG, {}, self.ledger)
+        report = c.run()
+        self.assertEqual(report["skipped"], "no durable memory")
+
+    def test_disabled_is_a_skip(self):
+        report = self.consolidator(enabled=False).run()
+        self.assertEqual(report["skipped"], "consolidation disabled")
+
+    def test_a_dry_run_changes_nothing(self):
+        for i in range(3):
+            self.store.remember(f"the security scan found no new findings run {i}")
+        before = self.store.stats()["entries"]
+        report = self.consolidator().run(dry_run=True)
+        self.assertEqual(len(report["merged"]), 1)
+        self.assertIsNone(report["merged"][0]["id"])
+        self.assertEqual(self.store.stats()["entries"], before)
+        self.assertEqual(self.ledger.entries, [])
+
+    def test_a_broken_store_is_reported_not_raised(self):
+        class Broken(MemoryStore):
+            def live(self, *a, **k):
+                raise RuntimeError("disk gone")
+        broken = Broken(os.path.join(self.tmp.name, "b.db"), logger=LOG)
+        report = Consolidator(broken, LOG, {}, self.ledger).run()
+        self.assertIn("disk gone", report["skipped"])
+        broken.close()
+
+
+class TestTheRecord(Base):
+
+    def test_a_pass_that_changed_something_is_ledgered(self):
+        """How the memory got its shape is itself worth auditing."""
+        for i in range(3):
+            self.store.remember(f"the security scan found no new findings run {i}")
+        self.consolidator().run()
+        kinds = [k for k, _ in self.ledger.entries]
+        self.assertIn("consolidation", kinds)
+        body = dict(self.ledger.entries[0][1])
+        self.assertEqual(len(body["merged"]), 1)
+        self.assertEqual(len(body["merged"][0]["sources"]), 3)
+
+    def test_a_quiet_pass_is_not_an_event(self):
+        self.store.remember("one lonely observation")
+        self.consolidator().run()
+        self.assertEqual(self.ledger.entries, [])
+
+
+if __name__ == "__main__":
+    unittest.main()
+
+
+class TestWhatTheAgentSaidIsNotEvidence(Base):
+    """An exchange row is the agent quoting itself.
+
+    The conversation memory added on 23 September records what was answered at
+    the time. A reviewer caught the consequence the same day: consolidation
+    ends in promote, and a row confirmed often enough becomes standing fact. So
+    three consistent answers to similar questions would have hardened the
+    agent's own past position into something the model is handed as given --
+    the exact failure the agent warned about when asked, arriving through the
+    memory pass rather than through the prompt.
+
+    Exclusion is from acting, not from existing. The rows stay live, readable
+    and subject to decay and prune like anything else.
+    """
+
+    def _age(self, memory_id, seconds):
+        self.store._db.execute("UPDATE memories SET first_ts = ts - ? WHERE id = ?",
+                               (float(seconds), memory_id))
+        self.store._db.commit()
+
+    def _said(self, text, times=6, age_s=3 * 86400):
+        entry = self.store.remember(text, kind="exchange", source="operator")
+        for _ in range(times - 1):
+            self.store.remember(text, kind="exchange", source="operator")
+        self._age(entry["id"], age_s)
+        return entry
+
+    def test_a_repeated_answer_never_becomes_standing_fact(self):
+        self._said("23 Sep: spoke with Paul. They asked: \"have we spoken?\" "
+                   "What I said at the time, which may since be wrong: \"no\"")
+        report = self.consolidator().run()
+        self.assertEqual(report["promoted"], [])
+        row = self.store.recent(5, kind="exchange")[0]
+        self.assertFalse(row["pinned"])
+
+    def test_the_same_shape_of_row_is_promoted_when_it_is_an_observation(self):
+        # The control. Without this the test above passes for the wrong reason
+        # -- a promotion path that never fires proves nothing about exchanges.
+        entry = self.store.remember("the planner is an imported Qwen3-32B on Bedrock")
+        for _ in range(5):
+            self.store.remember("the planner is an imported Qwen3-32B on Bedrock")
+        self._age(entry["id"], 3 * 86400)
+        self.assertEqual(len(self.consolidator().run()["promoted"]), 1)
+
+    def test_answers_are_not_merged_into_one_derived_memory(self):
+        # A merge writes a new row that cites its sources and reads as a
+        # finding. Summarising three of the agent's own replies would produce
+        # one confident sentence with the hedging gone.
+        for n in range(3):
+            self.store.remember(
+                f"spoke with Paul about the ledger and what it records, note {n}",
+                kind="exchange", source="operator")
+        report = self.consolidator().run()
+        self.assertEqual(report["merged"], [])
+
+    def test_an_answer_cannot_make_up_the_numbers_for_a_real_merge(self):
+        # This is the "counting as confirmation for any other row" half. Two
+        # observations are below the threshold; the agent having said the same
+        # thing must not carry them over it.
+        self.store.remember("the tunnel to the instance is up and serving the UI")
+        self.store.remember("the tunnel to the instance is up and serving traffic")
+        self.store.remember("the tunnel to the instance is up and serving pages",
+                            kind="exchange", source="operator")
+        self.assertEqual(self.consolidator().run()["merged"], [])
+
+    def test_a_quoted_measurement_does_not_retire_a_real_reading(self):
+        real = self.store.remember("the root filesystem is 20 GB")
+        time.sleep(0.01)
+        self.store.remember("the root filesystem is 8 GB, or so I said at the time",
+                            kind="exchange", source="operator")
+        report = self.consolidator().run()
+        self.assertEqual(report["superseded"], [])
+        row = self.store._query("SELECT * FROM memories WHERE id = ?", (real["id"],))[0]
+        self.assertEqual(row["state"], "live")
+
+    def test_the_rows_are_still_there_afterwards(self):
+        self._said("23 Sep: spoke with Paul. They asked: \"are you awake?\" "
+                   "What I said at the time, which may since be wrong: \"yes\"")
+        before = self.store.stats()["entries"]
+        self.consolidator().run()
+        self.assertEqual(self.store.stats()["entries"], before)
+        self.assertTrue(self.store.recent(5, kind="exchange"))

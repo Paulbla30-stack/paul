@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# OpenClaw ISO Builder
+# Jarvis ISO Builder
 # ====================
 # Builds a bootable ISO image from the prepared ISO directory.
 # Usage: build-iso.sh <iso_dir> <output_iso>
@@ -9,7 +9,7 @@ set -euo pipefail
 ISO_DIR="${1:?Usage: build-iso.sh <iso_dir> <output_iso>}"
 ISO_OUTPUT="${2:?Usage: build-iso.sh <iso_dir> <output_iso>}"
 
-echo "[*] OpenClaw ISO Builder"
+echo "[*] Jarvis ISO Builder"
 echo "========================"
 
 # Validate inputs
@@ -35,7 +35,7 @@ if command -v xorriso &>/dev/null; then
     echo "[*] Using xorriso..."
     xorriso -as mkisofs \
         -R -J \
-        -V "OPENCLAW" \
+        -V "JARVIS" \
         -b boot/grub/i386-pc/eltorito.img \
         -no-emul-boot \
         -boot-load-size 4 \
@@ -52,7 +52,7 @@ for tool in mkisofs genisoimage; do
         echo "[*] Using $tool..."
         "$tool" \
             -R -J \
-            -V "OPENCLAW" \
+            -V "JARVIS" \
             -o "$ISO_OUTPUT" \
             "$ISO_DIR"
         echo "[+] ISO created: $ISO_OUTPUT"

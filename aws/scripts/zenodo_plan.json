@@ -1,0 +1,768 @@
+{
+ "22771015": {
+  "language": "eng",
+  "keywords": [
+   "Heartbeat Framework",
+   "DCB0129",
+   "DCB0160",
+   "clinical safety",
+   "clinical risk management",
+   "NHS England",
+   "clinical safety officer",
+   "clinical safety case",
+   "hazard log",
+   "AI governance",
+   "post-implementation monitoring",
+   "agentic AI",
+   "health IT",
+   "standards revision",
+   "compliance",
+   "healthcare"
+  ],
+  "related_identifiers": [
+   {
+    "identifier": "https://heartbeat-framework.org/papers/what-the-signature-certifies/",
+    "relation": "isDescribedBy",
+    "scheme": "url"
+   },
+   {
+    "identifier": "10.5281/zenodo.21443120",
+    "relation": "references",
+    "scheme": "doi"
+   },
+   {
+    "identifier": "10.5281/zenodo.21282804",
+    "relation": "references",
+    "scheme": "doi"
+   },
+   {
+    "identifier": "10.5281/zenodo.21515861",
+    "relation": "references",
+    "scheme": "doi"
+   },
+   {
+    "identifier": "10.5281/zenodo.22045477",
+    "relation": "references",
+    "scheme": "doi"
+   },
+   {
+    "identifier": "10.5281/zenodo.21515932",
+    "relation": "references",
+    "scheme": "doi"
+   },
+   {
+    "identifier": "10.5281/zenodo.21455540",
+    "relation": "references",
+    "scheme": "doi"
+   },
+   {
+    "identifier": "10.5281/zenodo.21516401",
+    "relation": "references",
+    "scheme": "doi"
+   }
+  ],
+  "subjects": [
+   {
+    "id": "euroscivoc:297",
+    "subject": "Artificial intelligence",
+    "scheme": "EuroSciVoc"
+   },
+   {
+    "id": "mesh:D061214",
+    "subject": "Patient Safety",
+    "scheme": "MeSH"
+   },
+   {
+    "id": "mesh:D015279",
+    "subject": "Organizational Culture",
+    "scheme": "MeSH"
+   },
+   {
+    "id": "mesh:D017751",
+    "subject": "Safety Management",
+    "scheme": "MeSH"
+   },
+   {
+    "id": "mesh:D008490",
+    "subject": "Medical Informatics",
+    "scheme": "MeSH"
+   },
+   {
+    "id": "mesh:D011787",
+    "subject": "Quality of Health Care",
+    "scheme": "MeSH"
+   },
+   {
+    "id": "gemet:concept/10053",
+    "subject": "Risk management",
+    "scheme": "GEMET"
+   }
+  ],
+  "version": "1.0"
+ },
+ "21243118": {
+  "subjects": [
+   {
+    "id": "euroscivoc:297",
+    "subject": "Artificial intelligence",
+    "scheme": "EuroSciVoc"
+   },
+   {
+    "id": "mesh:D061214",
+    "subject": "Patient Safety",
+    "scheme": "MeSH"
+   },
+   {
+    "id": "mesh:D015279",
+    "subject": "Organizational Culture",
+    "scheme": "MeSH"
+   },
+   {
+    "id": "mesh:D017751",
+    "subject": "Safety Management",
+    "scheme": "MeSH"
+   },
+   {
+    "id": "mesh:D009729",
+    "subject": "Nursing",
+    "scheme": "MeSH"
+   },
+   {
+    "id": "mesh:D012112",
+    "subject": "Residential Facilities",
+    "scheme": "MeSH"
+   }
+  ],
+  "language": "eng"
+ },
+ "21245130": {
+  "subjects": [
+   {
+    "id": "euroscivoc:297",
+    "subject": "Artificial intelligence",
+    "scheme": "EuroSciVoc"
+   },
+   {
+    "id": "mesh:D061214",
+    "subject": "Patient Safety",
+    "scheme": "MeSH"
+   },
+   {
+    "id": "mesh:D015279",
+    "subject": "Organizational Culture",
+    "scheme": "MeSH"
+   },
+   {
+    "id": "mesh:D017751",
+    "subject": "Safety Management",
+    "scheme": "MeSH"
+   },
+   {
+    "id": "mesh:D020000",
+    "subject": "Decision Support Systems, Clinical",
+    "scheme": "MeSH"
+   },
+   {
+    "id": "mesh:D012112",
+    "subject": "Residential Facilities",
+    "scheme": "MeSH"
+   }
+  ],
+  "language": "eng"
+ },
+ "21245205": {
+  "subjects": [
+   {
+    "id": "euroscivoc:297",
+    "subject": "Artificial intelligence",
+    "scheme": "EuroSciVoc"
+   },
+   {
+    "id": "mesh:D061214",
+    "subject": "Patient Safety",
+    "scheme": "MeSH"
+   },
+   {
+    "id": "mesh:D015279",
+    "subject": "Organizational Culture",
+    "scheme": "MeSH"
+   },
+   {
+    "id": "mesh:D017751",
+    "subject": "Safety Management",
+    "scheme": "MeSH"
+   },
+   {
+    "id": "mesh:D009729",
+    "subject": "Nursing",
+    "scheme": "MeSH"
+   },
+   {
+    "id": "mesh:D003695",
+    "subject": "Delivery of Health Care",
+    "scheme": "MeSH"
+   }
+  ],
+  "language": "eng"
+ },
+ "21249771": {
+  "subjects": [
+   {
+    "id": "euroscivoc:297",
+    "subject": "Artificial intelligence",
+    "scheme": "EuroSciVoc"
+   },
+   {
+    "id": "mesh:D061214",
+    "subject": "Patient Safety",
+    "scheme": "MeSH"
+   },
+   {
+    "id": "mesh:D015279",
+    "subject": "Organizational Culture",
+    "scheme": "MeSH"
+   },
+   {
+    "id": "mesh:D017751",
+    "subject": "Safety Management",
+    "scheme": "MeSH"
+   },
+   {
+    "id": "gemet:concept/10053",
+    "subject": "Risk management",
+    "scheme": "GEMET"
+   },
+   {
+    "id": "mesh:D011787",
+    "subject": "Quality of Health Care",
+    "scheme": "MeSH"
+   }
+  ],
+  "language": "eng"
+ },
+ "21260388": {
+  "subjects": [
+   {
+    "id": "euroscivoc:297",
+    "subject": "Artificial intelligence",
+    "scheme": "EuroSciVoc"
+   },
+   {
+    "id": "mesh:D061214",
+    "subject": "Patient Safety",
+    "scheme": "MeSH"
+   },
+   {
+    "id": "mesh:D015279",
+    "subject": "Organizational Culture",
+    "scheme": "MeSH"
+   },
+   {
+    "id": "mesh:D017751",
+    "subject": "Safety Management",
+    "scheme": "MeSH"
+   },
+   {
+    "id": "mesh:D012112",
+    "subject": "Residential Facilities",
+    "scheme": "MeSH"
+   },
+   {
+    "id": "mesh:D011568",
+    "subject": "Psychiatric Nursing",
+    "scheme": "MeSH"
+   }
+  ],
+  "language": "eng"
+ },
+ "21264935": {
+  "subjects": [
+   {
+    "id": "euroscivoc:297",
+    "subject": "Artificial intelligence",
+    "scheme": "EuroSciVoc"
+   },
+   {
+    "id": "mesh:D061214",
+    "subject": "Patient Safety",
+    "scheme": "MeSH"
+   },
+   {
+    "id": "mesh:D015279",
+    "subject": "Organizational Culture",
+    "scheme": "MeSH"
+   },
+   {
+    "id": "mesh:D017751",
+    "subject": "Safety Management",
+    "scheme": "MeSH"
+   },
+   {
+    "id": "mesh:D020000",
+    "subject": "Decision Support Systems, Clinical",
+    "scheme": "MeSH"
+   },
+   {
+    "id": "mesh:D011787",
+    "subject": "Quality of Health Care",
+    "scheme": "MeSH"
+   }
+  ],
+  "language": "eng"
+ },
+ "21279944": {
+  "subjects": [
+   {
+    "id": "euroscivoc:297",
+    "subject": "Artificial intelligence",
+    "scheme": "EuroSciVoc"
+   },
+   {
+    "id": "mesh:D061214",
+    "subject": "Patient Safety",
+    "scheme": "MeSH"
+   },
+   {
+    "id": "mesh:D015279",
+    "subject": "Organizational Culture",
+    "scheme": "MeSH"
+   },
+   {
+    "id": "mesh:D017751",
+    "subject": "Safety Management",
+    "scheme": "MeSH"
+   },
+   {
+    "id": "mesh:D020000",
+    "subject": "Decision Support Systems, Clinical",
+    "scheme": "MeSH"
+   },
+   {
+    "id": "mesh:D003695",
+    "subject": "Delivery of Health Care",
+    "scheme": "MeSH"
+   }
+  ],
+  "language": "eng"
+ },
+ "21282804": {
+  "subjects": [
+   {
+    "id": "euroscivoc:297",
+    "subject": "Artificial intelligence",
+    "scheme": "EuroSciVoc"
+   },
+   {
+    "id": "mesh:D061214",
+    "subject": "Patient Safety",
+    "scheme": "MeSH"
+   },
+   {
+    "id": "mesh:D015279",
+    "subject": "Organizational Culture",
+    "scheme": "MeSH"
+   },
+   {
+    "id": "mesh:D017751",
+    "subject": "Safety Management",
+    "scheme": "MeSH"
+   },
+   {
+    "id": "mesh:D008490",
+    "subject": "Medical Informatics",
+    "scheme": "MeSH"
+   },
+   {
+    "id": "mesh:D011787",
+    "subject": "Quality of Health Care",
+    "scheme": "MeSH"
+   }
+  ],
+  "language": "eng"
+ },
+ "21340572": {
+  "subjects": [
+   {
+    "id": "euroscivoc:297",
+    "subject": "Artificial intelligence",
+    "scheme": "EuroSciVoc"
+   },
+   {
+    "id": "mesh:D061214",
+    "subject": "Patient Safety",
+    "scheme": "MeSH"
+   },
+   {
+    "id": "mesh:D015279",
+    "subject": "Organizational Culture",
+    "scheme": "MeSH"
+   },
+   {
+    "id": "mesh:D017751",
+    "subject": "Safety Management",
+    "scheme": "MeSH"
+   },
+   {
+    "id": "mesh:D020000",
+    "subject": "Decision Support Systems, Clinical",
+    "scheme": "MeSH"
+   },
+   {
+    "id": "mesh:D011568",
+    "subject": "Psychiatric Nursing",
+    "scheme": "MeSH"
+   }
+  ],
+  "language": "eng"
+ },
+ "21357450": {
+  "subjects": [
+   {
+    "id": "euroscivoc:297",
+    "subject": "Artificial intelligence",
+    "scheme": "EuroSciVoc"
+   },
+   {
+    "id": "mesh:D061214",
+    "subject": "Patient Safety",
+    "scheme": "MeSH"
+   },
+   {
+    "id": "mesh:D015279",
+    "subject": "Organizational Culture",
+    "scheme": "MeSH"
+   },
+   {
+    "id": "mesh:D017751",
+    "subject": "Safety Management",
+    "scheme": "MeSH"
+   },
+   {
+    "id": "mesh:D011568",
+    "subject": "Psychiatric Nursing",
+    "scheme": "MeSH"
+   },
+   {
+    "id": "gemet:concept/10053",
+    "subject": "Risk management",
+    "scheme": "GEMET"
+   }
+  ],
+  "language": "eng"
+ },
+ "21443120": {
+  "subjects": [
+   {
+    "id": "euroscivoc:297",
+    "subject": "Artificial intelligence",
+    "scheme": "EuroSciVoc"
+   },
+   {
+    "id": "mesh:D061214",
+    "subject": "Patient Safety",
+    "scheme": "MeSH"
+   },
+   {
+    "id": "mesh:D015279",
+    "subject": "Organizational Culture",
+    "scheme": "MeSH"
+   },
+   {
+    "id": "mesh:D017751",
+    "subject": "Safety Management",
+    "scheme": "MeSH"
+   },
+   {
+    "id": "mesh:D011787",
+    "subject": "Quality of Health Care",
+    "scheme": "MeSH"
+   },
+   {
+    "id": "gemet:concept/10053",
+    "subject": "Risk management",
+    "scheme": "GEMET"
+   }
+  ],
+  "language": "eng"
+ },
+ "21445040": {
+  "subjects": [
+   {
+    "id": "euroscivoc:297",
+    "subject": "Artificial intelligence",
+    "scheme": "EuroSciVoc"
+   },
+   {
+    "id": "mesh:D061214",
+    "subject": "Patient Safety",
+    "scheme": "MeSH"
+   },
+   {
+    "id": "mesh:D015279",
+    "subject": "Organizational Culture",
+    "scheme": "MeSH"
+   },
+   {
+    "id": "mesh:D017751",
+    "subject": "Safety Management",
+    "scheme": "MeSH"
+   },
+   {
+    "id": "mesh:D011787",
+    "subject": "Quality of Health Care",
+    "scheme": "MeSH"
+   },
+   {
+    "id": "mesh:D003695",
+    "subject": "Delivery of Health Care",
+    "scheme": "MeSH"
+   }
+  ],
+  "language": "eng"
+ },
+ "21445071": {
+  "subjects": [
+   {
+    "id": "euroscivoc:297",
+    "subject": "Artificial intelligence",
+    "scheme": "EuroSciVoc"
+   },
+   {
+    "id": "mesh:D061214",
+    "subject": "Patient Safety",
+    "scheme": "MeSH"
+   },
+   {
+    "id": "mesh:D015279",
+    "subject": "Organizational Culture",
+    "scheme": "MeSH"
+   },
+   {
+    "id": "mesh:D017751",
+    "subject": "Safety Management",
+    "scheme": "MeSH"
+   },
+   {
+    "id": "mesh:D011787",
+    "subject": "Quality of Health Care",
+    "scheme": "MeSH"
+   },
+   {
+    "id": "mesh:D003695",
+    "subject": "Delivery of Health Care",
+    "scheme": "MeSH"
+   }
+  ],
+  "language": "eng"
+ },
+ "21455540": {
+  "subjects": [
+   {
+    "id": "euroscivoc:297",
+    "subject": "Artificial intelligence",
+    "scheme": "EuroSciVoc"
+   },
+   {
+    "id": "mesh:D061214",
+    "subject": "Patient Safety",
+    "scheme": "MeSH"
+   },
+   {
+    "id": "mesh:D015279",
+    "subject": "Organizational Culture",
+    "scheme": "MeSH"
+   },
+   {
+    "id": "mesh:D017751",
+    "subject": "Safety Management",
+    "scheme": "MeSH"
+   },
+   {
+    "id": "mesh:D011787",
+    "subject": "Quality of Health Care",
+    "scheme": "MeSH"
+   },
+   {
+    "id": "mesh:D003695",
+    "subject": "Delivery of Health Care",
+    "scheme": "MeSH"
+   }
+  ],
+  "language": "eng"
+ },
+ "21515861": {
+  "subjects": [
+   {
+    "id": "euroscivoc:297",
+    "subject": "Artificial intelligence",
+    "scheme": "EuroSciVoc"
+   },
+   {
+    "id": "mesh:D061214",
+    "subject": "Patient Safety",
+    "scheme": "MeSH"
+   },
+   {
+    "id": "mesh:D015279",
+    "subject": "Organizational Culture",
+    "scheme": "MeSH"
+   },
+   {
+    "id": "mesh:D017751",
+    "subject": "Safety Management",
+    "scheme": "MeSH"
+   },
+   {
+    "id": "mesh:D008490",
+    "subject": "Medical Informatics",
+    "scheme": "MeSH"
+   },
+   {
+    "id": "mesh:D011787",
+    "subject": "Quality of Health Care",
+    "scheme": "MeSH"
+   }
+  ],
+  "language": "eng"
+ },
+ "21515932": {
+  "subjects": [
+   {
+    "id": "euroscivoc:297",
+    "subject": "Artificial intelligence",
+    "scheme": "EuroSciVoc"
+   },
+   {
+    "id": "mesh:D061214",
+    "subject": "Patient Safety",
+    "scheme": "MeSH"
+   },
+   {
+    "id": "mesh:D015279",
+    "subject": "Organizational Culture",
+    "scheme": "MeSH"
+   },
+   {
+    "id": "mesh:D017751",
+    "subject": "Safety Management",
+    "scheme": "MeSH"
+   },
+   {
+    "id": "mesh:D011568",
+    "subject": "Psychiatric Nursing",
+    "scheme": "MeSH"
+   },
+   {
+    "id": "mesh:D011787",
+    "subject": "Quality of Health Care",
+    "scheme": "MeSH"
+   }
+  ],
+  "language": "eng"
+ },
+ "21516401": {
+  "subjects": [
+   {
+    "id": "euroscivoc:297",
+    "subject": "Artificial intelligence",
+    "scheme": "EuroSciVoc"
+   },
+   {
+    "id": "mesh:D061214",
+    "subject": "Patient Safety",
+    "scheme": "MeSH"
+   },
+   {
+    "id": "mesh:D015279",
+    "subject": "Organizational Culture",
+    "scheme": "MeSH"
+   },
+   {
+    "id": "mesh:D017751",
+    "subject": "Safety Management",
+    "scheme": "MeSH"
+   },
+   {
+    "id": "mesh:D009729",
+    "subject": "Nursing",
+    "scheme": "MeSH"
+   },
+   {
+    "id": "mesh:D003695",
+    "subject": "Delivery of Health Care",
+    "scheme": "MeSH"
+   }
+  ],
+  "language": "eng"
+ },
+ "22045477": {
+  "subjects": [
+   {
+    "id": "euroscivoc:297",
+    "subject": "Artificial intelligence",
+    "scheme": "EuroSciVoc"
+   },
+   {
+    "id": "mesh:D061214",
+    "subject": "Patient Safety",
+    "scheme": "MeSH"
+   },
+   {
+    "id": "mesh:D015279",
+    "subject": "Organizational Culture",
+    "scheme": "MeSH"
+   },
+   {
+    "id": "mesh:D017751",
+    "subject": "Safety Management",
+    "scheme": "MeSH"
+   },
+   {
+    "id": "mesh:D008490",
+    "subject": "Medical Informatics",
+    "scheme": "MeSH"
+   },
+   {
+    "id": "mesh:D011787",
+    "subject": "Quality of Health Care",
+    "scheme": "MeSH"
+   }
+  ],
+  "language": "eng"
+ },
+ "22164015": {
+  "subjects": [
+   {
+    "id": "euroscivoc:297",
+    "subject": "Artificial intelligence",
+    "scheme": "EuroSciVoc"
+   },
+   {
+    "id": "mesh:D061214",
+    "subject": "Patient Safety",
+    "scheme": "MeSH"
+   },
+   {
+    "id": "mesh:D015279",
+    "subject": "Organizational Culture",
+    "scheme": "MeSH"
+   },
+   {
+    "id": "mesh:D017751",
+    "subject": "Safety Management",
+    "scheme": "MeSH"
+   },
+   {
+    "id": "mesh:D008490",
+    "subject": "Medical Informatics",
+    "scheme": "MeSH"
+   },
+   {
+    "id": "mesh:D012112",
+    "subject": "Residential Facilities",
+    "scheme": "MeSH"
+   }
+  ],
+  "language": "eng"
+ }
+}

@@ -1,0 +1,47 @@
+[Unit]
+Description=Jarvis agentic agent (headless, agent-first)
+Documentation=https://github.com/Paulbla30-stack/paul
+After=network-online.target jarvis-bootstrap.service
+Wants=network-online.target
+Wants=jarvis-bootstrap.service
+StartLimitIntervalSec=300
+StartLimitBurst=10
+
+[Service]
+Type=simple
+User=root
+Environment=PYTHONPATH=/usr/lib/jarvis
+Environment=PYTHONUNBUFFERED=1
+Environment=JARVIS_HEADLESS=1
+EnvironmentFile=-/etc/default/jarvis
+RuntimeDirectory=jarvis
+RuntimeDirectoryMode=0700
+# The boot gate. The standing refusals are executable, and this is what makes
+# them a gate rather than a description: they run against the code that is
+# about to start, and a failure stops it starting. Without the "-" prefix a
+# non-zero exit fails the unit, which is the whole point.
+#
+# It fails closed on every way of not running -- no suite, no pytest, nothing
+# collected -- so an agent that starts is an agent whose refusals were checked
+# this boot. Recovery is `journalctl -u jarvis` for which invariant, and
+# `systemctl edit jarvis` with an empty ExecStartPre= to start without it,
+# which is a decision somebody makes rather than a thing that quietly happens.
+ExecStartPre=/usr/local/bin/jarvis-refusals
+ExecStart=/usr/local/bin/jarvis --headless --extra-config /etc/jarvis/cloud.yaml
+Restart=always
+RestartSec=5
+KillSignal=SIGTERM
+TimeoutStopSec=30
+# Agent-first: its log is the console.  Visible on the EC2 serial console
+# and in `journalctl -u jarvis`.
+StandardOutput=journal+console
+StandardError=journal+console
+SyslogIdentifier=jarvis
+# Leave the agent full system access (that is the point of the box), but
+# keep the obvious foot-guns off.
+NoNewPrivileges=no
+LimitNOFILE=65536
+OOMScoreAdjust=-500
+
+[Install]
+WantedBy=multi-user.target

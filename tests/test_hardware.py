@@ -1,13 +1,13 @@
-"""Tests for OpenClaw Hardware Access Layer."""
+"""Tests for Jarvis Hardware Access Layer."""
 
 import unittest
 import os
 import tempfile
 
-from openclaw.hardware.display import DisplayManager, FramebufferInfo
-from openclaw.hardware.input_devices import InputManager, InputDevice
-from openclaw.hardware.mem import MemoryManager, MemoryRegion
-from openclaw.hardware.storage import StorageManager, BlockDevice
+from jarvis.hardware.display import DisplayManager, FramebufferInfo
+from jarvis.hardware.input_devices import InputManager, InputDevice
+from jarvis.hardware.mem import MemoryManager, MemoryRegion
+from jarvis.hardware.storage import StorageManager, BlockDevice
 
 
 class TestFramebufferInfo(unittest.TestCase):
