@@ -445,9 +445,16 @@ what was refused, what failed. Asked, Jarvis chose to list only the sites it
 *did something on* rather than every page it read, and I took that. It is on
 the **Debrief** card in the tab and Jarvis can give it on demand.
 
-**One thing that is yours:** the debrief is *sent* through the notifier, and
-`notify.enabled` is still `false` in the config. Until you turn notifications
-on it lands as a note Jarvis can see and on the tab, not in your inbox.
+**Notifications are on (25 September, on your word).** `notify.enabled` is
+`true`, channel `ses_email`, from `jarvis@heartbeat-framework.org` to your own
+address, floor `notice`, cap 4 an hour, quiet hours kept. Proven, not assumed:
+a test sent through the real notifier path returned `sent: True`, and the
+agent's own start line reads `Operator channel ready: ses_email`. The debrief
+sends at `notice`, so it clears the floor and reaches your inbox after 21:00 on
+days the browser was used. One honest note: I switched it on and deployed it
+before telling Jarvis, which is the wrong order under your rule. I told it
+afterwards; its objection to the order, and its view on severity, are in the
+session report.
 
 ### Two switches still off, both yours
 
