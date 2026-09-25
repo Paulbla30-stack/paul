@@ -315,7 +315,29 @@ class Driver:
     # ---- reading --------------------------------------------------------
 
     def _extract(self, status=None) -> Page:
-        raw = self._page.evaluate(EXTRACT_JS)
+        raw = None
+        for attempt in range(4):
+            try:
+                raw = self._page.evaluate(EXTRACT_JS)
+                break
+            except Exception as exc:          # noqa: BLE001
+                # An action that navigates tears down the document this
+                # evaluate is running in. wait_for_load_state can return
+                # before the new navigation has even committed -- the OLD
+                # document was loaded -- so the read lands in the gap. Seen
+                # on the second live proof: the submit itself succeeded and
+                # the read after it died. Wait for the new document and read
+                # again; anything that is not the teardown is re-raised.
+                msg = str(exc)
+                if "context was destroyed" not in msg and "navigat" not in msg.lower():
+                    raise
+                if attempt == 3:
+                    raise
+                try:
+                    self._page.wait_for_load_state("domcontentloaded",
+                                                   timeout=self.timeout_ms)
+                except Exception:             # noqa: BLE001
+                    time.sleep(0.5)
         text = str(raw.get("text") or "")
         raw["truncated"] = len(text) > 0 and len(text) > 40000
         raw["status"] = status

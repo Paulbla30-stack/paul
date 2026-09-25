@@ -297,3 +297,42 @@ class TestElementsAreLocatedByStampNotPosition(unittest.TestCase):
         import inspect
         src = inspect.getsource(Driver._act)
         self.assertIn("context was destroyed", src)
+
+
+class TestReadingAfterANavigationDoesNotDieInTheGap(unittest.TestCase):
+    """wait_for_load_state can return for the OLD document. Then the read lands
+    between teardown and the new document. Seen live: the submit succeeded and
+    the read after it did not."""
+
+    def test_extract_retries_across_the_teardown(self):
+        d = Driver()
+        calls = {"n": 0}
+        class _P:
+            def evaluate(self, js):
+                calls["n"] += 1
+                if calls["n"] == 1:
+                    raise RuntimeError("Execution context was destroyed, most likely because of a navigation")
+                return {"url": "https://e.test/after", "title": "after", "text": "b"}
+            def wait_for_load_state(self, *a, **k): return None
+        d._page = _P()
+        page = d._extract()
+        self.assertEqual(page.url, "https://e.test/after")
+        self.assertEqual(calls["n"], 2)
+
+    def test_an_unrelated_error_is_not_swallowed(self):
+        d = Driver()
+        class _P:
+            def evaluate(self, js): raise RuntimeError("something else entirely")
+            def wait_for_load_state(self, *a, **k): return None
+        d._page = _P()
+        with self.assertRaises(RuntimeError):
+            d._extract()
+
+    def test_it_gives_up_rather_than_looping(self):
+        d = Driver()
+        class _P:
+            def evaluate(self, js): raise RuntimeError("Execution context was destroyed")
+            def wait_for_load_state(self, *a, **k): return None
+        d._page = _P()
+        with self.assertRaises(RuntimeError):
+            d._extract()
