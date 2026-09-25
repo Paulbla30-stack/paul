@@ -690,7 +690,10 @@ class AgentCore:
         notifier = getattr(self, "notifier", None)
         if notifier is not None and (got.get("actions") or got.get("operator_actions")):
             try:
-                notifier.send("Browser debrief", text, severity="info",
+                # notice, not info: the notifier's floor is min_severity
+                # notice and "info never sends on its own", so a debrief at
+                # info would have been held every day and reported as held.
+                notifier.send("Browser debrief", text, severity="notice",
                               key=f"browser-debrief-{stamp}")
             except Exception as exc:           # noqa: BLE001
                 self.log.debug("debrief not sent: %s", exc)

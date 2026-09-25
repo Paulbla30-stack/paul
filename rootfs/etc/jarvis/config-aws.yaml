@@ -143,8 +143,14 @@ cloud:
     region: us-west-2
 
   notify:
-    enabled: false           # set true once a destination secret exists
-    channel: sns_sms         # sns_sms | sns_topic | ses_email | none
+    # On, 25 September 2026, at Paul's word. The destination is the address
+    # in the jarvis/notify-email secret (lands in destination_file at boot);
+    # the channel is email because that is what the secret holds -- it said
+    # sns_sms for an email address, which would have failed at the last step
+    # after passing every rule. The sender is the verified domain.
+    enabled: true
+    channel: ses_email       # sns_sms | sns_topic | ses_email | none
+    from_address: jarvis@heartbeat-framework.org
     destination_file: /etc/jarvis/notify.dest
     sender_id: Jarvis        # SMS sender ID where the carrier honours one
     min_severity: notice     # info never sends on its own; alert ignores quiet hours
