@@ -86,6 +86,10 @@ class TestTheDebrief(unittest.TestCase):
         self.assertEqual(d["pages_visited"], 2)
         self.assertEqual(len(d["waited_for_paul"]), 1)
         self.assertEqual(d["waited_for_paul"][0]["gate"], "publish")
+        # Only the page something happened on is named; the page merely read
+        # is a count. The agent's own call, when asked.
+        self.assertEqual(d["top_pages"], ["https://a.test/b"])
+        self.assertIn("Did something on", BrowserJournal.render(d))
 
     def test_a_declined_decision_is_a_correction(self):
         self.j.record("submit", "https://a.test/", "needs-approval", gate="publish")

@@ -269,3 +269,31 @@ class TestOriginTrustAtTheDriver(unittest.TestCase):
         with self.assertRaises(NeedsApproval) as caught:
             d.act("click", "C1", approved=[])
         self.assertEqual(caught.exception.gate, "origin")
+
+
+class TestElementsAreLocatedByStampNotPosition(unittest.TestCase):
+    """The extractor reports only shown elements; the DOM holds the rest.
+
+    So a position-based locator drifts: on the first live proof the page's
+    F12 resolved to a checkbox in the DOM and the fill failed. The extractor
+    now stamps data-jarvis-ref on each reported element and the driver locates
+    by that stamp. Read from the source, so a rewrite back to nth() trips it.
+    """
+
+    def test_the_extractor_stamps_links_fields_and_controls(self):
+        from jarvis.browser.page import EXTRACT_JS
+        self.assertEqual(EXTRACT_JS.count("setAttribute('data-jarvis-ref'"), 3)
+        self.assertIn("data-jarvis-form", EXTRACT_JS)
+
+    def test_the_driver_locates_by_the_stamp(self):
+        import ast, inspect, textwrap
+        src = textwrap.dedent(inspect.getsource(Driver._act))
+        self.assertIn('data-jarvis-ref', src)
+        called = {n.func.attr for n in ast.walk(ast.parse(src))
+                  if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)}
+        self.assertNotIn("nth", called, "an element is being located by position again")
+
+    def test_submit_treats_the_navigation_teardown_as_success(self):
+        import inspect
+        src = inspect.getsource(Driver._act)
+        self.assertIn("context was destroyed", src)

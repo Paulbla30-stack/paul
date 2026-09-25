@@ -491,27 +491,34 @@ class Driver:
                     "submits a form on a page that does (browser.allow_secrets)")
 
             self._start()
-            controls_sel = "button, input[type=submit], input[type=button], input[type=image], [role=button], summary"
-            fields_sel = "input:not([type=hidden]), textarea, select"
+            # Located by the ref the extractor stamped on the element, not by
+            # position. The extractor reports only SHOWN elements and the DOM
+            # holds the hidden ones too, so nth() drifted: on the first live
+            # proof F12 in the page's report resolved to a checkbox in the
+            # DOM and the fill failed. The stamp cannot drift.
+            by_ref = lambda r: self._page.locator(f'[data-jarvis-ref="{r}"]').first
             if kind == "click":
-                handle = (self._page.locator(controls_sel).nth(self._index_of(ref)) if control
-                          else self._page.locator("a[href]").nth(self._index_of(ref)))
-                handle.click(timeout=self.timeout_ms)
+                by_ref(ref).click(timeout=self.timeout_ms)
             elif kind == "type":
-                self._page.locator(fields_sel).nth(self._index_of(ref)).fill(
-                    text or "", timeout=self.timeout_ms)
+                by_ref(ref).fill(text or "", timeout=self.timeout_ms)
                 if field.kind == "textarea":
                     self._typed_composing.add(ref)
             elif kind == "select":
-                self._page.locator(fields_sel).nth(self._index_of(ref)).select_option(
-                    text or "", timeout=self.timeout_ms)
+                by_ref(ref).select_option(text or "", timeout=self.timeout_ms)
             elif kind == "press":
-                sel = fields_sel if field else controls_sel
-                self._page.locator(sel).nth(self._index_of(ref)).press(
-                    text or "Enter", timeout=self.timeout_ms)
+                by_ref(ref).press(text or "Enter", timeout=self.timeout_ms)
             else:
-                self._page.locator("form").nth(self._index_of(ref) if ref else 0).evaluate(
-                    "f => f.requestSubmit ? f.requestSubmit() : f.submit()")
+                form = (self._page.locator(f'[data-jarvis-form="{ref}"]').first if ref
+                        else self._page.locator("form").first)
+                try:
+                    form.evaluate("f => f.requestSubmit ? f.requestSubmit() : f.submit()")
+                except Exception as exc:      # noqa: BLE001
+                    # Submitting navigates, and the navigation tears down the
+                    # execution context the evaluate was running in before it
+                    # returns. That is the SUCCESS case, seen on the first
+                    # live proof; anything else is re-raised.
+                    if "context was destroyed" not in str(exc) and "navigation" not in str(exc).lower():
+                        raise
             try:
                 self._page.wait_for_load_state("domcontentloaded",
                                                timeout=self.timeout_ms)

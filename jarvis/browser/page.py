@@ -273,8 +273,9 @@ EXTRACT_JS = r"""
     catch (e) { continue; }
     if (!/^https?:/i.test(href)) continue;   // no javascript:, no data:, no mailto:
     const text = (a.innerText || a.getAttribute('aria-label') || '').trim();
-    links.push({ref: 'L' + (links.length + 1), text: text.slice(0, 200),
-                href: href.slice(0, MAX_HREF)});
+    const lref = 'L' + (links.length + 1);
+    a.setAttribute('data-jarvis-ref', lref);
+    links.push({ref: lref, text: text.slice(0, 200), href: href.slice(0, MAX_HREF)});
   }
 
   // Things that can be pressed and are not links. in_form is the structural
@@ -287,7 +288,9 @@ EXTRACT_JS = r"""
     if (controls.length >= MAX_CONTROLS) break;
     if (!shown(el)) continue;
     const text = (el.innerText || el.value || el.getAttribute('aria-label') || label(el) || '').trim();
-    controls.push({ref: 'C' + (controls.length + 1), text: text.slice(0, 120),
+    const cref = 'C' + (controls.length + 1);
+    el.setAttribute('data-jarvis-ref', cref);
+    controls.push({ref: cref, text: text.slice(0, 120),
                    kind: (el.tagName.toLowerCase() === 'input' ? (el.type || 'button') : el.tagName.toLowerCase()),
                    in_form: !!el.closest('form')});
   }
@@ -306,14 +309,19 @@ EXTRACT_JS = r"""
     if (!shown(el)) continue;
     const kind = (el.type || el.tagName.toLowerCase() || 'text').toLowerCase();
     if (el.tagName.toLowerCase() === 'textarea' && (el.value || '').trim()) composing = true;
+    const fref = 'F' + (fields.length + 1);
+    el.setAttribute('data-jarvis-ref', fref);
     fields.push({
-      ref: 'F' + (fields.length + 1),
+      ref: fref,
       label: label(el),
       kind: el.tagName.toLowerCase() === 'textarea' ? 'textarea' : kind,
       autocomplete: (el.getAttribute('autocomplete') || '').toLowerCase(),
       required: !!el.required,
     });
   }
+
+  let fi = 0;
+  for (const f of document.querySelectorAll('form')) { fi += 1; f.setAttribute('data-jarvis-form', 'M' + fi); }
 
   const headings = [];
   for (const h of document.querySelectorAll('h1, h2, h3')) {

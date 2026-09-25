@@ -336,12 +336,22 @@ class BrowserJournal:
         rows = self.recent(since_s)
         agent = [r for r in rows if r.get("by") == "agent"]
         mine = [r for r in rows if r.get("by") == "operator"]
-        visited, counts = [], {}
+        visited, acted_on, counts = [], [], {}
+        reading = ("opened", "followed", "read", "back", "forward", "reload", "scroll")
         for r in agent:
-            if r.get("did", "").startswith(("opened", "followed", "back", "forward", "reload")) and r.get("url"):
-                u = r["url"]
-                if u not in visited:
-                    visited.append(u)
+            u = r.get("url") or ""
+            if u and u not in visited:
+                visited.append(u)
+            # Asked whether the debrief should name every page it merely read,
+            # the agent said no: "the value of the debrief is in accountability
+            # and learning from interactions that carry intent or risk, not in
+            # logging observation." So the list is sites where something
+            # happened -- acted on, waited, refused, failed -- and the pages
+            # only read are a count.
+            happened = (not r.get("did", "").startswith(reading)
+                        or r.get("outcome") in ("needs-approval", "refused", "error"))
+            if u and happened and u not in acted_on:
+                acted_on.append(u)
             counts[r.get("outcome", "?")] = counts.get(r.get("outcome", "?"), 0) + 1
         waited = [r for r in agent if r.get("outcome") == "needs-approval"]
         refused = [r for r in agent if r.get("outcome") == "refused"]
@@ -352,7 +362,7 @@ class BrowserJournal:
             "since_s": since_s,
             "actions": len(agent),
             "pages_visited": len(visited),
-            "top_pages": visited[:12],
+            "top_pages": acted_on[:12],
             "outcomes": counts,
             "waited_for_paul": [{"did": r["did"], "url": r.get("url"), "why": r.get("reason"),
                                  "gate": r.get("gate")} for r in waited[-20:]],
@@ -377,7 +387,7 @@ class BrowserJournal:
         lines.append(f"{d['actions']} action(s) by the agent across {d['pages_visited']} page(s); "
                      f"{d['operator_actions']} by you.")
         if d.get("top_pages"):
-            lines.append("Went to: " + "; ".join(d["top_pages"][:8]))
+            lines.append("Did something on: " + "; ".join(d["top_pages"][:8]))
         w = d.get("waited_for_paul") or []
         if w:
             lines.append(f"Waited for you {len(w)} time(s):")
