@@ -80,6 +80,32 @@ from typing import Optional
 
 UI_HTML_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                             "ui", "web", "index.html")
+
+# The UI page's one inline script carries this placeholder; each response
+# swaps in a fresh nonce and names it in the policy, so the only script that
+# can run in the page is the script that shipped with it.
+UI_NONCE_PLACEHOLDER = "__JARVIS_CSP_NONCE__"
+
+
+def ui_csp(nonce: str) -> str:
+    """The UI page's Content-Security-Policy.
+
+    Added on 27 September after the security review. The page renders every
+    outside string as text, so there is no known way to inject script into it
+    -- but the runner token is as good as root, the page is where it is used,
+    and every planned feature adds another place outside text is shown. This
+    is what makes one slip in one of them not the whole machine. Inline style
+    stays allowed: styles cannot run code, and the page is full of them.
+    """
+    return ("default-src 'none'; "
+            f"script-src 'nonce-{nonce}'; "
+            "style-src 'self' 'unsafe-inline'; "
+            "img-src 'self' blob: data:; "
+            "connect-src 'self'; "
+            "form-action 'none'; base-uri 'none'; "
+            "frame-ancestors 'none'; object-src 'none'")
+
+
 DEFAULT_UPLOAD_DIR = "/var/lib/jarvis/uploads"
 # Exactly the formats compose.py can write, and nothing that a browser would
 # execute. text/html is absent on purpose.
@@ -217,6 +243,10 @@ class HeadlessRunner:
         self.session_samesite = (ui or {}).get("session_samesite") or _session.DEFAULT_SAMESITE
         self.session_key_file = session_key_file or _session.DEFAULT_KEY_FILE
         self.session_key = _session.load_or_create_key(self.session_key_file, self.log)
+        # Sessions issued before this moment are refused. Kept beside the key
+        # so a restart does not quietly bring a logged-out session back.
+        self.session_revoked_file = self.session_key_file + ".not_before"
+        self.session_not_before = _session.read_not_before(self.session_revoked_file)
         ui = dict(ui or {})
         self.ui_enabled = bool(ui.get("enabled"))
         self.ui_host = ui.get("host") or "0.0.0.0"
@@ -445,18 +475,57 @@ class HeadlessRunner:
                         return forwarded[:64]
                 return peer
 
-            def _authorised(self) -> bool:
+            def _auth_kind(self) -> Optional[str]:
+                """"token", "cookie", or None. The token wins when both come.
+
+                The difference matters for one thing: a browser attaches the
+                cookie to requests another site makes it send, and never
+                attaches a header it was not told to. So only a cookie-only
+                request can be forged cross-site, and only it is held to the
+                same-origin check in _post.
+                """
                 if runner.auth_locked(self._client()):
-                    return False
-                if runner.session_valid(self.headers.get("Cookie")):
-                    return True
+                    return None
                 header = self.headers.get("Authorization") or ""
                 supplied = header[7:].strip() if header.lower().startswith("bearer ") else ""
                 supplied = supplied or (self.headers.get("X-Jarvis-Token") or "").strip()
-                ok = bool(supplied) and secrets.compare_digest(supplied, runner.token)
-                if not ok and supplied:
+                if supplied and secrets.compare_digest(supplied, runner.token):
+                    return "token"
+                # A valid session with a stale token beside it (a browser that
+                # stored the token before a rotation) is still the session, as
+                # it always was; only a bad token on its own counts as a guess.
+                if runner.session_valid(self.headers.get("Cookie")):
+                    return "cookie"
+                if supplied:
                     runner.auth_failed(self._client())
-                return ok
+                return None
+
+            def _authorised(self) -> bool:
+                return self._auth_kind() is not None
+
+            def _same_origin(self) -> bool:
+                """Did the page that sent this come from this server?
+
+                Sec-Fetch-Site is set by the browser and cannot be set by a
+                page, so when it is present it decides. Older browsers send
+                Origin instead, compared with the Host this request came in
+                on (the tunnel hostname behind Cloudflare, ip:port direct).
+                A cookie-carrying request with neither is refused: every
+                browser this UI supports sends one of them on a POST, and a
+                request that sends neither is not the UI.
+                """
+                site = (self.headers.get("Sec-Fetch-Site") or "").strip().lower()
+                if site:
+                    return site == "same-origin"
+                origin = (self.headers.get("Origin") or "").strip()
+                host = (self.headers.get("Host") or "").strip().lower()
+                if not origin or not host or origin == "null":
+                    return False
+                from urllib.parse import urlsplit
+                try:
+                    return urlsplit(origin).netloc.lower() == host
+                except ValueError:
+                    return False
 
             def _deny(self):
                 if runner.auth_locked(self._client()):
@@ -499,6 +568,10 @@ class HeadlessRunner:
                                  f'attachment; filename="{filename}"')
                 self.send_header("X-Content-Type-Options", "nosniff")
                 self.send_header("Cache-Control", "no-store")
+                # If a browser ever renders it anyway, it renders with no
+                # script, no origin and no frame.
+                self.send_header("Content-Security-Policy", "sandbox; default-src 'none'")
+                self.send_header("X-Frame-Options", "DENY")
                 self.end_headers()
                 self.wfile.write(body)
 
@@ -517,7 +590,7 @@ class HeadlessRunner:
                 self.end_headers()
                 self.wfile.write(body)
 
-            def _send_html(self, html: str):
+            def _send_html(self, html: str, nonce: Optional[str] = None):
                 body = html.encode()
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -525,6 +598,9 @@ class HeadlessRunner:
                 self.send_header("Cache-Control", "no-store")
                 self.send_header("X-Frame-Options", "DENY")
                 self.send_header("Referrer-Policy", "no-referrer")
+                self.send_header("X-Content-Type-Options", "nosniff")
+                if nonce:
+                    self.send_header("Content-Security-Policy", ui_csp(nonce))
                 self.end_headers()
                 self.wfile.write(body)
 
@@ -538,7 +614,9 @@ class HeadlessRunner:
                 raw_path, _, query = self.path.partition("?")
                 path = raw_path.rstrip("/") or "/"
                 if path == "/ui":
-                    return self._send_html(runner.ui_html())
+                    nonce = secrets.token_urlsafe(18)
+                    return self._send_html(
+                        runner.ui_html().replace(UI_NONCE_PLACEHOLDER, nonce), nonce)
                 # The bare domain is the address you actually type or tap, and
                 # on the public server it answered "token required" — which
                 # reads as a broken login rather than a wrong path. The login
@@ -746,10 +824,23 @@ class HeadlessRunner:
                     return self._send(200, {"ok": True, "session": True, "days": runner.session_days},
                                       headers=[("Set-Cookie", cookie)])
                 if path == "/logout":
+                    # Ending every session is only done for a real, same-origin
+                    # request from a logged-in page: otherwise any site could
+                    # log Paul out by posting here. Clearing this browser's
+                    # own cookie is harmless and always done.
+                    if (runner.session_valid(self.headers.get("Cookie"))
+                            and self._same_origin()):
+                        runner.revoke_sessions()
                     return self._send(200, {"ok": True},
                                       headers=[("Set-Cookie", runner.clear_session_cookie())])
-                if not self._authorised():
+                kind = self._auth_kind()
+                if kind is None:
                     return self._deny()
+                if kind == "cookie" and not self._same_origin():
+                    # SameSite=Lax keeps the cookie off most cross-site POSTs,
+                    # but not off a sibling subdomain, and it is one setting
+                    # away from off. This does not depend on either.
+                    return self._send(403, {"error": "cross-site request refused"})
                 if path == "/upload":
                     return self._handle_upload()
                 if self._content_length() > 1_000_000:
@@ -1329,15 +1420,35 @@ class HeadlessRunner:
             return False
         from jarvis.cloud import session as _session
         return _session.verify(self.session_key,
-                               _session.from_cookie_header(cookie_header))
+                               _session.from_cookie_header(cookie_header),
+                               not_before=self.session_not_before)
+
+    def revoke_sessions(self) -> None:
+        """End every session issued so far, on every device.
+
+        One operator, so "log out" meaning "log out everywhere" costs him a
+        login on his other device and closes the case where a copied cookie
+        outlives the logout that was meant to end it.
+        """
+        import time as _time
+        from jarvis.cloud import session as _session
+        # Whole seconds are what a session carries, so the line sits one
+        # past this second: everything issued up to now is on the far side.
+        moment = int(_time.time()) + 1
+        self.session_not_before = moment
+        _session.write_not_before(self.session_revoked_file, moment, self.log)
 
     def new_session_cookie(self) -> Optional[str]:
         """A Set-Cookie value for a fresh session, or None when disabled."""
         if not self.session_key:
             return None
         from jarvis.cloud import session as _session
+        # Never stamped before the revocation line: a login in the same
+        # second as a logout must not be born already revoked.
+        import time as _time
+        issued = max(_time.time(), float(self.session_not_before or 0))
         return _session.cookie_header(
-            _session.issue(self.session_key, self.session_days),
+            _session.issue(self.session_key, self.session_days, now=issued),
             self.session_days, secure=self.ui_tls,
             samesite=self.session_samesite)
 

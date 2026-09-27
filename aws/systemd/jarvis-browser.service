@@ -85,7 +85,20 @@ LimitNOFILE=8192
 # denied here because the service's own API listens on it. Two layers, one in
 # code and one in the kernel, because the code layer has a gap between
 # resolving a name and connecting to it and this one does not.
-IPAddressAllow=any
+#
+# The allow list is checked FIRST: an address on it is granted and the deny
+# lines are never consulted (systemd.resource-control: "Access is granted when
+# the checked IP address matches an entry in the IPAddressAllow= list.
+# Otherwise, access is denied when it matches IPAddressDeny=. Otherwise,
+# access is granted"). Until 27 September this line said `any`, which matched
+# everything, so none of the deny lines below did anything and the kernel
+# layer described above did not exist. Found by the security review of that
+# day. The allow list now names only what the browser must reach inside the
+# denied ranges: loopback for its own API, and the VPC resolver, because
+# /etc/resolv.conf points straight at 172.31.0.2 and that sits inside
+# 172.16.0.0/12. Everything public still falls through to "granted".
+IPAddressAllow=localhost
+IPAddressAllow=172.31.0.2/32
 IPAddressDeny=link-local
 IPAddressDeny=multicast
 IPAddressDeny=10.0.0.0/8

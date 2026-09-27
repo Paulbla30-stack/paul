@@ -924,3 +924,45 @@ class TestA10TheBoundHoldsAfterDefusing(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# ---- 27 Sep security review, L1: the kernel fence must actually fence --------
+
+class TestKernelFenceIsLive(unittest.TestCase):
+    """IPAddressAllow= wins over IPAddressDeny=. `any` there made every deny
+    line dead; this pins that the allow list never swallows the metadata
+    service or the private ranges again."""
+
+    def _unit(self):
+        here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        with open(os.path.join(here, "aws", "systemd", "jarvis-browser.service"),
+                  encoding="utf-8") as fh:
+            return fh.read()
+
+    def _values(self, key):
+        out = []
+        for line in self._unit().splitlines():
+            line = line.strip()
+            if line.startswith(key + "="):
+                out.extend(line.split("=", 1)[1].split())
+        return out
+
+    def test_allow_list_names_nothing_broad(self):
+        import ipaddress
+        allowed = self._values("IPAddressAllow")
+        self.assertTrue(allowed, "no allow list: loopback API and DNS would still work, "
+                                 "but say so deliberately")
+        for entry in allowed:
+            self.assertNotIn(entry, ("any", "0.0.0.0/0", "::/0", "link-local",
+                                     "multicast"), entry)
+            if entry == "localhost":
+                continue
+            net = ipaddress.ip_network(entry, strict=False)
+            self.assertGreaterEqual(net.prefixlen, 32 if net.version == 4 else 128,
+                                    f"{entry} is wider than one host")
+            self.assertNotIn(ipaddress.ip_address("169.254.169.254"), net)
+
+    def test_metadata_and_private_ranges_are_denied(self):
+        denied = self._values("IPAddressDeny")
+        for entry in ("link-local", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"):
+            self.assertIn(entry, denied)

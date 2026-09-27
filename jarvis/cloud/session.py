@@ -67,6 +67,35 @@ def load_or_create_key(path: str, logger: Optional[logging.Logger] = None) -> Op
     return key
 
 
+def read_not_before(path: Optional[str]) -> Optional[float]:
+    """The revocation line, or None when there has never been a logout."""
+    if not path:
+        return None
+    try:
+        with open(path, "r") as fh:
+            return float(fh.read().strip())
+    except (OSError, ValueError):
+        return None
+
+
+def write_not_before(path: Optional[str], moment: float,
+                     logger: Optional[logging.Logger] = None) -> bool:
+    """Persist the revocation line 0600, atomically. False when it could not."""
+    if not path:
+        return False
+    tmp = path + ".tmp"
+    try:
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w") as fh:
+            fh.write(f"{int(moment)}\n")
+        os.replace(tmp, path)
+        return True
+    except OSError as exc:
+        (logger or logging.getLogger("jarvis")).warning(
+            "Could not persist the session revocation line %s: %s", path, exc)
+        return False
+
+
 def _mac(key: str, payload: str) -> str:
     return hmac.new(key.encode(), payload.encode(), hashlib.sha256).hexdigest()
 
@@ -80,8 +109,15 @@ def issue(key: str, days: int = DEFAULT_DAYS, now: Optional[float] = None) -> st
     return f"{payload}.{_mac(key, payload)}"
 
 
-def verify(key: Optional[str], value: Optional[str], now: Optional[float] = None) -> bool:
-    """True when ``value`` is a well-formed, unexpired session signed by ``key``."""
+def verify(key: Optional[str], value: Optional[str], now: Optional[float] = None,
+           not_before: Optional[float] = None) -> bool:
+    """True when ``value`` is a well-formed, unexpired session signed by ``key``.
+
+    ``not_before`` refuses anything issued earlier: it is how a logout ends
+    every session, not just the cookie in the browser that asked. Before it,
+    /logout only told that browser to forget its cookie; a copy of the value
+    taken anywhere else stayed good for up to 30 days.
+    """
     if not key or not value:
         return False
     parts = str(value).split(".")
@@ -96,6 +132,8 @@ def verify(key: Optional[str], value: Optional[str], now: Optional[float] = None
         return False
     moment = now if now is not None else time.time()
     if expires_at <= moment or issued_at > moment + 300:   # allow small clock skew
+        return False
+    if not_before is not None and issued_at < int(not_before):
         return False
     expected = _mac(key, f"{version}.{issued}.{expires}")
     return hmac.compare_digest(expected, signature)

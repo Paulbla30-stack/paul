@@ -175,7 +175,7 @@
   <span id="statusDot" class="dot"></span>
   <h1 id="agentName">Jarvis</h1>
   <span id="brainBadge" class="small muted">brain: ?</span>
-  <button class="ghost" style="padding:6px 10px" onclick="logout()">Log out</button>
+  <button class="ghost" style="padding:6px 10px" data-click="logout">Log out</button>
 </header>
 <nav>
   <button data-tab="chat" class="active">Chat</button>
@@ -204,7 +204,7 @@
       <p id="lastAction" class="small muted" style="margin:10px 0 0"></p>
       <p id="lastThought" class="small" style="margin:6px 0 0"></p>
       <div class="row" style="margin-top:10px">
-        <button class="btn" id="thinkBtn" onclick="thinkNow()">Think now</button>
+        <button class="btn" id="thinkBtn" data-click="thinkNow">Think now</button>
         <span id="brainState" class="small muted"></span>
       </div>
     </div>
@@ -214,7 +214,7 @@
       <ul id="goals"></ul>
       <div class="row" style="margin-top:8px">
         <input id="goalInput" placeholder="Add a goal for the agent" />
-        <button class="btn" onclick="addGoal()">Add</button>
+        <button class="btn" data-click="addGoal">Add</button>
       </div>
     </div>
 
@@ -250,7 +250,7 @@
       <div class="row wrap" style="margin-top:10px">
         <input id="calWhat" placeholder="What it is" style="flex:2" />
         <input id="calWhen" placeholder="friday 2pm for 1 hour at the dentist" style="flex:3" />
-        <button class="btn" onclick="addAppointment()">Book</button>
+        <button class="btn" data-click="addAppointment">Book</button>
       </div>
       <p id="calMsg" class="small" style="margin:8px 0 0"></p>
     </div>
@@ -259,7 +259,7 @@
       <h2>Gaps</h2>
       <div class="row wrap">
         <input id="calFreeDay" placeholder="2026-09-24" style="flex:1" />
-        <button class="btn" onclick="showGaps()">Look</button>
+        <button class="btn" data-click="showGaps">Look</button>
       </div>
       <p id="calFree" class="small" style="margin:8px 0 0"></p>
       <p class="small muted" style="margin:6px 0 0">Gaps in what is written down. Not the same as being free — anything you have not told him about is invisible here.</p>
@@ -297,7 +297,7 @@
           <option value="3 days">and three days before</option>
           <option value="1 week">and a week before</option>
         </select>
-        <button class="btn" onclick="addCommitment()">Add</button>
+        <button class="btn" data-click="addCommitment">Add</button>
       </div>
       <p id="diaryMsg" class="small" style="margin:8px 0 0"></p>
     </div>
@@ -357,9 +357,9 @@
       <div style="display:flex;gap:6px;margin-bottom:8px">
         <input id="brUrl" type="text" placeholder="address, or something to search for"
                style="flex:1" autocapitalize="off" autocorrect="off" spellcheck="false">
-        <button onclick="brGo()">Go</button>
-        <button onclick="brShot()" title="Picture of the page">View</button>
-        <button onclick="brReset()" title="Throw the profile away">Reset</button>
+        <button data-click="brGo">Go</button>
+        <button data-click="brShot" title="Picture of the page">View</button>
+        <button data-click="brReset" title="Throw the profile away">Reset</button>
       </div>
       <p id="brStatus" class="small muted"></p>
     </div>
@@ -427,7 +427,7 @@
       <p class="small muted" style="margin:8px 0 0">Every decision, action and outcome is signed and chained; the agent cannot rewrite it and never reads it. A verdict from this box is a convenience: the audit that counts runs from your machine against the witness copy with the public key you pinned.</p>
       <p class="small" style="margin:8px 0 0;word-break:break-all">public key <code id="lPub">-</code></p>
       <div class="row" style="margin-top:10px">
-        <button class="btn" id="verifyBtn" onclick="verifyLedger()">Verify on box</button>
+        <button class="btn" id="verifyBtn" data-click="verifyLedger">Verify on box</button>
         <span id="lVerdict" class="small"></span>
       </div>
     </div>
@@ -442,7 +442,7 @@
       <h2>Lab session</h2>
       <p class="small muted" style="margin:0 0 10px">One switch. It opens the lab and it tells Jarvis, in the same move &mdash; the window cannot open without him being told, because the notice goes first and the lab only opens if it landed. While it is open he carries a line saying what is being varied, that some variants are the bare model and not him, and that entries will appear in his record that he did not choose. He is not told which dials are set.</p>
       <div class="row" style="flex-wrap:wrap;gap:8px;align-items:center">
-        <label class="small" style="display:flex;align-items:center;gap:8px"><input type="checkbox" id="labOpen" onchange="toggleLabSession()"> <b>Lab is in use</b></label>
+        <label class="small" style="display:flex;align-items:center;gap:8px"><input type="checkbox" id="labOpen" data-change="toggleLabSession"> <b>Lab is in use</b></label>
         <input id="labPurpose" placeholder="what this window is for (he is told this)" style="flex:1;min-width:220px">
         <span id="labSessionMsg" class="small muted"></span>
       </div>
@@ -452,9 +452,9 @@
       <p class="small muted" style="margin:0 0 10px">Every layer that moves the model away from its base presentation, on a dial. Level 0 everywhere is the bare model: no system prompt, no context. Change a dial, read what the model will see, then run a question under the dials and against the base side by side. Layers enforced in code stay locked: the lab changes what the model is told, never what the executor allows.</p>
       <div id="dials"></div>
       <div class="row" style="margin-top:10px;flex-wrap:wrap;gap:8px">
-        <button class="btn" onclick="saveDials()">Save dials</button>
-        <button class="ghost" onclick="resetDials('defaults')">Defaults</button>
-        <button class="ghost" onclick="resetDials('base')">All off (base)</button>
+        <button class="btn" data-click="saveDials">Save dials</button>
+        <button class="ghost" data-click="resetDials" data-arg="defaults">Defaults</button>
+        <button class="ghost" data-click="resetDials" data-arg="base">All off (base)</button>
         <label class="small" style="display:flex;align-items:center;gap:6px"><input type="checkbox" id="applyChat"> use these dials for live Chat</label>
         <span id="dialsMsg" class="small muted"></span>
       </div>
@@ -472,7 +472,7 @@
         <label class="small"><input type="radio" name="labMode" value="answer" checked> answer</label>
         <label class="small"><input type="radio" name="labMode" value="plan"> plan (decision only, never executed)</label>
         <label class="small" style="display:flex;align-items:center;gap:6px"><input type="checkbox" id="labCompare" checked> compare with base</label>
-        <button class="btn" id="labRunBtn" onclick="runLab()">Run</button>
+        <button class="btn" id="labRunBtn" data-click="runLab">Run</button>
         <span id="labRunMsg" class="small muted"></span>
       </div>
       <div id="labResults" style="margin-top:10px;display:grid;gap:10px"></div>
@@ -487,7 +487,7 @@
 <div class="composer" id="composer">
   <div class="inner">
     <textarea id="chatInput" rows="1" placeholder="Ask the agent… (/goal, /remind, /book, /think)"></textarea>
-    <button class="btn" id="sendBtn" onclick="sendChat()">Send</button>
+    <button class="btn" id="sendBtn" data-click="sendChat">Send</button>
   </div>
 </div>
 
@@ -497,18 +497,23 @@
     <p class="small muted">Found on the instance in <code>/run/jarvis/token</code> (root only).</p>
     <input id="tokenInput" placeholder="paste token" autocomplete="off" />
     <div class="row" style="margin-top:10px; justify-content:flex-end">
-      <button class="btn" onclick="saveToken()">Connect</button>
+      <button class="btn" data-click="saveToken">Connect</button>
     </div>
     <p id="loginErr" class="small" style="color:var(--bad); margin:8px 0 0"></p>
   </div>
 </div>
 
-<script>
+<script nonce="__JARVIS_CSP_NONCE__">
 (function () {
   const $ = (id) => document.getElementById(id);
   let token = "";
   let sessionActive = false;
-  try { token = localStorage.getItem("jarvis.token") || ""; } catch (e) {}
+  // The runner token is as good as root on the box, so it is never left in
+  // localStorage, where any script in this origin could read it forever. A
+  // login trades it for an HttpOnly session cookie that script cannot read.
+  // Only when sessions are unavailable is it kept, and then for this tab.
+  try { localStorage.removeItem("jarvis.token"); } catch (e) {}
+  try { token = sessionStorage.getItem("jarvis.token") || ""; } catch (e) {}
   let turns = [];
   try { turns = JSON.parse(localStorage.getItem("jarvis.chat") || "[]"); } catch (e) { turns = []; }
 
@@ -546,14 +551,20 @@
       showLogin("Could not reach the agent: " + e.message);
       return;
     }
-    token = supplied;
-    try { localStorage.setItem("jarvis.token", token); } catch (e) {}
+    $("tokenInput").value = "";
+    if (sessionActive) {
+      token = "";
+      try { sessionStorage.removeItem("jarvis.token"); } catch (e) {}
+    } else {
+      token = supplied;
+      try { sessionStorage.setItem("jarvis.token", token); } catch (e) {}
+    }
     $("login").style.display = "none"; refresh();
   };
   window.logout = async function () {
     try { await fetch("/logout", { method: "POST", credentials: "same-origin" }); } catch (e) {}
     token = ""; sessionActive = false;
-    try { localStorage.removeItem("jarvis.token"); } catch (e) {}
+    try { sessionStorage.removeItem("jarvis.token"); } catch (e) {}
     showLogin("");
   };
 
@@ -1234,6 +1245,23 @@
   ["dragenter", "dragover"].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add("over"); }));
   ["dragleave", "drop"].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove("over"); }));
   drop.addEventListener("drop", e => uploadAll(Array.from(e.dataTransfer.files)));
+
+  // Buttons name their handler in data-click rather than an onclick
+  // attribute: the page's Content-Security-Policy runs only its own nonced
+  // script, which is what stops any injected attribute from running, and it
+  // stops the page's own attributes the same way. One listener dispatches.
+  document.addEventListener("click", e => {
+    const el = e.target.closest && e.target.closest("[data-click]");
+    if (!el) return;
+    const fn = window[el.dataset.click];
+    if (typeof fn === "function") fn(el.dataset.arg);
+  });
+  document.addEventListener("change", e => {
+    const el = e.target.closest && e.target.closest("[data-change]");
+    if (!el) return;
+    const fn = window[el.dataset.change];
+    if (typeof fn === "function") fn();
+  });
 
   function escapeHtml(s) { return String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
 
