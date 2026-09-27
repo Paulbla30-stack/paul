@@ -159,8 +159,9 @@ was not — only that I have no evidence it was, and it was exposed five days
 ago.
 
 Cloudflare dashboard → Zero Trust → Networks → Tunnels → the tunnel → refresh
-the token, then update `/hbf/*` in SSM Parameter Store and restart
-`cloudflared`. I do not have Cloudflare access, so this one is entirely yours.
+the token, then update the Secrets Manager secret `jarvis/tunnel-token` (that is
+where the box reads it; an earlier version of this note wrongly said SSM
+`/hbf/*`) and restart `cloudflared`. I do not have Cloudflare access, so this one is entirely yours.
 
 Whatever you do, do not paste the token into this chat, and do not run it
 through a shell with `set -x` on. That is exactly how the last one leaked.
