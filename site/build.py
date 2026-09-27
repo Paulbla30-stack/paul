@@ -32,6 +32,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 LIVE = os.path.join(HERE, "live")
 OUT = os.path.join(HERE, "release")
 DRAFTS = os.path.join(HERE, "..", "docs", "site-drafts-2026-09-27")
+PAGES = ("index.html", "404.html")     # every HTML page the site serves
 NEW_PAGES = {"privacy": "privacy.html", "mission": "mission.html", "moat": "moat.html"}
 
 BEACON = re.compile(r'<script defer src="https://static\.cloudflareinsights\.com/beacon\.min\.js"'
@@ -83,7 +84,7 @@ def build() -> list:
         shutil.copy(os.path.join(DRAFTS, draft), os.path.join(OUT, page, "index.html"))
     for root, _, files in os.walk(OUT):
         for name in files:
-            if name != "index.html":
+            if name not in PAGES:
                 continue
             full = os.path.join(root, name)
             rel = os.path.relpath(full, OUT)
@@ -117,7 +118,7 @@ def check() -> list:
     problems, pages = [], 0
     for root, _, files in os.walk(OUT):
         for name in files:
-            if name != "index.html":
+            if name not in PAGES:
                 continue
             pages += 1
             rel = os.path.relpath(os.path.join(root, name), OUT)
