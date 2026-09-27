@@ -457,7 +457,8 @@ class JarvisSystem:
         for dest, path in (("document_ocr", ("cloud", "document_ocr")),
                            ("documents", ("documents",)),
                            ("marketing", ("marketing",)),
-                           ("browser", ("browser",))):
+                           ("browser", ("browser",)),
+                           ("research", ("research",))):
             node = self.config
             for step in path:
                 node = (node or {}).get(step) if isinstance(node, dict) else None

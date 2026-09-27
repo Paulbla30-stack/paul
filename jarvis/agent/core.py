@@ -273,6 +273,11 @@ class AgentCore:
         # The standing question set: a character specification you never
         # re-read is a hope. Baseline written once, drift computed over
         # deterministic markers rather than prose. See probes.py.
+        # Research projects: Plan, Learn, Elevate, Review. None unless a
+        # research block is configured; see research.py and
+        # docs/research-tab-brief-2026-09-27.md.
+        from jarvis.agent import research as _research
+        self.research = _research.build_research(self, config, self.log)
         from jarvis.agent import probes as _probes
         self.probes = _probes.build_probes(self, config)
         # Quiet hours are a guess at when he is unavailable; the calendar is

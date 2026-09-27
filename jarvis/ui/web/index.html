@@ -185,6 +185,7 @@
   <button data-tab="browser">Browser</button>
   <button data-tab="marketing">Marketing</button><button data-tab="ledger">Ledger</button>
   <button data-tab="lab">Lab</button>
+  <button data-tab="research">Research</button>
 </nav>
 
 <main>
@@ -437,6 +438,32 @@
     </div>
   </section>
 
+  <section id="research">
+    <div class="card span-2">
+      <h2>Research</h2>
+      <p id="rsStatus" class="small muted" style="margin:0 0 8px"></p>
+      <input id="rsTitle" placeholder="Project title" style="width:100%;margin-bottom:8px" />
+      <textarea id="rsDirection" rows="3" placeholder="The direction: what you want looked into, and why" style="width:100%"></textarea>
+      <div class="row wrap" style="margin-top:8px">
+        <button class="btn" data-click="researchCreate">Start project</button>
+      </div>
+      <p id="rsMsg" class="small" style="margin:8px 0 0"></p>
+    </div>
+    <div class="card span-2" id="rsWaitingCard" style="display:none">
+      <h2>Waiting for you</h2>
+      <div id="rsWaiting"></div>
+    </div>
+    <div class="card span-2">
+      <h2>Projects</h2>
+      <div id="rsProjects"></div>
+    </div>
+    <div class="card span-2">
+      <h2>Lessons and judgement</h2>
+      <p id="rsCalibration" class="small muted" style="margin:0 0 8px"></p>
+      <ul id="rsLessons"></ul>
+    </div>
+  </section>
+
   <section id="lab">
     <div class="card span-2" id="labSessionCard">
       <h2>Lab session</h2>
@@ -581,6 +608,7 @@
     if (b.dataset.tab === "marketing") loadMarketing();
     if (b.dataset.tab === "ledger") loadLedger();
     if (b.dataset.tab === "lab") loadLab();
+    if (b.dataset.tab === "research") loadResearch();
   }));
 
   // ---- chat ----
@@ -1245,6 +1273,121 @@
   ["dragenter", "dragover"].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add("over"); }));
   ["dragleave", "drop"].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove("over"); }));
   drop.addEventListener("drop", e => uploadAll(Array.from(e.dataTransfer.files)));
+
+  // ---- research ----
+  // Every string here came from a model or a web page at some point, so all
+  // of it goes in as text. Buttons are built with listeners, never markup.
+  const RS_PAUSE = { timed_out: "Timed out", needs_clarification: "Needs your answer",
+                     not_working: "Isn't working", breakthrough: "Possible breakthrough",
+                     paused_by_paul: "Paused by you" };
+  function el(tag, text, cls) { const e = document.createElement(tag); if (text !== undefined) e.textContent = text; if (cls) e.className = cls; return e; }
+  function rsButton(label, ghost, fn) { const b = el("button", label, ghost ? "ghost" : "btn"); b.addEventListener("click", fn); return b; }
+  async function rsPost(path, body, then) {
+    try { await api(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }); }
+    catch (e) { alert(e.message); }
+    if (then) then(); else loadResearch();
+  }
+  window.researchCreate = async function () {
+    const title = $("rsTitle").value.trim(), direction = $("rsDirection").value.trim();
+    if (!title || !direction) { $("rsMsg").textContent = "A project needs a title and a direction."; return; }
+    try {
+      await api("/research/create", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title, direction }) });
+      $("rsTitle").value = ""; $("rsDirection").value = ""; $("rsMsg").textContent = "Started.";
+    } catch (e) { $("rsMsg").textContent = "Refused: " + e.message; }
+    loadResearch();
+  };
+  function rsWaitingItem(p) {
+    const box = el("div", undefined, "card"); box.style.margin = "8px 0 0";
+    const head = el("p", undefined, "small"); head.style.margin = "0 0 6px";
+    head.appendChild(el("b", p.title)); head.appendChild(document.createTextNode(" · " + (p.status === "proposed" ? "Jarvis proposes" : (RS_PAUSE[p.pause_reason] || p.pause_reason))));
+    box.appendChild(head);
+    if (p.question) box.appendChild(el("p", p.question));
+    const reason = el("input"); reason.placeholder = p.status === "proposed" ? "why (optional)" : "your answer or reason"; reason.style.width = "100%";
+    box.appendChild(reason);
+    const row = el("div", undefined, "row wrap"); row.style.marginTop = "8px";
+    if (p.status === "proposed") {
+      row.appendChild(rsButton("Accept", false, () => rsPost("/research/decide", { id: p.id, accept: true, reason: reason.value })));
+      row.appendChild(rsButton("Decline", true, () => rsPost("/research/decide", { id: p.id, accept: false, reason: reason.value })));
+    } else if (p.pause_reason === "needs_clarification") {
+      row.appendChild(rsButton("Answer", false, () => rsPost("/research/answer", { id: p.id, text: reason.value })));
+    } else {
+      row.appendChild(rsButton("Resume", false, () => rsPost("/research/control", { id: p.id, action: "resume", reason: reason.value })));
+      row.appendChild(rsButton("Close", true, () => rsPost("/research/control", { id: p.id, action: "close", reason: reason.value })));
+    }
+    box.appendChild(row);
+    return box;
+  }
+  async function rsProjectCard(summary) {
+    const card = el("div", undefined, "card"); card.style.margin = "8px 0 0";
+    let p; try { p = await api("/research/project?id=" + encodeURIComponent(summary.id)); } catch (e) { card.appendChild(el("p", e.message)); return card; }
+    const head = el("p", undefined, "small"); head.style.margin = "0 0 6px";
+    head.appendChild(el("b", p.title));
+    const state = p.status === "paused" ? (RS_PAUSE[p.pause_reason] || "paused") : p.status;
+    head.appendChild(document.createTextNode(" · " + state + " · " + p.phase + " · cycle " + p.cycle + " · started by " + (p.origin === "paul" ? "you" : "Jarvis")));
+    card.appendChild(head);
+    card.appendChild(el("p", p.direction, "small muted"));
+    const s = p.spend;
+    card.appendChild(el("p", "Spent " + s.calls + "/" + s.max_calls + " calls (intrigue " + s.intrigue_calls + "/" + s.intrigue_allowance + ") · " + s.cycles + "/" + s.max_cycles + " cycles · " + s.hours + "/" + s.max_hours + " h" + (p.repeats ? " · " + p.repeats + " repeats refused" : ""), "small"));
+    if (p.pause_note) card.appendChild(el("p", p.pause_note, "small"));
+    const threads = el("ul");
+    for (const t of p.threads) {
+      const li = el("li"); li.style.flexWrap = "wrap";
+      const txt = el("span", (t.why === "intrigue" ? "✦ " : "") + t.question); txt.style.flex = "1 1 100%";
+      li.appendChild(txt);
+      li.appendChild(el("span", t.status + " · " + (t.verdict || t.standing) + " · pull " + t.pull + " · taste " + (t.taste ?? "–") + (t.caught_by ? " · caught by: " + t.caught_by : ""), "small muted"));
+      if (!t.verdict) {
+        li.appendChild(rsButton("Worth it", true, () => rsPost("/research/verdict", { thread: t.id, ruling: "worth", reason: prompt("Why? (optional)") || "" })));
+        li.appendChild(rsButton("Waste", true, () => rsPost("/research/verdict", { thread: t.id, ruling: "waste", reason: prompt("Why? (optional)") || "" })));
+      }
+      threads.appendChild(li);
+    }
+    if (p.threads.length) { card.appendChild(el("p", "Threads (✦ followed on intrigue)", "small muted")); card.appendChild(threads); }
+    const candidates = p.findings.filter(f => f.status === "lesson_candidate" || f.status === "breakthrough");
+    if (candidates.length) {
+      card.appendChild(el("p", "Findings for your review", "small muted"));
+      const ul = el("ul");
+      for (const f of candidates) {
+        const li = el("li"); li.style.flexWrap = "wrap";
+        const txt = el("span", (f.status === "breakthrough" ? "★ " : "") + f.text); txt.style.flex = "1 1 100%";
+        li.appendChild(txt);
+        if (f.source) li.appendChild(el("span", "source: " + f.source, "small muted"));
+        if (f.status === "lesson_candidate") {
+          li.appendChild(rsButton("Keep as lesson", true, () => rsPost("/research/lesson", { finding: f.id, accept: true })));
+          li.appendChild(rsButton("Reject", true, () => rsPost("/research/lesson", { finding: f.id, accept: false, reason: prompt("Why? (optional)") || "" })));
+        }
+        ul.appendChild(li);
+      }
+      card.appendChild(ul);
+    }
+    if (p.status === "active" || p.status === "paused") {
+      const follow = el("input"); follow.placeholder = "That's interesting, look into…"; follow.style.width = "100%"; follow.style.marginTop = "8px";
+      card.appendChild(follow);
+      const row = el("div", undefined, "row wrap"); row.style.marginTop = "8px";
+      row.appendChild(rsButton("Look into it", true, () => { if (follow.value.trim()) rsPost("/research/follow", { id: p.id, question: follow.value.trim(), reason: "Paul's intrigue" }); }));
+      if (p.status === "active") row.appendChild(rsButton("Pause", true, () => rsPost("/research/control", { id: p.id, action: "pause", reason: "" })));
+      row.appendChild(rsButton("Extend", true, () => rsPost("/research/control", { id: p.id, action: "extend", reason: "extended by Paul", budget: { max_cycles: p.budget.max_cycles + 6, max_calls: p.budget.max_calls + 30, max_hours: p.budget.max_hours + 24 } })));
+      row.appendChild(rsButton("Close", true, () => rsPost("/research/control", { id: p.id, action: "close", reason: prompt("Why close it? (optional)") || "" })));
+      card.appendChild(row);
+    }
+    return card;
+  }
+  async function loadResearch() {
+    let got; try { got = await api("/research"); } catch (e) { $("rsStatus").textContent = "Could not load: " + e.message; return; }
+    if (got.configured === false) { $("rsStatus").textContent = "Research is not configured on this box yet."; return; }
+    $("rsStatus").textContent = got.enabled ? "Jarvis works on active projects on his own, one step at a time." : "Automatic research is switched off: projects wait until it is turned on.";
+    const waiting = $("rsWaiting"); waiting.innerHTML = "";
+    $("rsWaitingCard").style.display = got.waiting_for_paul.length ? "" : "none";
+    for (const p of got.waiting_for_paul) waiting.appendChild(rsWaitingItem(p));
+    const list = $("rsProjects"); list.innerHTML = "";
+    const live = got.projects.filter(p => p.status !== "declined");
+    if (!live.length) list.appendChild(el("p", "No projects yet.", "small muted"));
+    for (const p of live) list.appendChild(await rsProjectCard(p));
+    const c = got.calibration;
+    $("rsCalibration").textContent = c.verdicts ? ("Jarvis's sense of what pulls agrees with your verdicts " + Math.round(c.rate * 100) + "% of the time (" + c.agree + " of " + c.verdicts + ").") : "No verdicts yet: mark threads 'worth it' or 'waste' and his judgement calibrates to yours.";
+    const lessons = $("rsLessons"); lessons.innerHTML = "";
+    for (const l of got.lessons) lessons.appendChild(el("li", l.text));
+    if (!got.lessons.length) lessons.appendChild(el("li", "No lessons kept yet.", "muted small"));
+  }
 
   // Buttons name their handler in data-click rather than an onclick
   // attribute: the page's Content-Security-Policy runs only its own nonced

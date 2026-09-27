@@ -785,6 +785,18 @@ class HeadlessRunner:
                         self._send(200, runner.agent.diary.state())
                     elif path == "/lab":
                         self._send(200, runner.lab_state())
+                    elif path in ("/research", "/research/project"):
+                        research = getattr(runner.agent, "research", None)
+                        if research is None:
+                            self._send(200, {"enabled": False, "configured": False, "projects": []})
+                        elif path == "/research":
+                            self._send(200, research.state())
+                        else:
+                            pid = dict(p.split("=", 1) for p in query.split("&") if "=" in p).get("id")
+                            try:
+                                self._send(200, research.project(pid))
+                            except Exception as exc:
+                                self._send(404, {"error": str(exc)})
                     elif path == "/ledger":
                         self._send(200, runner.agent.ledger.status())
                     elif path == "/ledger/tail":
@@ -1192,6 +1204,46 @@ class HeadlessRunner:
                     runner._write_status_file()
                     self._send(200 if done else 404,
                                {"changed": done, "diary": runner.agent.diary.state()})
+                elif path.startswith("/research/"):
+                    research = getattr(runner.agent, "research", None)
+                    if research is None:
+                        return self._send(404, {"error": "research is not configured"})
+                    try:
+                        payload = json.loads(body or "{}")
+                    except ValueError:
+                        return self._send(400, {"error": "body must be JSON"})
+                    if not isinstance(payload, dict):
+                        return self._send(400, {"error": "JSON object required"})
+                    from jarvis.agent.research import Refused as _ResearchRefused
+                    try:
+                        with runner._lock:
+                            if path == "/research/create":
+                                out = research.create(payload.get("title"), payload.get("direction"),
+                                                      payload.get("budget"))
+                            elif path == "/research/decide":
+                                out = research.decide(payload.get("id"), bool(payload.get("accept")),
+                                                      str(payload.get("reason") or ""),
+                                                      payload.get("edits") if isinstance(payload.get("edits"), dict) else None)
+                            elif path == "/research/answer":
+                                out = research.answer(payload.get("id"), payload.get("text"))
+                            elif path == "/research/control":
+                                out = research.control(payload.get("id"), str(payload.get("action") or ""),
+                                                       str(payload.get("reason") or ""),
+                                                       payload.get("budget") if isinstance(payload.get("budget"), dict) else None)
+                            elif path == "/research/verdict":
+                                out = research.verdict(payload.get("thread"), str(payload.get("ruling") or ""),
+                                                       str(payload.get("reason") or ""))
+                            elif path == "/research/follow":
+                                out = research.follow(payload.get("id"), payload.get("question"),
+                                                      str(payload.get("reason") or ""))
+                            elif path == "/research/lesson":
+                                out = research.review_finding(payload.get("finding"), bool(payload.get("accept")),
+                                                              str(payload.get("reason") or ""))
+                            else:
+                                return self._send(404, {"error": "not found"})
+                    except _ResearchRefused as why:
+                        return self._send(409, {"error": str(why)})
+                    self._send(200, out)
                 elif path in ("/questions/ask", "/questions/answer"):
                     try:
                         payload = json.loads(body or "{}")
@@ -1641,6 +1693,32 @@ class HeadlessRunner:
                           report["scanned"])
         self.last_consolidation = report
 
+    def _research_tick(self):
+        """One phase of one research project, on its own slow clock.
+
+        Only when research is switched on (research.enabled). One project per
+        tick, the one that has waited longest, so a busy project cannot
+        starve the others and the planner's own budget is not swamped.
+        """
+        research = getattr(self.agent, "research", None)
+        if research is None or not research.enabled:
+            return
+        now = time.time()
+        if now - getattr(self, "_last_research", 0.0) < research.every_s:
+            return
+        self._last_research = now
+        pid = research.due()
+        if pid is None:
+            return
+        try:
+            with self._lock:
+                out = research.run_cycle(pid)
+        except Exception as e:                       # never stops the loop
+            self.log.warning("research cycle failed: %s", e)
+            return
+        if out.get("paused"):
+            self.log.info("research project %s paused: %s", pid, out["paused"])
+
     def _backup_tick(self):
         """Copy the memory off the box, on its own slow clock.
 
@@ -1747,6 +1825,7 @@ class HeadlessRunner:
                 except Exception as e:  # the witness copy never stops the loop
                     self.log.warning("ledger anchor tick failed: %s", e)
                 self._consolidation_tick()
+                self._research_tick()
                 self._backup_tick()
                 self._diary_tick()
                 if self.max_cycles and cycles >= self.max_cycles:

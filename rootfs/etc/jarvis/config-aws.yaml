@@ -367,6 +367,23 @@ documents:
 # approving is done on the signed link in the digest email, which is the only
 # thing holding the signing secret.
 #
+# Research projects (the Research tab): Plan, Learn, Elevate, Review. With
+# this block present the tab works: Paul can open projects and answer, and
+# Jarvis's proposals appear. `enabled` switches on the autonomous cycle,
+# which spends model calls; it is off until Paul decides. Learn has nothing
+# to read until an evidence source (the browser, the scout) is linked.
+# See docs/research-tab-brief-2026-09-27.md.
+research:
+  enabled: false
+  path: /var/lib/jarvis/research.db
+  every_s: 900                 # one phase of one project at most this often
+  budget:                      # defaults for a new project; each can be changed
+    max_cycles: 12
+    max_calls: 60
+    max_hours: 48
+    intrigue_share: 0.25       # protected share for following intrigue
+    stall_cycles: 3            # rounds with nothing that held up -> pause
+
 # The first coupling between the agent and the scout, which until now shared
 # no code, no IAM and no visibility. One direction, and switched on
 # deliberately rather than found on by default.
