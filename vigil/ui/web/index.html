@@ -442,7 +442,7 @@
     <div class="card span-2">
       <h2>Research</h2>
       <p id="rsStatus" class="small muted" style="margin:0 0 8px"></p>
-      <p class="small muted" style="margin:0 0 8px">Each project runs Plan, Learn, Elevate, Review. Plan is the brainstorm: Vigil writes an action plan (the searches, pages and code each step needs) and dry-runs it against what he already knows. You check it. Once you approve, he works through it on his own, inside what you allowed.</p>
+      <p class="small muted" style="margin:0 0 8px">Each project runs Plan, Learn, Elevate, Review. Plan is the brainstorm: Vigil writes an action plan (the searches, pages and code each step needs) and dry-runs it against what he already knows. You talk it through and sign it off. He then works through it on his own, inside what you allowed, and comes back with results: what he tried, what held up, and paths to pick for the next round.</p>
       <input id="rsTitle" placeholder="Project title" style="width:100%;margin-bottom:8px" />
       <textarea id="rsDirection" rows="3" placeholder="The direction: what you want looked into, and why" style="width:100%"></textarea>
       <div class="row wrap" style="margin-top:8px">
@@ -1321,7 +1321,8 @@
   // of it goes in as text. Buttons are built with listeners, never markup.
   const RS_PAUSE = { timed_out: "Timed out", needs_clarification: "Needs your answer",
                      not_working: "Isn't working", breakthrough: "Possible breakthrough",
-                     paused_by_paul: "Paused by you", plan_to_check: "Plan to check" };
+                     paused_by_paul: "Paused by you", plan_to_check: "Plan to check",
+                     back_with_results: "Back with results" };
   const RS_TOOL = { search: "Search", read: "Read page", code: "Run code" };
   // The action plan, grouped by thread. Editable only while it waits for Paul.
   function rsPlanList(p, editable) {
@@ -1351,6 +1352,101 @@
     }
     return { wrap, inputs };
   }
+  // One mind, many paths: the project's hypotheses side by side, with the
+  // evidence for and against each. Vigil proposes; only Paul settles one.
+  function rsHypotheses(p) {
+    const wrap = el("div");
+    if (!p.hypotheses || !p.hypotheses.length) return wrap;
+    wrap.appendChild(el("p", "Hypotheses (one mind, many paths)", "small muted"));
+    const row = el("div"); row.style.display = "flex"; row.style.flexWrap = "wrap"; row.style.gap = "8px";
+    for (const h of p.hypotheses) {
+      const c = el("div", undefined, "card"); c.style.flex = "1 1 220px"; c.style.margin = "0";
+      c.appendChild(el("p", h.text));
+      c.appendChild(el("p", h.status + " · " + h.for.length + " for · " + h.against.length + " against", "small muted"));
+      for (const [label, list] of [["For", h.for], ["Against", h.against]]) {
+        if (!list.length) continue;
+        c.appendChild(el("p", label, "small"));
+        const ul = el("ul");
+        for (const f of list.slice(0, 5)) { const li = el("li", f.text, "small"); if (f.source) li.appendChild(el("span", " · " + f.source, "muted")); ul.appendChild(li); }
+        c.appendChild(ul);
+      }
+      const act = el("div", undefined, "row wrap");
+      if (h.proposed) {
+        c.appendChild(el("p", "Vigil proposes: " + h.proposed + (h.proposed_why ? " · " + h.proposed_why : ""), "small"));
+        act.appendChild(rsButton("Confirm", false, () => rsPost("/research/hypothesis", { hypothesis: h.id, action: "confirm" })));
+        act.appendChild(rsButton("Not yet", true, () => rsPost("/research/hypothesis", { hypothesis: h.id, action: "reject" })));
+      } else if (h.status === "open") {
+        act.appendChild(rsButton("Supported", true, () => rsPost("/research/hypothesis", { hypothesis: h.id, action: "support", reason: prompt("Why? (optional)") || "" })));
+        act.appendChild(rsButton("Drop", true, () => rsPost("/research/hypothesis", { hypothesis: h.id, action: "drop", reason: prompt("Why? (optional)") || "" })));
+      } else {
+        act.appendChild(rsButton("Reopen", true, () => rsPost("/research/hypothesis", { hypothesis: h.id, action: "reopen" })));
+      }
+      c.appendChild(act); row.appendChild(c);
+    }
+    wrap.appendChild(row);
+    return wrap;
+  }
+  // Talking it through: the project's own conversation, held with the
+  // research prompt, never Vigil's full chat context.
+  function rsDiscussion(p) {
+    const wrap = el("div");
+    wrap.appendChild(el("p", "Talk it through", "small muted"));
+    const log = el("div");
+    for (const d of (p.discussion || []).slice(-12)) {
+      const line = el("p", undefined, "small"); line.style.margin = "4px 0";
+      line.appendChild(el("b", d.role === "paul" ? "You: " : "Vigil: ")); line.appendChild(document.createTextNode(d.text));
+      log.appendChild(line);
+    }
+    wrap.appendChild(log);
+    const say = el("input"); say.placeholder = "Ask about the plan, the findings, where it's going…"; say.style.width = "100%";
+    const row = el("div", undefined, "row wrap"); row.style.marginTop = "6px";
+    const send = rsButton("Send", true, () => { if (!say.value.trim()) return; send.disabled = true; send.textContent = "Vigil is thinking…"; rsPost("/research/discuss", { id: p.id, text: say.value.trim() }); });
+    row.appendChild(send);
+    wrap.appendChild(say); wrap.appendChild(row);
+    return wrap;
+  }
+  // Back with results: what was attempted, where the effort went, findings by
+  // hypothesis with sources, what is blocked -- then the paths to pick from.
+  function rsReport(p, interactive) {
+    const r = p.report, wrap = el("div");
+    if (!r) return wrap;
+    wrap.appendChild(el("p", "Report", "small muted"));
+    if (r.summary) wrap.appendChild(el("p", r.summary));
+    const att = el("ul");
+    for (const a of r.attempted || []) att.appendChild(el("li", (RS_TOOL[a.tool] || a.tool) + " · " + a.goal + " · " + a.used + " of " + a.of, "small"));
+    for (const f of r.failed || []) att.appendChild(el("li", "failed: step " + f.step + " · " + f.what, "small"));
+    if (att.childNodes.length) { wrap.appendChild(el("p", "Attempted", "small")); wrap.appendChild(att); }
+    const sp = r.spent || {};
+    wrap.appendChild(el("p", "Spent: " + (sp.model_calls || "?") + " model calls · " + (sp.hours ?? "?") + " h" + Object.entries(sp.tools || {}).map(([t, v]) => " · " + (RS_TOOL[t] || t) + " " + v).join(""), "small"));
+    for (const h of r.by_hypothesis || []) wrap.appendChild(el("p", "Hypothesis " + h.id + " (" + h.status + "): " + h.supports.length + " for, " + h.weakens.length + " against · " + h.text, "small"));
+    for (const b of (r.blocked || []).concat(r.waiting_for_paul || [])) wrap.appendChild(el("p", "⚠ " + b, "small"));
+    if (interactive) {
+      wrap.appendChild(el("p", "Where next?", "small muted"));
+      const row = el("div", undefined, "row wrap");
+      for (const o of r.paths || []) {
+        const b = rsButton(o.label, false, () => rsPost("/research/answer", { id: p.id, text: o.label + (o.description ? " (" + o.description + ")" : "") }));
+        b.title = o.description || ""; row.appendChild(b);
+      }
+      wrap.appendChild(row);
+      const other = el("input"); other.placeholder = "Other: say it your way"; other.style.width = "100%"; other.style.marginTop = "6px";
+      const go = el("div", undefined, "row wrap"); go.style.marginTop = "6px";
+      go.appendChild(rsButton("Send", true, () => { if (other.value.trim()) rsPost("/research/answer", { id: p.id, text: other.value.trim() }); }));
+      go.appendChild(rsButton("Close the project", true, () => rsPost("/research/control", { id: p.id, action: "close", reason: prompt("Why close it? (optional)") || "" })));
+      wrap.appendChild(other); wrap.appendChild(go);
+    }
+    return wrap;
+  }
+  async function rsReportCheck(summary) {
+    const box = el("div", undefined, "card"); box.style.margin = "8px 0 0";
+    let p; try { p = await api("/research/project?id=" + encodeURIComponent(summary.id)); } catch (e) { box.appendChild(el("p", e.message)); return box; }
+    const head = el("p", undefined, "small"); head.style.margin = "0 0 6px";
+    head.appendChild(el("b", p.title)); head.appendChild(document.createTextNode(" · back with results"));
+    box.appendChild(head);
+    box.appendChild(rsReport(p, true));
+    box.appendChild(rsHypotheses(p));
+    box.appendChild(rsDiscussion(p));
+    return box;
+  }
   async function rsPlanCheck(summary) {
     const box = el("div", undefined, "card"); box.style.margin = "8px 0 0";
     let p; try { p = await api("/research/project?id=" + encodeURIComponent(summary.id)); } catch (e) { box.appendChild(el("p", e.message)); return box; }
@@ -1360,6 +1456,7 @@
     if (p.pause_note) box.appendChild(el("p", p.pause_note, "small"));
     box.appendChild(el("p", "Nothing runs until you approve. Search queries go to the search engine exactly as written here. Set a step to 0 to drop it.", "small muted"));
     const { wrap, inputs } = rsPlanList(p, true); box.appendChild(wrap);
+    box.appendChild(rsHypotheses(p));
     box.appendChild(el("p", "Allowance for the whole project. Later plans that stay inside it go ahead without asking you again. Leave blank for the plan plus a little room.", "small muted"));
     const allowRow = el("div", undefined, "row wrap"), allow = {};
     for (const tool of Object.keys(p.tool_caps)) {
@@ -1382,6 +1479,7 @@
       rsPost("/research/plan", { id: p.id, action: "return", note: note.value });
     }));
     box.appendChild(row);
+    box.appendChild(rsDiscussion(p));
     return box;
   }
   function el(tag, text, cls) { const e = document.createElement(tag); if (text !== undefined) e.textContent = text; if (cls) e.className = cls; return e; }
@@ -1451,6 +1549,9 @@
       card.appendChild(rsPlanList(p, false).wrap);
       if (p.allowance) card.appendChild(el("p", "Tools used of allowed: " + Object.keys(p.allowance).map(t => (RS_TOOL[t] || t) + " " + p.used[t] + "/" + p.allowance[t]).join(" · "), "small"));
     }
+    if (p.hypotheses && p.hypotheses.length) card.appendChild(rsHypotheses(p));
+    if (p.report && p.pause_reason !== "back_with_results") card.appendChild(rsReport(p, false));
+    if (p.status === "active" || p.status === "paused") card.appendChild(rsDiscussion(p));
     if (p.runs && p.runs.length) {
       card.appendChild(el("p", "Code runs (in the sandbox: no network, nothing of Vigil in reach)", "small muted"));
       for (const r of p.runs) {
@@ -1494,7 +1595,7 @@
     $("rsStatus").textContent = got.enabled ? "Vigil works on active projects on his own, one step at a time." : "Automatic research is switched off: projects wait until it is turned on.";
     const waiting = $("rsWaiting"); waiting.innerHTML = "";
     $("rsWaitingCard").style.display = got.waiting_for_paul.length ? "" : "none";
-    for (const p of got.waiting_for_paul) waiting.appendChild(p.pause_reason === "plan_to_check" ? await rsPlanCheck(p) : rsWaitingItem(p));
+    for (const p of got.waiting_for_paul) waiting.appendChild(p.pause_reason === "plan_to_check" ? await rsPlanCheck(p) : p.pause_reason === "back_with_results" ? await rsReportCheck(p) : rsWaitingItem(p));
     const list = $("rsProjects"); list.innerHTML = "";
     const live = got.projects.filter(p => p.status !== "declined");
     if (!live.length) list.appendChild(el("p", "No projects yet.", "small muted"));

@@ -130,8 +130,10 @@ class TestTheCycle(unittest.TestCase):
         pid = reg.create("H", "handovers")["id"]
         reg.run_cycle(pid)
         sent = json.loads(script.calls[0][1])
+        # The project's own hypotheses and its conversation with Paul are
+        # project data; nothing from the diary, memory or chats is here.
         self.assertEqual(set(sent), {"direction", "title", "threads_so_far", "lessons",
-                                     "wasted_before", "cycle"})
+                                     "wasted_before", "cycle", "hypotheses", "talked_with_paul"})
 
     def test_learn_says_so_when_no_evidence_source_is_linked(self):
         script = Script({"threads": [{"question": "checklists and handovers", "why": "results"}]})

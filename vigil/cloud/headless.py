@@ -1243,6 +1243,14 @@ class HeadlessRunner:
                             elif path == "/research/lesson":
                                 out = research.review_finding(payload.get("finding"), bool(payload.get("accept")),
                                                               str(payload.get("reason") or ""))
+                            elif path == "/research/discuss":
+                                out = research.discuss(payload.get("id"), str(payload.get("text") or ""))
+                            elif path == "/research/hypothesis":
+                                out = research.settle_hypothesis(payload.get("hypothesis"),
+                                                                 str(payload.get("action") or ""),
+                                                                 str(payload.get("reason") or ""))
+                            elif path == "/research/hypothesis/add":
+                                out = research.add_hypothesis(payload.get("id"), str(payload.get("text") or ""))
                             elif path == "/research/plan":
                                 counts = payload.get("counts")
                                 allowance = payload.get("allowance")

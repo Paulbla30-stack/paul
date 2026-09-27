@@ -373,12 +373,14 @@ documents:
 #
 # Research projects (the Research tab): Plan, Learn, Elevate, Review. With
 # this block present the tab works: Paul can open projects and answer, and
-# Vigil's proposals appear. `enabled` switches on the autonomous cycle,
-# which spends model calls; it is off until Paul decides. Learn reads through
-# the toolbox below, and only as an action plan Paul has approved allows.
+# Vigil's proposals appear. `enabled` switches on the autonomous cycle.
+# Paul, 27 September: "The plan gets done, we talk and it's signed off and
+# then he goes off. He can come back, together again." So it is on: nothing
+# runs before Paul signs a plan off, and Vigil stops and reports back when
+# the signed-off plan is done. Learn reads through the toolbox below.
 # See docs/research-tab-brief-2026-09-27.md.
 research:
-  enabled: false
+  enabled: true
   path: /var/lib/vigil/research.db
   every_s: 900                 # one phase of one project at most this often
   budget:                      # defaults for a new project; each can be changed
