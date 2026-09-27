@@ -1242,6 +1242,13 @@ class HeadlessRunner:
                             elif path == "/research/lesson":
                                 out = research.review_finding(payload.get("finding"), bool(payload.get("accept")),
                                                               str(payload.get("reason") or ""))
+                            elif path == "/research/plan":
+                                counts = payload.get("counts")
+                                allowance = payload.get("allowance")
+                                out = research.check_plan(payload.get("id"), str(payload.get("action") or ""),
+                                                          counts if isinstance(counts, dict) else None,
+                                                          allowance if isinstance(allowance, dict) else None,
+                                                          str(payload.get("note") or ""))
                             else:
                                 return self._send(404, {"error": "not found"})
                     except _ResearchRefused as why:

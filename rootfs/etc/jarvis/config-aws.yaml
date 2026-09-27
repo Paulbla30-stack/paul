@@ -383,6 +383,19 @@ research:
     max_hours: 48
     intrigue_share: 0.25       # protected share for following intrigue
     stall_cycles: 3            # rounds with nothing that held up -> pause
+  # Tools for projects, used only as an action plan Paul has approved allows.
+  # search and read go through the fenced browser; code through the sandbox.
+  toolbox:
+    enabled: true
+    # DuckDuckGo answers this box with a bot check (tested 27 Sep); Brave returns results.
+    search_url: "https://search.brave.com/search?q={q}"
+  # Terms set with Jarvis on 27 September: Python 3.11, standard library only,
+  # no network, 384 MB, one run at a time. A transient systemd unit per run.
+  sandbox:
+    enabled: true
+    memory_mb: 384
+    timeout_s: 60
+    cpu_percent: 100
 
 # The first coupling between the agent and the scout, which until now shared
 # no code, no IAM and no visibility. One direction, and switched on
