@@ -62,17 +62,18 @@ def _log(op: str, connection: str = "", result: str = "ok", nbytes: int = 0):
 class Broker:
     """The logic, with its table and network passed in so tests need neither."""
 
-    def __init__(self, table=None, enabled=None, get=None, clock=time.time):
+    def __init__(self, table=None, enabled=None, get=None, clock=time.time, scan=None):
         self.table = table
         self.enabled = set(enabled) if enabled is not None else _enabled()
         self.get = get or fetch.get
         self.clock = clock
+        self.scan = scan or _scout_scan
 
     # ---- operations ----------------------------------------------------
 
     def catalogue(self) -> dict:
         return {"connections": [
-            {"id": cid, "label": m["label"], "host": m["host"], "kind": m["kind"],
+            {"id": cid, "label": m["label"], "host": m.get("host"), "kind": m["kind"],
              "auth": m["auth"], "data_class": m["data_class"],
              "operations": {name: {"effect": op["effect"], "params": op["params"]}
                             for name, op in m["operations"].items()},
@@ -94,12 +95,16 @@ class Broker:
         if not self._take_quota(cid, m["limits"]["calls_per_hour"]):
             return {"ok": False, "error": "hourly_limit"}
         connector = CONNECTORS[cid]
-        url = connector.build(event["operation"], params)
-        body = self.get(url, check_host(m["host"]),
-                        max_bytes=m["limits"]["max_bytes"],
-                        timeout=float(m["limits"]["timeout_s"]))
         try:
-            records = connector.normalise(event["operation"], body, params)
+            if m["kind"] == "aws_table":
+                records = connector.read(event["operation"], params,
+                                         lambda: self.scan(m["table"]))
+            else:
+                url = connector.build(event["operation"], params)
+                body = self.get(url, check_host(m["host"]),
+                                max_bytes=m["limits"]["max_bytes"],
+                                timeout=float(m["limits"]["timeout_s"]))
+                records = connector.normalise(event["operation"], body, params)
         except (ValueError, KeyError, TypeError, AttributeError):
             self._note_result(cid, "malformed")
             return {"ok": False, "error": "malformed_response"}
@@ -172,6 +177,23 @@ class Broker:
             if exc.response.get("Error", {}).get("Code") == "ConditionalCheckFailedException":
                 return False
             raise
+
+
+def _scout_scan(table_name: str):
+    """The scout table's finds, read-only, bounded. Only the scout's own table."""
+    import boto3
+    from boto3.dynamodb.conditions import Attr
+    from connectors.scout import MAX_SCAN
+    table = boto3.resource("dynamodb").Table(table_name)
+    kwargs, seen = {"FilterExpression": Attr("sk").eq("HIT")}, 0
+    while seen < MAX_SCAN:
+        page = table.scan(**kwargs)
+        for item in page.get("Items", []):
+            seen += 1
+            yield item
+        if "LastEvaluatedKey" not in page:
+            return
+        kwargs["ExclusiveStartKey"] = page["LastEvaluatedKey"]
 
 
 def handler(event, context=None):

@@ -20,6 +20,10 @@ Parameters:
       Comma-separated catalogue ids Paul has switched on, for example
       "open_meteo,uk_bank_holidays,zenodo". Empty means every connection is
       off. Jarvis can switch a connection off; only this can switch one on.
+  ScoutTableName:
+    Type: String
+    Default: jarvis-scout
+    Description: The scout's table, read (Scan) by the "scout" connection. Never written.
   LogRetentionDays:
     Type: Number
     Default: 30
@@ -84,9 +88,9 @@ Resources:
         project: jarvis-connect
         owner: jarvis
 
-  # Least privilege. Its own table and its own log group. No Secrets
-  # Manager, no other table, no model service, no role assumption. Stage 1
-  # holds nothing worth stealing, and this keeps it that way.
+  # Least privilege. Its own table, a read-only Scan of the scout's table,
+  # and its own log group. No Secrets Manager, no model service, no role
+  # assumption. Stage 1 holds nothing worth stealing; this keeps it that way.
   BrokerRole:
     Type: AWS::IAM::Role
     Properties:
@@ -98,13 +102,18 @@ Resources:
             Principal: {Service: lambda.amazonaws.com}
             Action: sts:AssumeRole
       Policies:
-        - PolicyName: own-table-and-logs
+        - PolicyName: own-table-scout-read-and-logs
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
               - Effect: Allow
                 Action: [dynamodb:GetItem, dynamodb:PutItem, dynamodb:UpdateItem]
                 Resource: !GetAtt ConnectionsTable.Arn
+              # The scout's finds, read-only. No PutItem, UpdateItem or
+              # DeleteItem: the scout's chain is its own record.
+              - Effect: Allow
+                Action: [dynamodb:Scan]
+                Resource: !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ScoutTableName}'
               - Effect: Allow
                 Action: [logs:CreateLogStream, logs:PutLogEvents]
                 Resource: !Sub '${BrokerLogs.Arn}:*'

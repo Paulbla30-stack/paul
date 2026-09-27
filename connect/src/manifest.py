@@ -9,7 +9,8 @@ an unknown key, a value out of range, a string that is not on the list. The
 broker runs that check itself and does not trust whoever called it.
 
 Stage 1 is keyless and public: weather for places Paul saves, the UK bank
-holidays, and the metadata of his own twenty Zenodo records.
+holidays, the metadata of his own twenty Zenodo records, and the scout's
+finds, read from its own table.
 """
 
 import hashlib
@@ -63,6 +64,25 @@ CATALOGUE: Dict[str, dict] = {
                 "params": {
                     "division": {"type": "enum", "values": [
                         "england-and-wales", "scotland", "northern-ireland"]},
+                },
+            },
+        },
+    },
+    "scout": {
+        "label": "The scout's finds",
+        # Not a web request: the scout's own DynamoDB table, in this account,
+        # read-only. There is no host because nothing leaves AWS.
+        "kind": "aws_table",
+        "table": "jarvis-scout",
+        "auth": "none",
+        "data_class": "public",
+        "limits": {"calls_per_hour": 12, "max_bytes": 64 * 1024, "timeout_s": 10},
+        "operations": {
+            "recent": {
+                "effect": READ,
+                "params": {
+                    "days": {"type": "int", "min": 1, "max": 30},
+                    "limit": {"type": "int", "min": 1, "max": 50},
                 },
             },
         },

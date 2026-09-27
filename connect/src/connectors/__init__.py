@@ -8,10 +8,11 @@ else never travels back to the box. What a service says is data, never
 instructions, and the easiest way to keep it that way is not to carry it.
 """
 
-from connectors import bank_holidays, open_meteo, zenodo
+from connectors import bank_holidays, open_meteo, scout, zenodo
 
 CONNECTORS = {
     "open_meteo": open_meteo,
     "uk_bank_holidays": bank_holidays,
+    "scout": scout,
     "zenodo": zenodo,
 }

@@ -14,10 +14,13 @@ code, accounts or data. No access to the `heartbeat-memory` server.
 
 ## Status
 
-Built and tested locally against the live APIs. **Not deployed** — the
-brief says to state the expected monthly cost before deploying anything
-billed, and to stop for a decision after the first real run. See
-"What the first run actually found" below, which is the decision.
+**Deployed and running** (checked 27 September 2026). The `jarvis-scout` stack was created on 21 September 2026 and last updated on 27 September. The schedule `jarvis-scout-daily` is enabled and runs at 07:00 UK. By 27 September it had logged 46 finds, with the hash chain at 46 entries.
+
+- **The digest goes to Paul directly.** The scout emails it itself; Jarvis is not involved.
+- **Jarvis could not see the finds.** His only window onto the scout (`jarvis/agent/marketing.py`) read draft proposals from Stage 2, which is not switched on, so it showed empty lists.
+- **The fix, on Paul's choice of 27 September ("option 1"):** the finds become a read-only connection, `scout`, in `connect/`. It returns typed fields, and titles only for Paul's screen. The scout's chain stays its own record. It is built and tested but **not yet linked to Jarvis**.
+
+The sections below are the pre-deployment record. They are kept as written, because they explain the thresholds.
 
 ---
 
