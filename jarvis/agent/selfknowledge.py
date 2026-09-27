@@ -16,12 +16,17 @@ does it either. What people actually have is behavioural self-knowledge: not
 
 So: statistics computed over the ledger and handed to the model as fact. The
 derivation is one-way and the numbers are aggregates. The model learns that it
-proposed six changes and one was taken; it does not learn which, or when, or
-what the operator said, and it cannot alter the record or the reading of it.
-The evidence stays sealed. What crosses is a mirror, not a door.
+proposed six changes and one was taken, and it cannot alter the record or the
+reading of it. The evidence stays sealed. What crosses is a mirror, not a door.
 
 Deliberately not included: anything that would let the model reconstruct a
-particular entry, and any operator content. The point is for it to know its own
+particular entry, and any operator content, with one exception. The operator's
+verdicts on its proposals are carried across with their text: up to twenty of
+the most recent in the window, each with the proposal and his stated reason
+verbatim (200 characters apiece), and the six newest are shown to the model.
+They are instruction rather than evidence about the agent -- a count cannot
+teach it what a good proposal looks like -- so for those, it does learn which
+proposals were taken and what he said. The point is for it to know its own
 shape, not to read its file.
 """
 

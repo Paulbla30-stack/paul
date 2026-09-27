@@ -87,7 +87,9 @@ class LedgerAnchor:
             self.stats["failures"] += 1
             self.failure_streak += 1
             self.last_error = f"{type(e).__name__}: {e}"
-            if self.failure_streak in (1, 5, 20):
+            # First, fifth, then every twentieth: a bucket that stays broken
+            # keeps saying so without filling the log on every tick.
+            if self.failure_streak in (1, 5) or self.failure_streak % 20 == 0:
                 self.log.warning("Ledger anchor upload to s3://%s failed (%s)", self.bucket, self.last_error)
             self._last_flush = time.time()  # do not hammer a broken bucket
             return False

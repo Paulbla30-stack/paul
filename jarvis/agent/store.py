@@ -466,23 +466,60 @@ class MemoryStore:
         Marked derived so it can never be consolidated again: summarising a
         summary, and then that summary, is how a memory becomes a confident
         fiction with no provenance left. Depth is capped at one, forever.
+
+        Refused (None, nothing written) when the text already exists as any
+        row other than this same derivation. Rows are one per text, so going
+        ahead would turn an original into a derived row -- lifting it out of
+        consolidation and letting a later merge cite a summary -- or rewrite
+        another derivation's sources. The only repeat allowed is the same
+        derived row from the same sources, which is refreshed.
         """
         ids = [int(i) for i in (sources or [])]
-        entry = self.remember(text, kind=kind, source="system", pinned=pinned)
-        if not entry or self._db is None:
-            return entry
+        text = (text or "").strip()[:TEXT_LIMIT]
+        if not text or self._db is None:
+            return None
+        kind = kind if kind in KINDS else "note"
+        joined = ",".join(str(i) for i in ids)
+        digest, now = _digest(text), time.time()
+        # One lock for the check and the write, so nothing can land the same
+        # text as an original between them.
         try:
             with self._lock:
-                self._db.execute(
-                    "UPDATE memories SET derived = 1, sources = ?, weight = ?"
-                    " WHERE id = ?",
-                    (",".join(str(i) for i in ids), float(weight), entry["id"]))
+                row = self._db.execute(
+                    "SELECT id, seen, derived, sources FROM memories WHERE digest = ?",
+                    (digest,)).fetchone()
+                if row is not None:
+                    have = sorted(int(x) for x in str(row["sources"] or "").split(",")
+                                  if x.strip())
+                    if not row["derived"] or have != sorted(ids):
+                        self.log.info("Refused derived memory: its text is already row %d",
+                                      row["id"])
+                        return None
+                    self._db.execute(
+                        "UPDATE memories SET ts = ?, seen = seen + 1, cycle = NULL,"
+                        " pinned = MAX(pinned, ?), state = 'live', weight = ?"
+                        " WHERE id = ?",
+                        (now, int(bool(pinned)), float(weight), row["id"]))
+                    self._db.commit()
+                    return {"id": row["id"], "text": text, "kind": kind,
+                            "repeat": True, "seen": row["seen"] + 1,
+                            "derived": True, "sources": ids}
+                # Inserted already derived, so the prune below cannot take it
+                # in the moment before it is marked.
+                cur = self._db.execute(
+                    "INSERT INTO memories (ts, first_ts, kind, source, cycle, text,"
+                    " digest, pinned, weight, derived, sources)"
+                    " VALUES (?,?,?,?,?,?,?,?,?,1,?)",
+                    (now, now, kind, "system", None, text, digest,
+                     int(bool(pinned)), float(weight), joined))
                 self._db.commit()
+                new_id = cur.lastrowid
         except Exception as exc:
-            self.log.warning("Could not mark derived memory: %s", exc)
-        entry["derived"] = True
-        entry["sources"] = ids
-        return entry
+            self.log.warning("Could not store derived memory: %s", exc)
+            return None
+        self.prune()
+        return {"id": new_id, "text": text, "kind": kind, "repeat": False, "seen": 1,
+                "derived": True, "sources": ids}
 
     def live(self, limit: int = 200, kind: Optional[str] = None,
              include_derived: bool = True) -> list:
@@ -507,7 +544,14 @@ class MemoryStore:
             return False
 
     def prune(self, max_rows: Optional[int] = None) -> int:
-        """Drop the oldest unpinned memories past the cap. Pinned ones stay."""
+        """Drop the weakest prunable memories past the cap.
+
+        What the cap can remove: unpinned, underived rows that no derived row
+        cites, of any state, weakest first. What it cannot: pinned rows,
+        derived rows, and the sources a derived row cites, so a merge's
+        provenance stays on disk for as long as the merge does. When every
+        row is one of those, the store may sit above the cap.
+        """
         if self._db is None:
             return 0
         cap = max(10, int(max_rows or self.max_rows))
@@ -520,11 +564,20 @@ class MemoryStore:
                 # hard-won fact from week one to make room for this morning's
                 # sixth "disk is fine", which is exactly backwards. Anything
                 # consolidation derived is protected with the pinned entries:
-                # it is the distilled form of memories already let go.
+                # it is the distilled form of memories already let go. Its
+                # sources are protected too: dormant rows no longer decay, so
+                # without this they would be the first to go and the merge
+                # would cite ids that no longer exist. `sources` is stored as
+                # "1,2,3"; wrapping both sides in commas makes the LIKE match
+                # whole ids only, so 1 does not match 12.
                 cur = self._db.execute(
                     "DELETE FROM memories WHERE id IN ("
-                    "  SELECT id FROM memories WHERE pinned = 0 AND derived = 0"
-                    "  ORDER BY weight ASC, ts ASC LIMIT ?)", (total - cap,))
+                    "  SELECT m.id FROM memories m WHERE m.pinned = 0 AND m.derived = 0"
+                    "  AND NOT EXISTS (SELECT 1 FROM memories d"
+                    "    WHERE d.derived = 1 AND d.sources IS NOT NULL"
+                    "    AND ',' || REPLACE(d.sources, ' ', '') || ','"
+                    "        LIKE '%,' || m.id || ',%')"
+                    "  ORDER BY m.weight ASC, m.ts ASC LIMIT ?)", (total - cap,))
                 self._db.commit()
                 dropped = cur.rowcount
         except Exception as exc:

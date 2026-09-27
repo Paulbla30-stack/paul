@@ -211,7 +211,7 @@ class AgentLedger:
                 body = dict(body or {})
                 body.setdefault("by", stamp)
             try:
-                entry = self.writer.append(kind, body)
+                self.writer.append(kind, body)
             except (LedgerError, OSError, ValueError, TypeError) as e:
                 self._fail(f"append failed: {e}")
                 return False
@@ -263,5 +263,17 @@ class AgentLedger:
         return out
 
     def verify(self) -> dict:
-        """On-box convenience check. The audit that counts runs off-box."""
-        return verify_file(self.path, pubkey=self.pubkey).to_dict()
+        """On-box convenience check. The audit that counts runs off-box.
+
+        Pinned to the last checkpoint this process anchored, when there is
+        one. Without the pin a ledger rolled back behind that checkpoint
+        reads INTACT, because a shorter chain is still a valid chain. The
+        anchor only knows what it uploaded since this process started, so
+        after a restart the pin returns with the first successful upload.
+        """
+        pin = None
+        anchored = self.anchor.last_anchored
+        if anchored and anchored.get("entry_hash") is not None \
+                and anchored.get("seq") is not None:
+            pin = {"seq": anchored["seq"], "entry_hash": anchored["entry_hash"]}
+        return verify_file(self.path, pubkey=self.pubkey, pin=pin).to_dict()
