@@ -1455,7 +1455,13 @@ class AgentCore:
         # Options for Paul to tap, if the reply offers any. Taken out before
         # every check below, so the checks read the words he will read.
         from jarvis.agent import choices as _choices
+        raw_answer = answer
         answer, self.last_chat_choices = _choices.split(answer)
+        if self.last_chat_choices is None and answer != raw_answer:
+            # Jarvis's own suggestion, 27 September: keep a trace of a block that
+            # did not check out, for audit only. The raw text is not logged.
+            self.log.warning("Dropped a malformed choices block (%d chars)",
+                             len(raw_answer or "") - len(answer or ""))
         answer, paths = self._check_answer_paths(answer) if answer else (answer, None)
         # And what it claimed, against what is actually so. The path check
         # above asks whether a path exists; this asks whether the assertion

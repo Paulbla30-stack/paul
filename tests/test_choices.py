@@ -93,5 +93,19 @@ class TestChatRoute(TestUiListener):
                 runner.stop_status_server()
 
 
+@needs_sdk
+class TestMalformedIsLogged(unittest.TestCase):
+
+    def test_a_dropped_block_leaves_a_trace_without_its_text(self):
+        with FakeClaude() as api:
+            agent = make_agent(make_brain(api.url))
+            api.respond_with(lambda r: message('Answer.\n```choices\n{"question": "SECRETQ", "options": ["x"]}\n```'))
+            with self.assertLogs(agent.log, level="WARNING") as seen:
+                answer = agent.chat([{"role": "user", "content": "hi"}])
+            self.assertIsNone(agent.last_chat_choices)
+            self.assertIn("Answer.", answer)
+            self.assertTrue(any("malformed choices block" in m for m in seen.output))
+            self.assertFalse(any("SECRETQ" in m for m in seen.output))
+
 if __name__ == "__main__":
     unittest.main()
