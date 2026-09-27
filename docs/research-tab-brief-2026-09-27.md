@@ -12,6 +12,17 @@
 - It is **shared**. Paul and Jarvis both work in it. Paul gives a direction. Jarvis then runs automated work within that direction and tests his own ideas. Paul can join in at any point.
 - **Either of them can start a project.** Paul describes one. Jarvis can also propose one, and it becomes a proposal card that Paul accepts, edits or declines before any work is done. This uses the permission spine's existing proposal pattern. (Paul, 27 September.)
 
+## Stopping and pausing (Paul, 27 September)
+
+Jarvis must be able to stop or pause a project himself, and say why, in four situations:
+
+- **Time out.** A project has a time and cost budget. When the budget runs out, the project stops. It records where it got to, what it spent and what is still open, so that Paul can extend it, redirect it or close it.
+- **Clarification.** When Jarvis cannot go on without Paul's judgement (an ambiguous direction, a choice between routes of similar value, or something outside what Paul asked for), he pauses the project and puts one specific question to Paul. Work waits for the answer rather than guessing.
+- **Not working.** Jarvis pauses when the evidence says he is stuck. Signs include several cycles with no new finding that holds up, the same approach failing repeatedly, and spending that keeps rising while value stays flat. He says what he tried, why he thinks it is not working, and what he would try instead, then waits for Paul's decision.
+- **Breakthrough.** When a finding scores unusually high on value, or passes its checks and changes the direction of the project, Jarvis stops before building on it. He tells Paul with the evidence, so that Paul can review it before it becomes a lesson or steers the next cycle. A claimed breakthrough gets more checking, not less.
+
+Every pause and stop shows on the project in the Research tab. Each is recorded on the ledger with its reason, and the reason is also a lesson for the Review stage. Paul can resume, redirect or close the project from the same place. Jarvis never resumes a project that was paused for clarification or for a breakthrough without Paul's answer.
+
 ## How the brief is read (agreed on 27 September; Paul replied "Cool thanks")
 
 - **Plan.** Split the question into sub-questions, and say what would count as an answer to each.
