@@ -17,6 +17,9 @@ So, before changing Jarvis:
   Its `/chat` endpoint takes `{"messages":[...]}` over the loopback port; a chat
   turn is recorded on the Glass Ledger as a `thought` entry, so the exchange
   becomes part of the record rather than living only in a transcript.
+  Send it with `aws/scripts/jarvis_chat.py --file message.txt`, never by
+  building a curl line: on 27 September backticks in a message were executed
+  as root by the box's shell.
 - **Ask what it thinks, and report the answer honestly** — including where it
   disagrees, and including where it is wrong. Accepting a correction that is not
   correct is its own kind of dishonesty.
