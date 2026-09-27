@@ -104,6 +104,42 @@ class TestParsePlan(unittest.TestCase):
         self.assertEqual(len(fake.calls), 1)
         self.assertEqual(decision.task.description, "Measure root usage")
 
+    HUNCH = {"about": "/var/log", "feeling": "grows", "despite": "df ok",
+             "expect": "growth", "confidence": 0.3}
+
+    def test_plan_missing_its_last_brace_is_not_read_as_its_hunch(self):
+        # Scanning on from the unbalanced plan reaches the nested hunch,
+        # which parses cleanly; it must not be taken for the plan.
+        text = json.dumps(plan(hunch=dict(self.HUNCH)))[:-1]
+        for prefix in ("", self.PROSE):
+            with self.subTest(prefix=prefix):
+                with self.assertRaises(ValueError) as cm:
+                    BaseBrain._parse_plan(prefix + text)
+                self.assertIn("unterminated", str(cm.exception))
+
+    def test_unescaped_quote_does_not_hand_over_the_hunch(self):
+        # One stray quote (a 5" disk) throws the brace matching off for the
+        # outer object, leaving the hunch as the first balanced candidate.
+        text = ('{"reasoning": "the 5" disk", "task_type": "none", '
+                '"hunch": ' + json.dumps(self.HUNCH) + '}')
+        with self.assertRaises(ValueError):
+            BaseBrain._parse_plan(text)
+
+    def test_object_without_task_type_is_skipped_for_the_plan(self):
+        text = 'See {"x": 1} then ' + json.dumps(plan(task_type="none"))
+        self.assertEqual(BaseBrain._parse_plan(text)["task_type"], "none")
+        with self.assertRaises(ValueError):
+            BaseBrain._parse_plan('Only {"x": 1} here.')
+
+    def test_bedrock_re_asks_when_the_plan_loses_its_last_brace(self):
+        text = json.dumps(plan(hunch=dict(self.HUNCH)))[:-1]
+        brain, fake = make_brain([converse_response(text),
+                                  converse_response(json.dumps(plan()))])
+        decision = brain.plan(make_agent(brain), {})
+        self.assertEqual(len(fake.calls), 2)
+        self.assertFalse(decision.idle)
+        self.assertEqual(decision.task.description, "Measure root usage")
+
     def test_a_non_object_plan_hands_over_to_the_fallback(self):
         # Retries exhausted on a list: plan() says "could not decide" (None)
         # rather than an idle decision nobody asked for.

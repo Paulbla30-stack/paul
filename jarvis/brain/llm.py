@@ -1053,21 +1053,33 @@ class BaseBrain:
         start = text.find("{")
         if start < 0:
             raise ValueError("no JSON object in model output")
-        error = "unterminated JSON object in model output"
+        unterminated = False
+        error = ""
         while start >= 0:
             end = BaseBrain._matching_brace(text, start)
             if end < 0:
                 # Unbalanced from here, perhaps a stray brace or quote in
                 # prose; the object may still start further on.
+                unterminated = True
                 start = text.find("{", start + 1)
                 continue
             try:
-                return json.loads(text[start:end + 1])
+                found = json.loads(text[start:end + 1])
             except ValueError as e:
                 error = str(e)
-            # Resume after the whole candidate, not inside it, so an object
-            # nested in a broken plan is never taken for the plan.
+            else:
+                # Scanning on past an unbalanced brace can land inside the
+                # plan itself, and every plan carries a nested hunch object.
+                # Only an object with a task_type is taken for the plan, so a
+                # plan missing its last '}' is an error (and Bedrock re-asks)
+                # rather than its hunch standing in for it.
+                if isinstance(found, dict) and "task_type" in found:
+                    return found
+                error = error or "JSON object in model output has no task_type"
+            # Resume after the whole candidate, not inside it.
             start = text.find("{", end + 1)
+        if unterminated:
+            raise ValueError("unterminated JSON object in model output")
         raise ValueError(error)
 
     @staticmethod
