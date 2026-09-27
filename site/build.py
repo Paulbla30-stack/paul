@@ -33,7 +33,22 @@ LIVE = os.path.join(HERE, "live")
 OUT = os.path.join(HERE, "release")
 DRAFTS = os.path.join(HERE, "..", "docs", "site-drafts-2026-09-27")
 PAGES = ("index.html", "404.html")     # every HTML page the site serves
-NEW_PAGES = {"privacy": "privacy.html", "mission": "mission.html", "moat": "moat.html"}
+NEW_PAGES = {"privacy": "privacy.html", "mission": "mission.html", "moat": "moat.html",
+             "advisory": "advisory.html"}
+
+# Paul, 27 September: consultancy and advisory, "all filter through the contact
+# funnel". Links from the Advisory page carry ?enquiry=consultancy|advisory;
+# this fills the enquiry box so the message says which, and nothing else changes.
+PREFILL = """<script>
+(function () {
+  var kind = new URLSearchParams(location.search).get("enquiry");
+  var labels = {consultancy: "Consultancy enquiry (healthcare)", advisory: "Advisory enquiry (teams)"};
+  var box = document.getElementById("f-msg");
+  if (!box || !labels[kind] || box.value) return;
+  box.value = labels[kind] + ": ";
+  box.placeholder = "Tell me about the setting, the team, and what you want to change.";
+})();
+</script>"""
 
 BEACON = re.compile(r'<script defer src="https://static\.cloudflareinsights\.com/beacon\.min\.js"'
                     r" data-cf-beacon='[^']*'></script>")
@@ -59,6 +74,16 @@ def edit_page(html: str, path: str, load: str) -> str:
                         '<div><b>About</b><a href="/mission/">Mission</a><br><a href="/founder/">Founder</a>')
     html = html.replace('<div class="small"><a href="/sovereignty/">',
                         '<div class="small"><a href="/mission/">Mission</a> · <a href="/sovereignty/">')
+    # Advisory goes between Founder and Contact in both menus. The current
+    # page's link carries class="on", so match the tags, not fixed text.
+    if '>Advisory</a>' not in html:
+        html = re.sub(r'(<a href="/founder/"[^>]*>Founder</a>)(<a href="/contact/")',
+                      r'\1<a href="/advisory/">Advisory</a>\2', html)
+    if path == "advisory/index.html":
+        html = html.replace('<a href="/advisory/">Advisory</a>', '<a href="/advisory/" class="on">Advisory</a>')
+    html = html.replace('<a href="/founder/">Founder</a><br><a href="/story/">',
+                        '<a href="/founder/">Founder</a><br><a href="/advisory/">Consultancy &amp; advisory</a>'
+                        '<br><a href="/story/">')
     html = html.replace('<span>Papers CC BY 4.0 · Code MIT</span>',
                         '<span>Papers CC BY 4.0 · Code MIT · '
                         '<a href="/privacy/#analytics">Visit counting: opt out</a></span>')
@@ -67,6 +92,18 @@ def edit_page(html: str, path: str, load: str) -> str:
             '<button class="send" type="submit">Send enquiry</button>',
             '<button class="send" type="submit">Send enquiry</button>\n'
             '  <p class="small">How I handle what you send: <a href="/privacy/">Privacy</a>.</p>', 1)
+        html = html.replace(
+            'deployment questions, the instruments in use, field returns and null results, structured review, '
+            'speaking, or anything the papers left you wanting to argue about.</p>',
+            'deployment questions, the instruments in use, field returns and null results, structured review, '
+            'speaking, <a href="/advisory/">consultancy and advisory work</a>, or anything the papers left you '
+            'wanting to argue about.</p>', 1)
+        html = html.replace("</form>", "</form>\n" + PREFILL, 1)
+    if path == "founder/index.html":
+        html = html.replace(
+            "Nothing on this site is for sale, and there is no team behind the address:",
+            'The framework is not for sale &mdash; my time is, through <a href="/advisory/">consultancy and '
+            'advisory</a> &mdash; and there is no team behind the address:', 1)
     if path == "argument/index.html":
         anchor = 'the record instrument that operationalises it is <a href="/instruments/record/">the Glass Ledger</a>.</p>'
         html = html.replace(anchor, anchor + '\n<p>Why the approach holds, and why the gate comes first, '
@@ -95,7 +132,7 @@ def build() -> list:
     sm = os.path.join(OUT, "sitemap.xml")
     with open(sm, encoding="utf-8") as fh:
         xml = fh.read()
-    for page in ("mission", "moat"):
+    for page in ("mission", "moat", "advisory"):
         url = f"https://heartbeat-framework.org/{page}/"
         if url not in xml:
             xml = xml.replace("</urlset>", f"  <url><loc>{url}</loc></url>\n</urlset>")
@@ -108,7 +145,8 @@ def build() -> list:
         text = text.replace("- Argument: https://heartbeat-framework.org/argument/",
                             "- Mission: https://heartbeat-framework.org/mission/\n"
                             "- Argument: https://heartbeat-framework.org/argument/\n"
-                            "- The Moat: https://heartbeat-framework.org/moat/", 1)
+                            "- The Moat: https://heartbeat-framework.org/moat/\n"
+                            "- Consultancy & advisory: https://heartbeat-framework.org/advisory/", 1)
     with open(llms, "w", encoding="utf-8") as fh:
         fh.write(text)
     return check()
@@ -132,13 +170,15 @@ def check() -> list:
                 problems.append(f"{rel}: Cloudflare challenge script authored into the page")
             if '<a href="/mission/">Mission</a><br><a href="/founder/">' not in html:
                 problems.append(f"{rel}: footer has no Mission link")
+            if not re.search(r'<a href="/advisory/"[^>]*>Advisory</a>', html) and rel != "404.html":
+                problems.append(f"{rel}: navigation has no Advisory link")
             if '<a href="/privacy/#analytics">Visit counting: opt out</a>' not in html:
                 problems.append(f"{rel}: footer has no opt-out link")
             if "[CONFIRM" in html and rel != "privacy/index.html":
                 problems.append(f"{rel}: unresolved [CONFIRM] marker")
     with open(os.path.join(OUT, "sitemap.xml"), encoding="utf-8") as fh:
         xml = fh.read()
-    for page in ("mission", "moat", "privacy"):
+    for page in ("mission", "moat", "privacy", "advisory"):
         if f"https://heartbeat-framework.org/{page}/" not in xml:
             problems.append(f"sitemap.xml: /{page}/ missing")
     print(f"{pages} pages checked, {len(problems)} problem(s)")

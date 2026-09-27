@@ -6,6 +6,7 @@
 - Mission: https://heartbeat-framework.org/mission/
 - Argument: https://heartbeat-framework.org/argument/
 - The Moat: https://heartbeat-framework.org/moat/
+- Consultancy & advisory: https://heartbeat-framework.org/advisory/
 - Instruments (eight, in deployment order): https://heartbeat-framework.org/instruments/
 - Papers (twenty-two records): https://heartbeat-framework.org/papers/
 - Implementation: https://heartbeat-framework.org/implementation/
