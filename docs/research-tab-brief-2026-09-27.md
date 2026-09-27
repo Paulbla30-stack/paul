@@ -28,7 +28,12 @@ Every pause and stop shows on the project in the Research tab. Each is recorded 
 Jarvis must learn to tell a line of work that is genuinely pulling somewhere from one that is wasting time.
 
 - **Judged on outcomes, not on how interesting it feels.** Each thread is scored afterwards on what it actually produced: findings that held up, lessons Paul accepted, questions it closed. That score is set against what the thread cost in time and model calls. The score feeds the value function.
-- **Novelty is not pull.** Taste pushes Jarvis towards new ground. A thread that stays novel but never produces anything that holds up is scored as a waste, and the taste function learns that too.
+- **Intrigue counts, as instinct (Paul: "often interesting and intrigue is an instinctual pull").** Being drawn to something before there is a result is a real signal, not noise, and must not be squeezed out by short-term scoring. So:
+  - **Intrigue has a protected budget.** A set share of each project's time and calls is kept for following intrigue with no result demanded up front. Results-led work cannot spend it.
+  - **Intrigue gets a longer horizon.** A thread followed on intrigue is not written off as waste after a few quiet cycles. It is parked, not closed, and credited later if it turns out to have led somewhere, even in a different project.
+  - **Jarvis says when intrigue is the reason.** He records "I'm following this because it's intriguing" and what caught him, as a hunch rather than a finding. Hunches already exist in his memory (`jarvis/agent/hunches.py`) as hypotheses, not facts.
+  - **His instinct is calibrated over time.** How often his intrigue eventually pays off is measured across projects, alongside Paul's. The aim is to sharpen the instinct, not replace it with a score. A thread that stays merely novel for a long time with nothing behind it still moves slowly towards "waste", but on a horizon measured in weeks, not cycles.
+  - **Paul's intrigue counts too.** When Paul says "that's interesting, look into it", the thread gets the same protected treatment.
 - **Paul's verdicts calibrate it.** "That was worth it" and "that was a waste of time" are recorded, with a reason where he gives one. Over time Jarvis's own estimate of pull should agree with Paul's. The rate at which they agree is measured and shown, so everyone can see whether his judgement is actually improving.
 - **What he learns carries forward.** Patterns of waste (a kind of source, a kind of question, an approach) become lessons that the Plan stage reads first. They pass through the same Elevate checks as any other lesson.
 
