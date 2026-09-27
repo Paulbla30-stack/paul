@@ -223,6 +223,8 @@ class AgentCore:
         # reason to conclude something is wrong with it.
         from jarvis.agent import lab as _lab
         self.lab = _lab.LabSession(self)
+        # Options the last chat reply offered Paul, if any; see choices.py.
+        self.last_chat_choices = None
         # Its side of the conversation. Consultation ran one way until now:
         # a reviewer could ask it anything and it could start nothing. Asked
         # what would make this a bad idea, it gave the best argument against
@@ -1450,6 +1452,10 @@ class AgentCore:
         extra = {"settings": settings} if settings is not None else {}
         observations = self.observe()
         answer = self.brain.chat(self, turns, observations, **extra)
+        # Options for Paul to tap, if the reply offers any. Taken out before
+        # every check below, so the checks read the words he will read.
+        from jarvis.agent import choices as _choices
+        answer, self.last_chat_choices = _choices.split(answer)
         answer, paths = self._check_answer_paths(answer) if answer else (answer, None)
         # And what it claimed, against what is actually so. The path check
         # above asks whether a path exists; this asks whether the assertion

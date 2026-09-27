@@ -615,11 +615,49 @@
   function renderChat() {
     const box = $("messages"); box.innerHTML = "";
     if (!turns.length) { const d = document.createElement("div"); d.className = "msg sys"; d.textContent = "Ask the agent about the machine, its goals, or an uploaded file."; box.appendChild(d); }
-    for (const t of turns) { const d = document.createElement("div"); d.className = "msg " + (t.role === "user" ? "user" : t.role === "assistant" ? "agent" : "sys"); d.textContent = t.content; box.appendChild(d); }
+    turns.forEach((t, i) => {
+      const d = document.createElement("div"); d.className = "msg " + (t.role === "user" ? "user" : t.role === "assistant" ? "agent" : "sys"); d.textContent = t.content; box.appendChild(d);
+      if (t.choices && !t.chosen && i === turns.length - 1) box.appendChild(choiceCard(t));
+    });
     window.scrollTo(0, document.body.scrollHeight);
   }
+  // The option window (Paul, 27 September). Jarvis offers two to four
+  // options; Paul taps one, ticks several, or writes his own. What he picks
+  // is sent as an ordinary message from him: a button grants nothing. All
+  // of it is model text, so all of it goes in as text.
+  function choiceCard(t) {
+    const c = t.choices, card = document.createElement("div");
+    card.className = "card"; card.style.margin = "6px 0 10px";
+    const q = document.createElement("p"); q.textContent = c.question; q.style.margin = "0 0 8px"; card.appendChild(q);
+    const picked = new Set();
+    const send = (text) => { t.chosen = text; saveChat(); $("chatInput").value = text; sendChat(); };
+    for (const o of c.options) {
+      const b = document.createElement("button"); b.className = "ghost";
+      b.style.cssText = "display:block;width:100%;text-align:left;margin:0 0 6px;padding:8px 10px;height:auto";
+      const l = document.createElement("div"); l.textContent = (c.multi ? "☐ " : "") + o.label; l.style.fontWeight = "600"; b.appendChild(l);
+      if (o.description) { const dsc = document.createElement("div"); dsc.className = "small muted"; dsc.textContent = o.description; b.appendChild(dsc); }
+      b.addEventListener("click", () => {
+        if (!c.multi) { send(o.label); return; }
+        if (picked.has(o.label)) picked.delete(o.label); else picked.add(o.label);
+        l.textContent = (picked.has(o.label) ? "☑ " : "☐ ") + o.label;
+      });
+      card.appendChild(b);
+    }
+    const row = document.createElement("div"); row.className = "row wrap";
+    const other = document.createElement("input"); other.placeholder = "Other: say it your way"; other.style.flex = "1";
+    row.appendChild(other);
+    const go = document.createElement("button"); go.className = "btn"; go.textContent = "Send";
+    go.addEventListener("click", () => {
+      const own = other.value.trim();
+      const chosen = [...picked];
+      if (own) chosen.push(own);
+      if (chosen.length) send(chosen.join("; "));
+    });
+    row.appendChild(go); card.appendChild(row);
+    return card;
+  }
   function saveChat() { try { localStorage.setItem("jarvis.chat", JSON.stringify(turns.slice(-40))); } catch (e) {} }
-  function pushTurn(role, content) { turns.push({ role, content }); saveChat(); renderChat(); }
+  function pushTurn(role, content, choices) { const t = { role, content }; if (choices) t.choices = choices; turns.push(t); saveChat(); renderChat(); }
   window.sendChat = async function () {
     const text = $("chatInput").value.trim(); if (!text) return;
     $("chatInput").value = ""; $("chatInput").style.height = "auto";
@@ -662,9 +700,12 @@
     pushTurn("user", text);
     $("sendBtn").disabled = true;
     try {
-      const msgs = turns.filter(t => t.role === "user" || t.role === "assistant").slice(-12);
+      // The options Jarvis offered travel with his turn, so a tapped label
+      // reads as an answer to them rather than out of the blue.
+      const msgs = turns.filter(t => t.role === "user" || t.role === "assistant").slice(-12)
+        .map(t => ({ role: t.role, content: t.content + (t.choices ? "\n[Options offered: " + t.choices.options.map(o => o.label).join(" / ") + "]" : "") }));
       const r = await api("/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ messages: msgs }) });
-      pushTurn("assistant", r.answer || "(no answer)");
+      pushTurn("assistant", r.answer || "(no answer)", r.choices || null);
     } catch (e) { pushTurn("system", "Error: " + e.message); }
     $("sendBtn").disabled = false;
   };

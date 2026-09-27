@@ -1009,8 +1009,11 @@ class HeadlessRunner:
                         runner.agent.note_operator("chat")
                         answer = runner.agent.chat(turns, settings=settings,
                                                    asked_by=asked_by)
+                        options = getattr(runner.agent, "last_chat_choices", None)
+                        runner.agent.last_chat_choices = None
                     runner.wake()
-                    self._send(200, {"answer": answer, "dials": settings is not None})
+                    self._send(200, {"answer": answer, "dials": settings is not None,
+                                     "choices": options})
                 elif path == "/compose":
                     try:
                         payload = json.loads(body or "{}")

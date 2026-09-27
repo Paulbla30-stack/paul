@@ -286,7 +286,12 @@ location would be conventional, and never describe a directory tree you have not
 path has not been checked and what would check it. Every path you name is verified against the \
 filesystem after you answer, and invented ones are shown to the operator.
 
-Plain text, no JSON."""
+Plain text, no JSON, except the one optional choices block described below."""
+
+# The option window in chat (Paul, 27 September). The prompt text lives with
+# the parser in jarvis/agent/choices.py so the two cannot drift apart.
+from jarvis.agent.choices import PROMPT as _CHOICES_PROMPT  # noqa: E402
+ASK_PROMPT = ASK_PROMPT + "\n\n" + _CHOICES_PROMPT
 
 
 @dataclass
