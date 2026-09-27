@@ -10,7 +10,7 @@ The files follow the live theme v2 template (26 Sep 2026): the same head, `heade
 |---|---|---|
 | `privacy.html` | `/privacy/index.html` → https://heartbeat-framework.org/privacy/ | The corrected privacy page. It replaces the live page, which says "No analytics scripts". |
 | `mission.html` | `/mission/index.html` → https://heartbeat-framework.org/mission/ | New Mission page |
-| `moat.html` | `/moat/index.html` → https://heartbeat-framework.org/moat/ | New page, "The Only Moat Is the Record". The breadcrumb reads Home › Argument › The moat. |
+| `moat.html` | `/moat/index.html` → https://heartbeat-framework.org/moat/ | New page, "The Moat" (rewritten in Paul's words, 27 Sep). The breadcrumb reads Home › Argument › The moat. |
 
 **Before publishing, search every file for `[CONFIRM`.** The privacy page has five visible markers where a fact is still unknown, numbered here in page order (see section 8). Resolve each one and delete the marker. Do not publish a marker.
 
@@ -26,16 +26,15 @@ Alternatives:
 - **Descriptive** (from the Reading Map v1.4 opening line): "Team psychology for the 24-hour organisation, extended to the mixed human–machine shift. Twenty-two open-access records by a registered mental health nurse — the papers argue; the instruments do."
 - **Purposive** (from The Tenant's Record §5): "The instruments a care organisation needs to deploy and govern its own AI are written, published, and open access. The last respectable excuse for tenancy — we couldn't govern it ourselves — is now a download." Only use this with the "operations moat still stands" caveat and the "rent the sockets, own the gravity" distinction nearby. Without them it reads as "SaaS is dead", and the paper's §0 says that reading "has deleted the argument".
 
-## 3. Three moat bullets (for the home or sovereignty page)
+## 3. The moat, in Paul's words (27 September)
 
-- **Free to copy, by design.** Every record is open access under CC BY 4.0, with the Glass Ledger's code under MIT. The estate exists so that "we couldn't govern it ourselves" is no longer a reason to rent, so there is no fee and no registration wall.
-- **The record is what stays.** Twenty-two records deposited on Zenodo since 7 July 2026, an md5 checksum on every file, and one named author answering for all of it: a registered mental health nurse with sixteen years in clinical practice.
-- **Built to fit, and built to fail in public.** A Reading Map and an eight-stage Instrument Deck that name every source by DOI, a ledger anyone can verify with a public key, and predictions registered in advance (four in The Cultural Safety Case, four in The Second Pair of Hands, three in After the Machine), so the estate can be proved wrong in print.
+Paul's wording: "Clinically grounded approach to safe AI deployment. To provide a framework to put safety at the centre of deployment and to gatekeep negative environments from advanced AI. Due to the deployment risk equation."
 
-These differ from the earlier draft in three ways:
-- "Seven predictions" was wrong. The Second Pair of Hands §9 registers four more (P1 Training, P2 Monitoring, P3 Users, P4 Organisations; `21340572.pdf.txt` lines 528–556).
-- "Twenty-two DOIs" became "twenty-two records", because the Reading Map alone has three version DOIs and a concept DOI.
-- "Make … a download" was reworded.
+The moat page was rewritten from that. The earlier draft argued the moat from the record itself (its dates, checksums and authorship) and was longer. Three bullets for the home or sovereignty page:
+
+- **Clinically grounded.** A framework for safe AI deployment, written from sixteen years of clinical practice.
+- **Safety at the centre.** Safety is part of deployment itself, not something checked afterwards.
+- **A gate, because of the equation.** Deployment risk is capability multiplied by culture. An advanced system amplifies whatever environment it joins, so negative environments are kept out until the culture is right. The Instrument Deck's first stage is the Readiness Gate.
 
 ## 4. Navigation, footer and other site-wide changes
 
@@ -175,7 +174,7 @@ The live page is dated "LAST UPDATED · 25 AUGUST 2026", and its full text is in
 - "Lift one page, and its cross-references still point to the rest" became "A single worksheet can be lifted; the cross-referenced system it belongs to cannot be, without re-deriving it".
 - Card key "FIRST DEPOSIT" became "RECORD". The trilogy and The Character Pathway share the 7 July creation date.
 - Added Mission and the opt-out link to the menu and footer.
-- Slug and title are kept: `/moat/`, "The Only Moat Is the Record". The Tenant's Record uses "moat" to mean a barrier the estate removes by publishing. A title claiming the estate has an exclusive moat would contradict that. The page claims only what copying cannot take.
+- Superseded on 27 September: the page is now "The Moat", in Paul's own framing. Worth knowing: The Tenant's Record uses "moat" for the barrier vendors keep and the estate removes by publishing. The new page does not claim exclusivity; it describes the approach and the gate.
 - **Not yet rendered:** `ul.map` with `span.r` exists in `/style.css` (lines 202–203, and a single column at phone width, line 235) but no live page uses it.
 
 ## 7. Errors on the live site outside these three files (not changed here)
