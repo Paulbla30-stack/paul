@@ -122,6 +122,18 @@ class TestTaskHistoryIsBounded(unittest.TestCase):
                          "look around")
         self.assertEqual(agent.task_history[0]["task"]["description"], "old 1")
 
+    def test_completed_tasks_keeps_counting_past_the_trim(self):
+        from jarvis.agent.core import AgentCore
+        from jarvis.agent.planner import Task, TaskType
+        agent = AgentCore({"name": "t", "profile": "cloud"},
+                          {"display": None, "input": None, "memory": None,
+                           "storage": None}, LOG)
+        for i in range(1001):
+            agent.act(Task(priority=5, description=f"look {i}",
+                           task_type=TaskType.OBSERVATION))
+        self.assertEqual(len(agent.task_history), 1000)
+        self.assertEqual(agent.get_status()["completed_tasks"], 1001)
+
 
 # ---- C3: the diary wrote every commitment back on every tick --------------
 
@@ -272,6 +284,43 @@ class TestAPlaceStopsWhereTheWhenBegins(unittest.TestCase):
         got = self.span("friday 2pm to 4pm at the office")
         self.assertEqual((got["where"], got["minutes"]), ("the office", 120))
 
+    def test_a_month_first_date_after_a_place(self):
+        # Month names were not stop words, so the place took the month and
+        # left "3" behind, which was refused. These parsed before the split.
+        got = self.span("in Leeds October 3")
+        self.assertEqual((got["where"], got["start_local"]),
+                         ("Leeds", "2026-10-03T00:00"))
+        got = self.span("at the office Oct 3 1pm")
+        self.assertEqual((got["where"], got["start_local"]),
+                         ("the office", "2026-10-03T13:00"))
+        got = self.span("at Nandos December 24 7pm")
+        self.assertEqual((got["where"], got["start_local"]),
+                         ("Nandos", "2026-12-24T19:00"))
+        got = self.span("dentist in Leeds October 3")
+        self.assertEqual((got["where"], got["start_local"]),
+                         ("Leeds", "2026-10-03T00:00"))
+        self.assertEqual(self.span("trip in october 3")["start_local"],
+                         "2026-10-03T00:00")
+
+    def test_a_month_word_alone_can_be_part_of_a_place(self):
+        got = self.span("drinks at May's friday 7pm")
+        self.assertEqual((got["where"], got["start_local"]),
+                         ("May's", "2026-09-25T19:00"))
+
+    def test_what_the_place_split_breaks_falls_back_to_the_whole(self):
+        # A when the stop words do not know still parses as it did before a
+        # place was split off, with no place, rather than being refused.
+        real = sc._split_place
+        sc._split_place = lambda raw: ("Leeds", "3")
+        try:
+            got = self.span("in Leeds October 3")
+        finally:
+            sc._split_place = real
+        self.assertEqual((got["where"], got["start_local"]),
+                         ("", "2026-10-03T00:00"))
+        with self.assertRaises(d.Refused):
+            self.span("tea at home")
+
     def test_a_time_of_day_is_not_a_place(self):
         self.assertEqual(self.span("friday in the morning")["where"], "")
         self.assertEqual(self.span("tomorrow at noon")["where"], "")
@@ -345,6 +394,7 @@ class TestTheRegisterLetsHistoryGo(unittest.TestCase):
         for i in range(60):
             self.clock.t += 1
             self.reg.answer(self.ask(i).id, "No.", by="Paul")
+        self.clock.t += q.SUBJECT_WINDOW_S + 60
         self.reg.sweep()
         answered = [x for x in self.reg.questions if x.state == q.ANSWERED]
         self.assertEqual(len(answered), q.KEEP_ANSWERED)
@@ -355,6 +405,23 @@ class TestTheRegisterLetsHistoryGo(unittest.TestCase):
             self.reg.ask("Should the interval for service59 alpha59 beta59 "
                          "change, put another way?", blocked_on="still")
         self.assertIn("already ruled on", str(why.exception))
+
+    def test_a_ruling_made_today_outlasts_fifty_more_answers(self):
+        self.clock.t += 1
+        self.reg.answer(self.ask(0).id, "No.", by="Paul")
+        for i in range(1, 1 + q.KEEP_ANSWERED):
+            self.clock.t += 60
+            self.reg.answer(self.ask(i).id, "No.", by="Paul")
+        self.reg.sweep()
+        with self.assertRaises(q.Refused) as why:
+            self.reg.ask("Should the interval for service0 alpha0 beta0 "
+                         "change, put another way?", blocked_on="still")
+        self.assertIn("already ruled on", str(why.exception))
+        # Once the day is out, the count applies and it may be asked again.
+        self.clock.t += q.SUBJECT_WINDOW_S
+        self.reg.sweep()
+        self.reg.ask("Should the interval for service0 alpha0 beta0 "
+                     "change, put another way?", blocked_on="still")
 
     def test_closed_questions_go_after_a_week(self):
         expired = self.ask(1, ttl_s=60)

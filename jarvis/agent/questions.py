@@ -39,9 +39,9 @@ expires: not after one cycle, which it proposed and which would kill every
 question before a reviewer ever connected, but when the thing it was blocked
 on resolves, or after a bounded wall-clock window. Nothing accumulates:
 expired and withdrawn questions are let go a week after they were asked, and
-only the fifty most recent answers are kept. That is also what bounds "already
-ruled on": a ruling older than the last fifty answers can be asked about
-again. The answer itself is not lost with it -- it went into memory as a
+only the fifty most recent answers are kept, along with any answered in the
+last day. That is also what bounds "already ruled on": a ruling more than a
+day old and older than the last fifty answers can be asked about again. The answer itself is not lost with it -- it went into memory as a
 verdict when it was given -- and the register is not persisted, so it starts
 empty after a restart in any case.
 """
@@ -62,8 +62,9 @@ SUBJECT_WINDOW_S = 24 * 3600
 # A hard ceiling on what can be waiting at once, so a loop cannot fill it.
 MAX_OPEN = 12
 # How long a question that died unanswered is kept for reading, and how many
-# answers are kept for "already ruled on". Both longer than SUBJECT_WINDOW_S,
-# so letting them go never lets a subject be pressed a third time in a day.
+# answers are kept for "already ruled on". Nothing younger than
+# SUBJECT_WINDOW_S is let go under either, so letting them go never lets a
+# subject be pressed a third time in a day.
 KEEP_CLOSED_S = 7 * 86_400
 KEEP_ANSWERED = 50
 
@@ -270,8 +271,9 @@ class QuestionRegister:
         """Expire what has gone stale, and let old history go.
 
         Returns how many were expired on this pass. Expired and withdrawn
-        questions older than KEEP_CLOSED_S are dropped, and only the most
-        recent KEEP_ANSWERED answers are kept; open questions never are.
+        questions older than KEEP_CLOSED_S are dropped, and answers beyond the
+        most recent KEEP_ANSWERED are dropped once they are more than
+        SUBJECT_WINDOW_S old; open questions never are.
         """
         now = self._clock() if now is None else now
         gone = 0
@@ -282,7 +284,10 @@ class QuestionRegister:
                 gone += 1
         answered = sorted((q for q in self.questions if q.state == ANSWERED),
                           key=lambda q: q.answered_at or q.asked_at)
-        forget = {id(q) for q in answered[:max(0, len(answered) - KEEP_ANSWERED)]}
+        # KEEP_ANSWERED is a count, so a busy day could push out a ruling
+        # made that morning; the day's answers are kept whatever the count.
+        forget = {id(q) for q in answered[:max(0, len(answered) - KEEP_ANSWERED)]
+                  if now - (q.answered_at or q.asked_at) > SUBJECT_WINDOW_S}
         self.questions = [
             q for q in self.questions
             if id(q) not in forget

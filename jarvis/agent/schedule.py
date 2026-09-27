@@ -97,6 +97,12 @@ _WEEKDAY_WORDS = frozenset(
 _PLACE_STOPS = _WEEKDAY_WORDS | frozenset(
     ("today", "tomorrow", "tonight", "morning", "afternoon", "evening",
      "midday", "noon", "midnight", "for", "to", "until", "till"))
+# A month name only ends a place when a number follows it ("in Leeds
+# October 3"): on its own it may be part of the place ("at May's").
+_MONTH_WORD = re.compile(
+    r"^(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?"
+    r"|aug(?:ust)?|sept?(?:ember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)"
+    r"\.?$")
 # Words that join a place to the when ("at the office on friday") and so are
 # left with the when rather than kept on the end of the place.
 _PLACE_TRAILERS = frozenset(("on", "at", "in", "from", "by", "the", "a", "an"))
@@ -142,6 +148,9 @@ def _split_place(raw: str) -> tuple:
                 break
             if bare == "day" and bares[i + 1:i + 3] == ["after", "tomorrow"]:
                 break
+            if _MONTH_WORD.match(bare) and i + 1 < len(words) and \
+                    _CLOCKISH.search(words[i + 1].group(0)):
+                break
             kept.append(word)
             if token[-1] in ",;":
                 break
@@ -174,8 +183,22 @@ def parse_span(text: str, now: Optional[float] = None,
 
     where, rest = _split_place(raw)
     if where:
-        raw = rest or raw
+        try:
+            return _parse_span(rest or raw, where, now, tz)
+        except Refused as first:
+            # Taking a place out can take part of the when with it, in a form
+            # the stop words do not know. What parsed before a place was split
+            # off still parses: fall back to the whole text with no place, and
+            # if that fails too, give the refusal for what was actually tried.
+            try:
+                return _parse_span(raw, "", now, tz)
+            except Refused:
+                raise first
+    return _parse_span(raw, "", now, tz)
 
+
+def _parse_span(raw: str, where: str, now: float, tz: str) -> dict:
+    """parse_span once the place, if any, has been taken out of raw."""
     minutes = _span_minutes(raw)
     head = _FOR.sub("", raw).strip() if minutes is not None else raw
 

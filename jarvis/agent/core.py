@@ -295,6 +295,9 @@ class AgentCore:
         self.cycle_count = 0
         self.current_task: Optional[Task] = None
         self.task_history: list[dict] = []
+        # task_history is trimmed, so its length stops counting at the trim.
+        # This is how many tasks this process has actually completed.
+        self.tasks_completed = 0
 
     def _restore_notes(self):
         """Refill the note cache from durable memory after a restart.
@@ -974,6 +977,7 @@ class AgentCore:
         # Every reader slices the tail; 1000 is well past the longest of them.
         # Trimmed in place so anything holding the list sees the same object.
         del self.task_history[:-1000]
+        self.tasks_completed = getattr(self, "tasks_completed", 0) + 1
 
         return result
 
@@ -1694,7 +1698,8 @@ class AgentCore:
             "current_task": (self.current_task.to_dict()
                              if self.current_task else None),
             "pending_tasks": len(self.planner.pending_tasks),
-            "completed_tasks": len(self.task_history),
+            "completed_tasks": getattr(self, "tasks_completed",
+                                       len(self.task_history)),
             "memory_entries": len(self.memory),
             "hardware": {
                 k: v is not None for k, v in self.hardware.items()
