@@ -15,7 +15,7 @@ warranted and a fact is weighed.
 import logging
 import unittest
 
-from jarvis.agent import faults
+from vigil.agent import faults
 
 LOG = logging.getLogger("test")
 NOW = 1_800_000_000.0
@@ -38,7 +38,7 @@ class TestTheDetectorsFindTheirRealIncident(unittest.TestCase):
     def test_invented_path(self):
         """The planner wrote a check against a log directory that never existed."""
         got = named(scan(("alert", NOW - 60, {"alert": "unverified_path",
-                                              "path": "/var/log/jarvis/scan.log"})),
+                                              "path": "/var/log/vigil/scan.log"})),
                     "invented_path")
         self.assertIsNotNone(got)
         self.assertEqual(got["times"], 1)

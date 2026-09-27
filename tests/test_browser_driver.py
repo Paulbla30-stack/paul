@@ -18,8 +18,8 @@ up has already started doing the thing it is deciding about.
 
 import unittest
 
-from jarvis.browser.driver import Driver
-from jarvis.browser.page import Field, Link, Page
+from vigil.browser.driver import Driver
+from vigil.browser.page import Field, Link, Page
 
 
 def a_page(fields=(), links=(), url="https://example.com/"):
@@ -115,7 +115,7 @@ class TestFollowingDoesNotClick(unittest.TestCase):
         unchecked. This asserts the refusal through follow() rather than
         through open(), because that is where an untrusted address enters.
         """
-        from jarvis.browser import guard
+        from vigil.browser import guard
         driver = Driver()
         driver._last = a_page(links=[Link("L1", "Next", "http://169.254.169.254/")])
         with self.assertRaises(guard.Refused) as caught:
@@ -123,7 +123,7 @@ class TestFollowingDoesNotClick(unittest.TestCase):
         self.assertEqual(caught.exception.reason, guard.REASON_METADATA)
 
     def test_a_link_to_a_private_address_is_refused_when_followed(self):
-        from jarvis.browser import guard
+        from vigil.browser import guard
         driver = Driver()
         driver._last = a_page(links=[Link("L1", "Home", "http://127.0.0.1:8471/status")])
         with self.assertRaises(guard.Refused):
@@ -161,7 +161,7 @@ class TestPostingWaitsForPaul(unittest.TestCase):
     """The hard rule, at the driver: above the grant, before the browser."""
 
     def setUp(self):
-        from jarvis.browser.page import Control
+        from vigil.browser.page import Control
         self.driver = Driver()
         self.driver._last = Page(
             url="https://forum.test/thread", title="t", text="b",
@@ -171,19 +171,19 @@ class TestPostingWaitsForPaul(unittest.TestCase):
                       Control("C2", "Show 10 more", "button", in_form=False)))
 
     def test_a_submit_raises_needs_approval_with_the_publish_gate(self):
-        from jarvis.browser.driver import NeedsApproval
+        from vigil.browser.driver import NeedsApproval
         with self.assertRaises(NeedsApproval) as caught:
             self.driver.act("submit")
         self.assertEqual(caught.exception.gate, "publish")
 
     def test_pressing_a_button_inside_a_form_waits(self):
-        from jarvis.browser.driver import NeedsApproval
+        from vigil.browser.driver import NeedsApproval
         with self.assertRaises(NeedsApproval):
             self.driver.act("click", "C1")
 
     def test_pressing_a_button_outside_a_form_does_not_wait_here(self):
         """Fails for want of a browser, not by refusal: the gate let it through."""
-        from jarvis.browser.driver import NeedsApproval
+        from vigil.browser.driver import NeedsApproval
         with self.assertRaises(Exception) as caught:
             self.driver.act("click", "C2")
         self.assertNotIsInstance(caught.exception, NeedsApproval)
@@ -191,11 +191,11 @@ class TestPostingWaitsForPaul(unittest.TestCase):
 
     def test_needs_approval_is_a_permission_error_but_a_distinct_one(self):
         """The service must be able to tell 'ask Paul' from 'never'."""
-        from jarvis.browser.driver import NeedsApproval
+        from vigil.browser.driver import NeedsApproval
         self.assertTrue(issubclass(NeedsApproval, PermissionError))
 
     def test_it_is_raised_before_the_browser_is_started(self):
-        from jarvis.browser.driver import NeedsApproval
+        from vigil.browser.driver import NeedsApproval
         started = []
         self.driver._start = lambda: started.append(1)
         with self.assertRaises(NeedsApproval):
@@ -204,7 +204,7 @@ class TestPostingWaitsForPaul(unittest.TestCase):
 
     def test_paul_pressing_it_himself_is_not_asked(self):
         """operator=True: there is nobody to ask. Fails only for want of a browser."""
-        from jarvis.browser.driver import NeedsApproval
+        from vigil.browser.driver import NeedsApproval
         with self.assertRaises(Exception) as caught:
             self.driver.act("click", "C1", operator=True)
         self.assertNotIsInstance(caught.exception, NeedsApproval)
@@ -214,12 +214,12 @@ class TestPostingWaitsForPaul(unittest.TestCase):
         self.driver._last = a_page(fields=[SECRET])
         with self.assertRaises(PermissionError) as caught:
             self.driver.act("type", "F1", "hunter2", operator=True)
-        from jarvis.browser.driver import NeedsApproval
+        from vigil.browser.driver import NeedsApproval
         self.assertNotIsInstance(caught.exception, NeedsApproval)
 
     def test_typing_into_a_textarea_arms_the_page(self):
         """After composing, even a plain button waits."""
-        from jarvis.browser.driver import NeedsApproval
+        from vigil.browser.driver import NeedsApproval
         self.driver._typed_composing.add("F1")
         with self.assertRaises(NeedsApproval) as caught:
             self.driver.act("click", "C2")
@@ -227,7 +227,7 @@ class TestPostingWaitsForPaul(unittest.TestCase):
 
     def test_navigating_disarms_it(self):
         from unittest import mock
-        from jarvis.browser import driver as _drv
+        from vigil.browser import driver as _drv
         self.driver._typed_composing.add("F1")
         self.driver._start = lambda: None
         class _P:
@@ -244,8 +244,8 @@ class TestPostingWaitsForPaul(unittest.TestCase):
 class TestOriginTrustAtTheDriver(unittest.TestCase):
 
     def test_an_unapproved_site_while_signed_in_waits_with_the_origin_gate(self):
-        from jarvis.browser.driver import NeedsApproval
-        from jarvis.browser.page import Control
+        from vigil.browser.driver import NeedsApproval
+        from vigil.browser.page import Control
         d = Driver(persistent=True)
         d._last = Page(url="https://bank.test/", title="t", text="b",
                        controls=(Control("C1", "Show more", in_form=False),))
@@ -259,19 +259,19 @@ class TestElementsAreLocatedByStampNotPosition(unittest.TestCase):
 
     So a position-based locator drifts: on the first live proof the page's
     F12 resolved to a checkbox in the DOM and the fill failed. The extractor
-    now stamps data-jarvis-ref on each reported element and the driver locates
+    now stamps data-vigil-ref on each reported element and the driver locates
     by that stamp. Read from the source, so a rewrite back to nth() trips it.
     """
 
     def test_the_extractor_stamps_links_fields_and_controls(self):
-        from jarvis.browser.page import EXTRACT_JS
-        self.assertEqual(EXTRACT_JS.count("setAttribute('data-jarvis-ref'"), 3)
-        self.assertIn("data-jarvis-form", EXTRACT_JS)
+        from vigil.browser.page import EXTRACT_JS
+        self.assertEqual(EXTRACT_JS.count("setAttribute('data-vigil-ref'"), 3)
+        self.assertIn("data-vigil-form", EXTRACT_JS)
 
     def test_the_driver_locates_by_the_stamp(self):
         import ast, inspect, textwrap
         src = textwrap.dedent(inspect.getsource(Driver._act))
-        self.assertIn('data-jarvis-ref', src)
+        self.assertIn('data-vigil-ref', src)
         called = {n.func.attr for n in ast.walk(ast.parse(src))
                   if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)}
         self.assertNotIn("nth", called, "an element is being located by position again")

@@ -13,8 +13,8 @@ in a way nobody will notice in review.
 
 import unittest
 
-from jarvis.agent import authority
-from jarvis.agent.planner import Task, TaskType
+from vigil.agent import authority
+from vigil.agent.planner import Task, TaskType
 
 
 def task(which, **meta):
@@ -49,7 +49,7 @@ class TestWhatAGrantCannotDo(unittest.TestCase):
         process under a separate uid inside Chromium's sandbox, holding no
         credentials and no route to the metadata service.
         """
-        from jarvis.agent import tools
+        from vigil.agent import tools
         by_name = {t.name: t for t in tools.TOOLS}
         for name in authority.GRANTABLE:
             self.assertIn(name, by_name, f"{name} is grantable and is not a tool")
@@ -156,7 +156,7 @@ class TestTheGrantChangesExactlyOneThing(unittest.TestCase):
                 command)
 
     def test_a_changing_shell_command_is_refused_with_or_without_grants(self):
-        for command in ("rm -rf /tmp/x", "systemctl restart jarvis",
+        for command in ("rm -rf /tmp/x", "systemctl restart vigil",
                         "sed -i s/a/b/ /etc/passwd"):
             self.assertFalse(authority.review(self.shell(command), "proposer").allowed,
                              command)

@@ -1,12 +1,12 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
 Description: >
-  JARVIS connections, stage 1: the connect-broker Lambda and its table.
+  Vigil connections, stage 1: the connect-broker Lambda and its table.
   Keyless, public, read-only connections (weather, UK bank holidays,
-  Paul's own Zenodo records). Runs off Jarvis's box so that later stages
-  can hold Paul's keys somewhere Jarvis cannot read.
+  Paul's own Zenodo records). Runs off Vigil's box so that later stages
+  can hold Paul's keys somewhere Vigil cannot read.
 
-  Personal to JARVIS. Strictly firewalled from Arkin: the validator refuses
+  Personal to Vigil. Strictly firewalled from Arkin: the validator refuses
   thearkinsystem.co.uk outright. Nothing here is billed by the hour.
 
   NOT YET LINKED: no role outside this stack may invoke the function, and
@@ -19,7 +19,7 @@ Parameters:
     Description: >
       Comma-separated catalogue ids Paul has switched on, for example
       "open_meteo,uk_bank_holidays,zenodo". Empty means every connection is
-      off. Jarvis can switch a connection off; only this can switch one on.
+      off. Vigil can switch a connection off; only this can switch one on.
   ScoutTableName:
     Type: String
     Default: jarvis-scout
@@ -46,7 +46,7 @@ Resources:
     DeletionPolicy: Retain
     UpdateReplacePolicy: Retain
     Properties:
-      TableName: jarvis-connections
+      TableName: vigil-connections
       BillingMode: PAY_PER_REQUEST
       AttributeDefinitions:
         - {AttributeName: pk, AttributeType: S}
@@ -62,20 +62,20 @@ Resources:
       SSESpecification:
         SSEEnabled: true
       Tags:
-        - {Key: project, Value: jarvis-connect}
-        - {Key: owner, Value: jarvis}
+        - {Key: project, Value: vigil-connect}
+        - {Key: owner, Value: vigil}
 
   BrokerLogs:
     Type: AWS::Logs::LogGroup
     Properties:
-      LogGroupName: /aws/lambda/jarvis-connect-broker
+      LogGroupName: /aws/lambda/vigil-connect-broker
       RetentionInDays: !Ref LogRetentionDays
 
   BrokerFunction:
     Type: AWS::Serverless::Function
     DependsOn: BrokerLogs
     Properties:
-      FunctionName: jarvis-connect-broker
+      FunctionName: vigil-connect-broker
       CodeUri: src/
       Handler: app.handler
       Description: Stage 1 keyless connections. Read-only. Holds no secrets.
@@ -85,8 +85,8 @@ Resources:
           CONNECT_TABLE: !Ref ConnectionsTable
           ENABLED_CONNECTIONS: !Ref EnabledConnections
       Tags:
-        project: jarvis-connect
-        owner: jarvis
+        project: vigil-connect
+        owner: vigil
 
   # Least privilege. Its own table, a read-only Scan of the scout's table,
   # and its own log group. No Secrets Manager, no model service, no role
@@ -94,7 +94,7 @@ Resources:
   BrokerRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: jarvis-connect-broker-role
+      RoleName: vigil-connect-broker-role
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
@@ -118,11 +118,11 @@ Resources:
                 Action: [logs:CreateLogStream, logs:PutLogEvents]
                 Resource: !Sub '${BrokerLogs.Arn}:*'
       Tags:
-        - {Key: project, Value: jarvis-connect}
+        - {Key: project, Value: vigil-connect}
 
 Outputs:
   BrokerFunctionArn:
     Value: !GetAtt BrokerFunction.Arn
-    Description: Not granted to Jarvis's instance role yet; linking is a later step.
+    Description: Not granted to Vigil's instance role yet; linking is a later step.
   ConnectionsTableName:
     Value: !Ref ConnectionsTable

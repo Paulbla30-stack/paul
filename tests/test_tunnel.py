@@ -12,8 +12,8 @@ import os
 import tempfile
 import unittest
 
-from jarvis.agent.executor import check_command_allowed, normalise_shell_policy
-from jarvis.cloud import bootstrap, tunnel
+from vigil.agent.executor import check_command_allowed, normalise_shell_policy
+from vigil.cloud import bootstrap, tunnel
 
 
 class TestTokenFile(unittest.TestCase):
@@ -129,9 +129,9 @@ class TestTheAgentCannotTakeTheTunnel(unittest.TestCase):
         self.policy = normalise_shell_policy({"enabled": True})
 
     def test_the_token_and_the_binary_are_denied(self):
-        for command in ("cat /etc/jarvis/cloudflared.env",
-                        "grep TUNNEL /etc/jarvis/cloudflared.env",
-                        "cp /etc/jarvis/cloudflared.env /tmp/t",
+        for command in ("cat /etc/vigil/cloudflared.env",
+                        "grep TUNNEL /etc/vigil/cloudflared.env",
+                        "cp /etc/vigil/cloudflared.env /tmp/t",
                         "cloudflared tunnel run --token stolen",
                         "sudo cloudflared tunnel list",
                         "/usr/local/bin/cloudflared tunnel route dns x y"):

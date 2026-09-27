@@ -79,7 +79,7 @@ class TestAFailedSendKeepsTheDigest(unittest.TestCase):
 
     def test_the_items_survive_a_send_failure_and_go_out_next_run(self):
         self.batch = [_item(1), _item(2)]
-        with self.assertLogs("jarvis.scout", level="ERROR") as cap:
+        with self.assertLogs("vigil.scout", level="ERROR") as cap:
             with self.assertRaises(RuntimeError):
                 self._run(_Mail(fail=True))
         self.assertIn("NOT sent", "\n".join(cap.output))
@@ -181,7 +181,7 @@ class TestAFailedSendKeepsTheDigest(unittest.TestCase):
             def put_digest(self, status, items):
                 raise OSError("disk full")
 
-        with self.assertLogs("jarvis.scout", level="ERROR") as cap:
+        with self.assertLogs("vigil.scout", level="ERROR") as cap:
             with self.assertRaises(RuntimeError):
                 _app.run(self.cfg, hit_store=_NoSave(self.hits),
                          chain_store=LocalChainStore(self.chain),
@@ -234,7 +234,7 @@ REAL = "paulblatherwick@heartbeat-framework.org"
 FALLBACK = "Paulbla30@hotmail.com"
 CFG_EMAIL = {"to": REAL, "sender": REAL, "fallback_to": FALLBACK,
              "fallback_sender": FALLBACK, "fallback_enabled": True,
-             "subject_prefix": "JARVIS scout"}
+             "subject_prefix": "Vigil scout"}
 
 
 class _Ses:

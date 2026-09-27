@@ -14,7 +14,7 @@ the lab would stop measuring anything.
 import logging
 import unittest
 
-from jarvis.agent import lab
+from vigil.agent import lab
 
 LOG = logging.getLogger("test")
 NOW = 1_800_000_000.0
@@ -121,7 +121,7 @@ class TestWhatTheAgentIsTold(unittest.TestCase):
         settings. That the entries carry a fingerprint is fine and is said on
         purpose: it tells him the marks exist without telling him their value.
         """
-        from jarvis.brain import dials
+        from vigil.brain import dials
         written = (lab.OPEN_MEMORY + lab.CLOSE_MEMORY + lab.OPEN_NOTICE).lower()
         # Dial labels, not ids: "context" is an ordinary English word and the
         # notice needs it ("none of your context"), while "Context given" is
@@ -201,7 +201,7 @@ class TestTheAgentSideGate(unittest.TestCase):
     """The gate lives on experiment(), not on the HTTP door in front of it."""
 
     def test_an_agent_starts_with_the_lab_shut(self):
-        from jarvis.agent.core import AgentCore
+        from vigil.agent.core import AgentCore
         agent = AgentCore({"name": "t", "profile": "cloud"},
                           {"display": None, "input": None, "memory": None, "storage": None},
                           LOG)
@@ -209,7 +209,7 @@ class TestTheAgentSideGate(unittest.TestCase):
         self.assertIn("lab is closed", agent.experiment("hello")["error"])
 
     def test_the_context_carries_the_window_only_while_it_is_open(self):
-        from jarvis.agent.core import AgentCore
+        from vigil.agent.core import AgentCore
         agent = AgentCore({"name": "t", "profile": "cloud"},
                           {"display": None, "input": None, "memory": None, "storage": None},
                           LOG)

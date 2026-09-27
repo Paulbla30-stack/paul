@@ -9,8 +9,8 @@ exchanges sat on the chain. These tests hold the memory side of that open.
 import logging
 import unittest
 
-from jarvis.agent.core import AgentCore
-from jarvis.agent.store import MemoryStore
+from vigil.agent.core import AgentCore
+from vigil.agent.store import MemoryStore
 import tempfile
 import os
 
@@ -155,7 +155,7 @@ class ContextTest(unittest.TestCase):
     """The memory is useless if it never reaches the model."""
 
     def test_recent_exchanges_reaches_the_planner_context(self):
-        from jarvis.brain import llm
+        from vigil.brain import llm
 
         store = MemoryStore(path=os.path.join(tempfile.mkdtemp(), "m.db"),
                             logger=logging.getLogger("test"))
@@ -177,7 +177,7 @@ class ContextTest(unittest.TestCase):
     def test_the_prompt_explains_the_block(self):
         # An unexplained empty list reads as "no conversations happened"
         # rather than "none remembered", which is the error being fixed.
-        source = open("jarvis/brain/llm.py").read()
+        source = open("vigil/brain/llm.py").read()
         self.assertIn("recent_exchanges is who you have spoken with", source)
 
 

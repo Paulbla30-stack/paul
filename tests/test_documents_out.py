@@ -15,10 +15,10 @@ import unittest
 import urllib.error
 import urllib.request
 
-from jarvis.agent import compose
-from jarvis.agent.core import AgentCore
-from jarvis.agent.planner import Task, TaskType
-from jarvis.cloud.headless import DOCUMENT_TYPES, HeadlessRunner
+from vigil.agent import compose
+from vigil.agent.core import AgentCore
+from vigil.agent.planner import Task, TaskType
+from vigil.cloud.headless import DOCUMENT_TYPES, HeadlessRunner
 
 NO_HW = {"display": None, "input": None, "memory": None, "storage": None}
 LOG = logging.getLogger("test")
@@ -170,7 +170,7 @@ class TestTheMandateDoesNotBlockIt(Base):
         self.assertTrue(result["success"], result.get("error"))
 
     def test_it_runs_at_observer_too(self):
-        from jarvis.agent import authority
+        from vigil.agent import authority
         self.agent.executor.rung = authority.OBSERVER
         result = self.agent.executor.execute(Task(
             priority=5, description="write a letter",
@@ -179,7 +179,7 @@ class TestTheMandateDoesNotBlockIt(Base):
         self.assertTrue(result["success"], result.get("error"))
 
     def test_the_tool_is_declared_as_reporting_not_as_a_change(self):
-        from jarvis.agent import tools
+        from vigil.agent import tools
         tool = tools.get("compose_document")
         self.assertIsNotNone(tool)
         self.assertTrue(tool.reporting)
@@ -290,7 +290,7 @@ class TestTheUiCanReachThem(unittest.TestCase):
     register exists to stop."""
 
     def setUp(self):
-        from jarvis.cloud.headless import UI_HTML_PATH
+        from vigil.cloud.headless import UI_HTML_PATH
         with open(UI_HTML_PATH, encoding="utf-8") as fh:
             self.page = fh.read()
 
@@ -321,12 +321,12 @@ class TestTheImageMakesTheDirectory(unittest.TestCase):
         root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         with open(os.path.join(root, "aws", "scripts", "provision.sh")) as fh:
             provision = fh.read()
-        self.assertIn("/var/lib/jarvis/documents", provision)
+        self.assertIn("/var/lib/vigil/documents", provision)
         import yaml
-        with open(os.path.join(root, "rootfs", "etc", "jarvis",
+        with open(os.path.join(root, "rootfs", "etc", "vigil",
                                "config-aws.yaml")) as fh:
             config = yaml.safe_load(fh)
-        self.assertEqual(config["documents"]["dir"], "/var/lib/jarvis/documents")
+        self.assertEqual(config["documents"]["dir"], "/var/lib/vigil/documents")
 
 
 if __name__ == "__main__":

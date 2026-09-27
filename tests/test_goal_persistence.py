@@ -17,8 +17,8 @@ import os
 import tempfile
 import unittest
 
-from jarvis.agent.core import AgentCore
-from jarvis.agent.store import build_store
+from vigil.agent.core import AgentCore
+from vigil.agent.store import build_store
 
 LOG = logging.getLogger("test")
 NO_HW = {"display": None, "input": None, "memory": None, "storage": None}

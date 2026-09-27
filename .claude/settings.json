@@ -8,7 +8,7 @@
       "Bash(python3 aws/scripts/ses_identity.py *)",
       "Bash(python3 -m pytest *)",
       "Bash(python3 -m fence.selftest *)",
-      "Bash(python3 jarvis/ledger/verify.py *)",
+      "Bash(python3 vigil/ledger/verify.py *)",
       "Bash(git status*)",
       "Bash(git diff*)",
       "Bash(git log*)",

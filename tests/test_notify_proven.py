@@ -17,7 +17,7 @@ import os
 import tempfile
 import unittest
 
-from jarvis.agent.notify import Notifier
+from vigil.agent.notify import Notifier
 
 LOG = logging.getLogger("test")
 NOW = 1_800_000_000.0

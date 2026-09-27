@@ -16,9 +16,9 @@ import tempfile
 import time
 import unittest
 
-from jarvis.agent.consolidate import (Consolidator, measurement_of, similarity,
+from vigil.agent.consolidate import (Consolidator, measurement_of, similarity,
                                       keywords)
-from jarvis.agent.store import MemoryStore, NullStore
+from vigil.agent.store import MemoryStore, NullStore
 
 LOG = logging.getLogger("test")
 

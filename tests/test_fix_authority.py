@@ -11,10 +11,10 @@ import os
 import tempfile
 import unittest
 
-from jarvis.agent import authority
-from jarvis.agent.executor import TaskExecutor
-from jarvis.agent.memory import AgentMemory
-from jarvis.agent.planner import Task, TaskType
+from vigil.agent import authority
+from vigil.agent.executor import TaskExecutor
+from vigil.agent.memory import AgentMemory
+from vigil.agent.planner import Task, TaskType
 
 LOG = logging.getLogger("test.fix_authority")
 LOG.addHandler(logging.NullHandler())
@@ -115,8 +115,8 @@ class TestJournalctl(Classify):
         self.change("journalctl --vac=1M", "journalctl --rot", "journalctl --fl")
 
     def test_reading_stays_reading(self):
-        self.read("journalctl -u jarvis -n 50", "journalctl --no-pager -p err",
-                  "journalctl --since today --unit jarvis", "journalctl --cursor=abc")
+        self.read("journalctl -u vigil -n 50", "journalctl --no-pager -p err",
+                  "journalctl --since today --unit vigil", "journalctl --cursor=abc")
 
 
 class TestDateAndHostname(Classify):
@@ -171,12 +171,12 @@ class TestFindSedSystemctlSysctlRpm(Classify):
         for verb in ("try-restart", "reload-or-restart", "link", "revert", "preset",
                      "set-default", "set-environment", "reboot", "poweroff", "kill",
                      "freeze", "clean", "daemon-reexec", "log-level"):
-            self.change(f"systemctl {verb} jarvis")
+            self.change(f"systemctl {verb} vigil")
         # An option whose argument is a read verb does not hide the real one.
-        self.change("systemctl -p status restart jarvis", "systemctl --bogus status")
-        self.read("systemctl status jarvis", "systemctl --no-pager -l status jarvis",
+        self.change("systemctl -p status restart vigil", "systemctl --bogus status")
+        self.read("systemctl status vigil", "systemctl --no-pager -l status vigil",
                   "systemctl list-units --type=service --state=failed", "systemctl",
-                  "systemctl is-enabled jarvis", "systemctl show -p ActiveState jarvis")
+                  "systemctl is-enabled vigil", "systemctl show -p ActiveState vigil")
 
     def test_sysctl_load_in_every_spelling(self):
         self.change("sysctl -pfoo", "sysctl -p/etc/sysctl.conf", "sysctl -qp",
@@ -222,7 +222,7 @@ class TestTheShellAroundTheWords(Classify):
 
     def test_quoted_text_is_still_quoted(self):
         self.read("echo '`not run`'", "echo '$(not run)'", "grep -E 'a{1,3}' f",
-                  'grep -E "warning|critical" /var/log/jarvis.log | wc -l',
+                  'grep -E "warning|critical" /var/log/vigil.log | wc -l',
                   "echo $HOME", "cat < /etc/hosts")
 
     def test_a_program_named_by_path_must_be_a_system_one(self):

@@ -19,10 +19,10 @@ try:
 except Exception:  # pragma: no cover
     HAVE_CRYPTO = False
 
-from jarvis.agent.consolidate import Consolidator
-from jarvis.agent.store import MemoryStore
-from jarvis.ledger.agent_ledger import AgentLedger
-from jarvis.ledger.anchor import LedgerAnchor
+from vigil.agent.consolidate import Consolidator
+from vigil.agent.store import MemoryStore
+from vigil.ledger.agent_ledger import AgentLedger
+from vigil.ledger.anchor import LedgerAnchor
 
 needs_crypto = unittest.skipUnless(HAVE_CRYPTO, "cryptography not installed")
 LOG = logging.getLogger("test")

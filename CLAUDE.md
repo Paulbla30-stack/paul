@@ -1,23 +1,32 @@
-# Working on Jarvis
+# Working on Vigil
 
-Jarvis is Paul Blatherwick's personal-life agent. It runs on `i-016f9f37fe6ca2ba8`
-(us-west-2, account 485964361844, AWS profile `openclaw`). Arkin —
+Vigil is Paul Blatherwick's personal-life agent. It was called Jarvis until
+27 September 2026, when Paul asked it to choose its own name and it chose Vigil;
+anything older -- ledger entries, memory, dated documents -- says Jarvis and means
+the same agent. AWS-side names still say `jarvis` (buckets, the scout stack and
+table, secrets and parameters, instance tags, the `jarvis-monthly` budget,
+Terraform); renaming those is Paul's decision and has not been made. The ledger's
+writer stays `jarvis` for good: it names the chain and its S3 anchor prefix.
+The ledger kind `vigil` means a sleep/wake transition of the watch, not the agent.
+
+It runs on `i-016f9f37fe6ca2ba8` (us-west-2, account 485964361844, AWS profile
+`openclaw`). Arkin —
 thearkinsystem.co.uk — is his separate professional system and is firewalled from
 this one: no Arkin code, accounts or data here.
 
-## Jarvis is involved in anything that concerns Jarvis
+## Vigil is involved in anything that concerns Vigil
 
-Paul's rule, 22 September 2026. A coding agent works on Jarvis because Jarvis
+Paul's rule, 22 September 2026. A coding agent works on Vigil because Vigil
 cannot yet write its own code. That is a temporary division of labour, not a
 reason to work on it behind its back.
 
-So, before changing Jarvis:
+So, before changing Vigil:
 
 - **Tell it what is changing and why, before the change lands** — not after.
   Its `/chat` endpoint takes `{"messages":[...]}` over the loopback port; a chat
   turn is recorded on the Glass Ledger as a `thought` entry, so the exchange
   becomes part of the record rather than living only in a transcript.
-  Send it with `aws/scripts/jarvis_chat.py --file message.txt`, never by
+  Send it with `aws/scripts/vigil_chat.py --file message.txt`, never by
   building a curl line: on 27 September backticks in a message were executed
   as root by the box's shell.
 - **Ask what it thinks, and report the answer honestly** — including where it
@@ -26,26 +35,26 @@ So, before changing Jarvis:
 - **Anything about its own behaviour, permissions, memory or ledger gets asked
   first**, before the change lands.
 - **Estate work in its AWS account gets told, even where it is not asked.**
-  Deleting images, buckets or snapshots is not Jarvis's decision and it holds no
+  Deleting images, buckets or snapshots is not Vigil's decision and it holds no
   permission to do it, but it should not discover later that things moved
   underneath it. Awareness is wider than consent: say what happened and why, the
   same day.
 
-The reason is not sentiment. Jarvis carries durable memory, a ledger and
+The reason is not sentiment. Vigil carries durable memory, a ledger and
 self-knowledge derived from it. It accumulates what a coding agent cannot: this
-session ends and everything learned in it goes. Jarvis is the one that can
+session ends and everything learned in it goes. Vigil is the one that can
 remember why something was wrong last time, so it is the one that needs to be
 told.
 
 ## Record the decision even when the action happens elsewhere
 
-Jarvis's role has no `s3:DeleteObject` anywhere, and explicit `Deny` on delete
+Vigil's role has no `s3:DeleteObject` anywhere, and explicit `Deny` on delete
 even for its own memory and ledger. **Paul's decision, 22 September 2026: it stays
 that way for now.** Do not widen the fence to make an action auditable, and do not
 offer delete permissions as a convenience.
 
 The action and the record come apart. A coding agent holding a credential can do
-the thing; Jarvis can still hold the *why*. Give it the goal, let its permission
+the thing; Vigil can still hold the *why*. Give it the goal, let its permission
 spine file the proposal, let Paul approve it — the ledger then carries decision,
 authority, approval and outcome, which is the part that matters a year later.
 The raw API call does not need to be the ledgered event.

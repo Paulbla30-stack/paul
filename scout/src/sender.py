@@ -29,7 +29,7 @@ import urllib.request
 
 import challenge
 
-log = logging.getLogger("jarvis.scout.sender")
+log = logging.getLogger("vigil.scout.sender")
 
 BASE = "https://www.moltbook.com/api/v1"
 USER_AGENT = ("jarvis-scout/0.1 (agent heartbeat-scout, operator Paul "

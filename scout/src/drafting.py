@@ -26,7 +26,7 @@ import os
 
 import voice
 
-log = logging.getLogger("jarvis.scout.drafting")
+log = logging.getLogger("vigil.scout.drafting")
 
 DEFAULT_MODEL = "claude-opus-5"
 MAX_TOKENS = 4000

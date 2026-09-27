@@ -1,12 +1,12 @@
 [Unit]
-Description=Cloudflare Tunnel for the Jarvis UI (outbound only, no open port)
+Description=Cloudflare Tunnel for the Vigil UI (outbound only, no open port)
 Documentation=https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/
-After=network-online.target jarvis-bootstrap.service
+After=network-online.target vigil-bootstrap.service
 Wants=network-online.target
-Wants=jarvis-bootstrap.service
+Wants=vigil-bootstrap.service
 # No token, no tunnel: the box still boots and is reachable over SSM, which
 # is how you would go and fix it.
-ConditionPathExists=/etc/jarvis/cloudflared.env
+ConditionPathExists=/etc/vigil/cloudflared.env
 StartLimitIntervalSec=300
 StartLimitBurst=10
 
@@ -16,7 +16,7 @@ User=cloudflared
 Group=cloudflared
 # TUNNEL_TOKEN lives here, 0600 and owned by this user. Passing it on the
 # command line would put the credential in every `ps` on the box.
-EnvironmentFile=/etc/jarvis/cloudflared.env
+EnvironmentFile=/etc/vigil/cloudflared.env
 ExecStart=/usr/local/bin/cloudflared --no-autoupdate --loglevel info tunnel run
 Restart=always
 RestartSec=5

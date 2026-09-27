@@ -1,11 +1,11 @@
 """Fence self-test: prove the OS-level fence holds, from inside the fenced process.
 
     python -m fence.selftest \
-        --deny-read /var/lib/jarvis-ledger/ledger.jsonl \
-        --deny-read /etc/jarvis-ledger/signing.key \
+        --deny-read /var/lib/vigil-ledger/ledger.jsonl \
+        --deny-read /etc/vigil-ledger/signing.key \
         --deny-write /proc/sys/vm/swappiness \
         --deny-write /etc/sysctl.d \
-        --probe-ledger-socket /run/jarvis-ledger/append.sock
+        --probe-ledger-socket /run/vigil-ledger/append.sock
 
 Run as ExecStartPre in the agent's unit. systemd runs ExecStartPre under the
 same user and sandbox as ExecStart, so this tests the fence the agent will

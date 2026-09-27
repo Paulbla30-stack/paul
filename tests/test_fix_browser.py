@@ -18,11 +18,11 @@ import time
 import unittest
 from unittest import mock
 
-from jarvis.agent import browse
-from jarvis.browser import driver as _drv
-from jarvis.browser import guard, publish
-from jarvis.browser.driver import BrowserUnavailable, Driver, NeedsApproval
-from jarvis.browser.page import EXTRACT_JS, MAX_FIELDS, Control, Field, Link, Page
+from vigil.agent import browse
+from vigil.browser import driver as _drv
+from vigil.browser import guard, publish
+from vigil.browser.driver import BrowserUnavailable, Driver, NeedsApproval
+from vigil.browser.page import EXTRACT_JS, MAX_FIELDS, Control, Field, Link, Page
 
 
 def _fence_metadata_only(url):
@@ -210,7 +210,7 @@ class TestA1TypingIntoAnyTextFieldArmsTheGate(unittest.TestCase):
             with self.assertRaises(NeedsApproval) as caught:
                 d.act("click", "C1")
         self.assertEqual(caught.exception.gate, "publish")
-        self.assertNotIn(("click", '[data-jarvis-ref="C1"]'), d._page.did)
+        self.assertNotIn(("click", '[data-vigil-ref="C1"]'), d._page.did)
 
     def test_an_email_or_unknown_kind_arms_it_too(self):
         for kind in ("email", "url", "tel", "textarea", "something-new"):
@@ -224,7 +224,7 @@ class TestA1TypingIntoAnyTextFieldArmsTheGate(unittest.TestCase):
         with mock.patch.object(_drv.guard, "check", _fence_metadata_only):
             d.act("type", "F1", "weather")
             d.act("click", "C1")
-        self.assertIn(("click", '[data-jarvis-ref="C1"]'), d._page.did)
+        self.assertIn(("click", '[data-vigil-ref="C1"]'), d._page.did)
 
     def test_kinds_that_cannot_hold_prose_do_not_arm_it(self):
         for kind in ("checkbox", "radio", "range", "date", "number", "file"):
@@ -485,7 +485,7 @@ class TestA5TheOnePumpIsBounded(unittest.TestCase):
             done.set()
 
     def test_the_service_exits_for_a_restart_when_wedged(self):
-        from jarvis.browser import service as svc
+        from vigil.browser import service as svc
         captured = {}
 
         def serve(self):
@@ -602,7 +602,7 @@ class TestA7ARefusedPageIsNotLeftLoaded(unittest.TestCase):
 class TestA8TheSwitchesLiveWithTheBrowser(unittest.TestCase):
 
     def _main_driver(self, env):
-        from jarvis.browser import service as svc
+        from vigil.browser import service as svc
         captured = {}
 
         def serve(self):
@@ -616,8 +616,8 @@ class TestA8TheSwitchesLiveWithTheBrowser(unittest.TestCase):
         return captured["driver"]
 
     def test_the_service_reads_its_switches_from_its_environment(self):
-        d = self._main_driver({"JARVIS_BROWSER_PERSISTENT": "1",
-                               "JARVIS_BROWSER_ALLOW_SECRETS": "true"})
+        d = self._main_driver({"VIGIL_BROWSER_PERSISTENT": "1",
+                               "VIGIL_BROWSER_ALLOW_SECRETS": "true"})
         self.assertTrue(d.persistent)
         self.assertTrue(d.allow_secrets)
         health = d.health()
@@ -625,12 +625,12 @@ class TestA8TheSwitchesLiveWithTheBrowser(unittest.TestCase):
         self.assertTrue(health["allow_secrets"])
 
     def test_they_are_off_unless_plainly_on(self):
-        from jarvis.browser.service import env_switch
+        from vigil.browser.service import env_switch
         for value in ("", "0", "false", "no", "off", "maybe", "2"):
             self.assertFalse(env_switch("X", {"X": value}), value)
         self.assertFalse(env_switch("X", {}))
-        d = self._main_driver({"JARVIS_BROWSER_PERSISTENT": "0",
-                               "JARVIS_BROWSER_ALLOW_SECRETS": ""})
+        d = self._main_driver({"VIGIL_BROWSER_PERSISTENT": "0",
+                               "VIGIL_BROWSER_ALLOW_SECRETS": ""})
         self.assertFalse(d.persistent)
         self.assertFalse(d.allow_secrets)
 
@@ -651,14 +651,14 @@ class TestA8TheSwitchesLiveWithTheBrowser(unittest.TestCase):
 
     def test_the_unit_sets_both_off_and_reads_the_environment_file(self):
         here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        with open(os.path.join(here, "aws", "systemd", "jarvis-browser.service"),
+        with open(os.path.join(here, "aws", "systemd", "vigil-browser.service"),
                   encoding="utf-8") as fh:
             unit = fh.read()
-        self.assertIn("Environment=JARVIS_BROWSER_PERSISTENT=0", unit)
-        self.assertIn("Environment=JARVIS_BROWSER_ALLOW_SECRETS=0", unit)
+        self.assertIn("Environment=VIGIL_BROWSER_PERSISTENT=0", unit)
+        self.assertIn("Environment=VIGIL_BROWSER_ALLOW_SECRETS=0", unit)
         # EnvironmentFile after Environment=, so the file's value wins.
-        self.assertLess(unit.index("Environment=JARVIS_BROWSER_PERSISTENT=0"),
-                        unit.index("EnvironmentFile=-/etc/default/jarvis-browser"))
+        self.assertLess(unit.index("Environment=VIGIL_BROWSER_PERSISTENT=0"),
+                        unit.index("EnvironmentFile=-/etc/default/vigil-browser"))
 
 
 # ---- A9: directories before Playwright, and a failure is "unavailable" ------
@@ -666,7 +666,7 @@ class TestA8TheSwitchesLiveWithTheBrowser(unittest.TestCase):
 class TestA9DirectoriesFirst(unittest.TestCase):
 
     def test_an_unmakeable_download_dir_starts_nothing_and_is_503(self):
-        from jarvis.browser.service import BrowserService
+        from vigil.browser.service import BrowserService
         blocker = tempfile.NamedTemporaryFile(delete=False)
         blocker.close()
         factory, counter, _ = _fake_playwright()
@@ -729,7 +729,7 @@ class TestA10TheEnvelopeIsBounded(unittest.TestCase):
 class TestA11IndexOfIsGone(unittest.TestCase):
 
     def test_driver_has_no_positional_ref_helper(self):
-        """Elements are located by the stamped data-jarvis-ref, not position."""
+        """Elements are located by the stamped data-vigil-ref, not position."""
         self.assertFalse(hasattr(Driver, "_index_of"))
 
 
@@ -769,7 +769,7 @@ class TestA1ArmingSurvivesBackAndForward(unittest.TestCase):
             with self.assertRaises(NeedsApproval) as caught:
                 d.act("click", "C1")
         self.assertEqual(caught.exception.gate, "publish")
-        self.assertNotIn(("click", '[data-jarvis-ref="C1"]'), d._page.did)
+        self.assertNotIn(("click", '[data-vigil-ref="C1"]'), d._page.did)
 
     def test_reload_does_not_disarm_either(self):
         d = self._driver()
@@ -935,7 +935,7 @@ class TestKernelFenceIsLive(unittest.TestCase):
 
     def _unit(self):
         here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        with open(os.path.join(here, "aws", "systemd", "jarvis-browser.service"),
+        with open(os.path.join(here, "aws", "systemd", "vigil-browser.service"),
                   encoding="utf-8") as fh:
             return fh.read()
 

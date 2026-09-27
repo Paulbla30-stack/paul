@@ -11,8 +11,8 @@ import unittest
 import urllib.error
 import urllib.request
 
-from jarvis.agent.core import AgentCore
-from jarvis.cloud.headless import HeadlessRunner, UI_HTML_PATH, UI_OPEN_PATHS
+from vigil.agent.core import AgentCore
+from vigil.cloud.headless import HeadlessRunner, UI_HTML_PATH, UI_OPEN_PATHS
 from tests.test_brain import FakeClaude, make_brain, message, needs_sdk
 
 NO_HW = {"display": None, "input": None, "memory": None, "storage": None}
@@ -54,7 +54,7 @@ class TestUiListener(unittest.TestCase):
             try:
                 html, status = call(base, "/ui")
                 self.assertEqual(status, 200)
-                self.assertIn("<title>Jarvis</title>", html)
+                self.assertIn("<title>Vigil</title>", html)
                 self.assertIn("/upload", html)
                 with self.assertRaises(urllib.error.HTTPError) as cm:
                     call(base, "/uploads")
@@ -113,7 +113,7 @@ class TestUiListener(unittest.TestCase):
                 # And following it lands on the page, not a 401.
                 html, status = call(base, "/")
                 self.assertEqual(status, 200)
-                self.assertIn("<title>Jarvis</title>", html)
+                self.assertIn("<title>Vigil</title>", html)
             finally:
                 runner.stop_status_server()
 
@@ -299,7 +299,7 @@ class TestUiListener(unittest.TestCase):
                 runner.stop_status_server()
 
     def test_turn_normalisation(self):
-        from jarvis.brain.llm import BaseBrain
+        from vigil.brain.llm import BaseBrain
         norm = BaseBrain._normalise_turns
         self.assertEqual(norm([]), [])
         self.assertEqual(norm([{"role": "assistant", "content": "x"}]), [])  # must start with user
@@ -325,7 +325,7 @@ class TestUiListener(unittest.TestCase):
                 ctx.verify_mode = ssl.CERT_NONE
                 html, status = call(f"https://127.0.0.1:{port}", "/ui", ctx=ctx)
                 self.assertEqual(status, 200)
-                self.assertIn("Jarvis", html)
+                self.assertIn("Vigil", html)
                 # plain HTTP to the TLS port must fail, not be served
                 with self.assertRaises(Exception):
                     call(f"http://127.0.0.1:{port}", "/ui", timeout=3)

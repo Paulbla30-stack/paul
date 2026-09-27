@@ -1,4 +1,4 @@
-"""JARVIS scout — Stage 1: find and log.
+"""Vigil scout — Stage 1: find and log.
 
 Runs once a day. Fetches from the enabled sources, scores everything against
 the rules in config.toml, stores what it has not seen before, appends each
@@ -28,7 +28,7 @@ from proposals import Proposal                                       # noqa: E40
 from sources import arxiv, hackernews, lesswrong, medrxiv, moltbook  # noqa: E402
 import digest                                                       # noqa: E402
 
-log = logging.getLogger("jarvis.scout")
+log = logging.getLogger("vigil.scout")
 logging.getLogger().setLevel(logging.INFO)
 
 CONFIG_PATH = os.environ.get(
@@ -432,7 +432,7 @@ class SesMailer:
         import boto3
         self.cfg = cfg["email"]
         self.ses = boto3.client("sesv2", region_name=region)
-        self.prefix = self.cfg.get("subject_prefix", "JARVIS scout")
+        self.prefix = self.cfg.get("subject_prefix", "Vigil scout")
 
     def _verified(self) -> set[str] | None:
         """Every identity SES will send for, or None when that is unknown.

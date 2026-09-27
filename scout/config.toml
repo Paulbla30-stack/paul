@@ -1,4 +1,4 @@
-# JARVIS scout — configuration
+# Vigil scout — configuration
 #
 # Edit this file to change what the scout looks for. Nothing here is
 # hard-coded in the source. After editing, redeploy with scripts/deploy.sh.
@@ -292,7 +292,7 @@ fallback_to       = "Paulbla30@hotmail.com"
 fallback_sender   = "Paulbla30@hotmail.com"
 fallback_enabled  = true
 
-subject_prefix = "JARVIS scout"
+subject_prefix = "Vigil scout"
 
 
 # ---------------------------------------------------------------------------

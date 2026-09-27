@@ -15,7 +15,7 @@ distance from today.
 import time
 import unittest
 
-from jarvis.agent import timesense as t
+from vigil.agent import timesense as t
 
 # A Sunday night, British Summer Time, so UTC and the operator differ.
 NOW = time.mktime(time.strptime("2026-09-20 22:30", "%Y-%m-%d %H:%M"))
@@ -191,7 +191,7 @@ class TestItReachesTheAgent(unittest.TestCase):
     def test_a_document_it_reads_carries_its_dates(self):
         import os
         import tempfile
-        from jarvis.agent import environment as env
+        from vigil.agent import environment as env
         path = os.path.join(tempfile.mkdtemp(), "bill.txt")
         with open(path, "w") as f:
             f.write("Amount due 92.50 by 14 Oct 2026\n")
@@ -202,7 +202,7 @@ class TestItReachesTheAgent(unittest.TestCase):
     def test_a_document_with_no_dates_carries_none(self):
         import os
         import tempfile
-        from jarvis.agent import environment as env
+        from vigil.agent import environment as env
         path = os.path.join(tempfile.mkdtemp(), "plain.txt")
         with open(path, "w") as f:
             f.write("just some words\n")

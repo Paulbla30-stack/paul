@@ -16,7 +16,7 @@ backwards.
 import logging
 import unittest
 
-from jarvis.agent.watch import (AWAKE, ASLEEP, NullWatch, Watch, build, digest,
+from vigil.agent.watch import (AWAKE, ASLEEP, NullWatch, Watch, build, digest,
                                 salient_change, WAKE_HEARTBEAT, WAKE_OPERATOR,
                                 WAKE_SALIENCE)
 
@@ -484,7 +484,7 @@ class TestWiredIntoTheAgent(unittest.TestCase):
     """The parts that only matter once the watch is attached to real objects."""
 
     def build(self, **sleep):
-        from jarvis.agent.core import AgentCore
+        from vigil.agent.core import AgentCore
         cfg = {"enabled": True, "burst_calls": 2, "idle_after_s": 60,
                "warm_window_s": 300, "heartbeat_s": 3600, "burst_window_s": 120}
         cfg.update(sleep)
@@ -501,7 +501,7 @@ class TestWiredIntoTheAgent(unittest.TestCase):
         self.assertEqual(agent.watch.state, AWAKE)
 
     def test_the_agent_gets_a_null_watch_when_not_configured(self):
-        from jarvis.agent.core import AgentCore
+        from vigil.agent.core import AgentCore
         agent = AgentCore({"name": "t", "profile": "cloud"},
                           {"display": None, "input": None, "memory": None, "storage": None}, LOG)
         self.assertIsInstance(agent.watch, NullWatch)
@@ -525,7 +525,7 @@ class TestWiredIntoTheAgent(unittest.TestCase):
 
     def test_vigil_is_a_registered_ledger_kind(self):
         """An unregistered kind is refused, and under fail_closed that stops the agent."""
-        from jarvis.ledger import chain
+        from vigil.ledger import chain
         self.assertIn("vigil", chain.KINDS)
 
     def test_note_operator_wakes_a_sleeping_agent(self):
@@ -574,8 +574,8 @@ class TestTheBrainGate(unittest.TestCase):
     """should_plan must refuse while asleep, and only for the watch's reason."""
 
     def make_brain(self, **cfg):
-        from jarvis.brain.bedrock import BedrockBrain
-        from jarvis.brain.llm import BaseBrain
+        from vigil.brain.bedrock import BedrockBrain
+        from vigil.brain.llm import BaseBrain
 
         class OfflineBrain(BaseBrain):
             provider = "test"
@@ -633,7 +633,7 @@ class TestTheBrainGate(unittest.TestCase):
         self.assertEqual(v.stats["calls_suppressed"], 0)
 
     def test_the_model_is_told_it_sleeps(self):
-        from jarvis.agent.core import AgentCore
+        from vigil.agent.core import AgentCore
         clock = FakeClock()
         brain = self.make_brain()
         v = Watch({"enabled": True, "burst_calls": 2, "warm_window_s": 300},
@@ -648,7 +648,7 @@ class TestTheBrainGate(unittest.TestCase):
         self.assertIn("put to sleep", context["rest"]["you_sleep"])
 
     def test_no_rest_block_without_a_watch(self):
-        from jarvis.agent.core import AgentCore
+        from vigil.agent.core import AgentCore
         brain = self.make_brain()
         agent = AgentCore({"name": "t", "profile": "cloud"},
                           {"display": None, "input": None, "memory": None, "storage": None},

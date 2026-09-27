@@ -10,7 +10,7 @@ import os
 import tempfile
 import unittest
 
-from jarvis.agent.browse import BrowserJournal
+from vigil.agent.browse import BrowserJournal
 
 
 class _Clock:
@@ -54,7 +54,7 @@ class TestRecording(unittest.TestCase):
         self.assertEqual(len(self.j.recent()), 2)
 
     def test_the_journal_is_bounded(self):
-        from jarvis.agent import browse
+        from vigil.agent import browse
         old = browse.MAX_JOURNAL_BYTES
         browse.MAX_JOURNAL_BYTES = 4000
         try:

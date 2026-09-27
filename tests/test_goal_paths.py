@@ -3,7 +3,7 @@
 The failure this is for, from 23 September 2026: the agent woke on a rebuilt
 box carrying three priority-5 goals about uploaded documents. `memory_backup`
 had carried memory.db across from i-091c77c6079228ca2, so the goals survived;
-nothing carries /var/lib/jarvis/uploads, so the documents did not. It spent
+nothing carries /var/lib/vigil/uploads, so the documents did not. It spent
 its top-priority attention retrying reads that could never succeed, and the
 only reason anyone found out is that it said so in a chat turn.
 
@@ -21,7 +21,7 @@ import os
 import tempfile
 import unittest
 
-from jarvis.agent.core import AgentCore
+from vigil.agent.core import AgentCore
 
 
 class TestPathsNamedInAGoal(unittest.TestCase):
@@ -32,9 +32,9 @@ class TestPathsNamedInAGoal(unittest.TestCase):
 
     def test_it_finds_an_absolute_file_path(self):
         self.assertEqual(
-            self.named("Read the uploaded file /var/lib/jarvis/uploads/gas.txt "
+            self.named("Read the uploaded file /var/lib/vigil/uploads/gas.txt "
                        "and report what is in it"),
-            ["/var/lib/jarvis/uploads/gas.txt"])
+            ["/var/lib/vigil/uploads/gas.txt"])
 
     def test_it_finds_more_than_one(self):
         self.assertEqual(self.named("diff /etc/a/one.conf against /etc/b/two.conf"),
@@ -55,8 +55,8 @@ class TestPathsNamedInAGoal(unittest.TestCase):
         self.assertEqual(self.named("clear /tmp"), [])
 
     def test_trailing_punctuation_is_not_part_of_the_path(self):
-        self.assertEqual(self.named("read /var/lib/jarvis/uploads/gas.txt."),
-                         ["/var/lib/jarvis/uploads/gas.txt"])
+        self.assertEqual(self.named("read /var/lib/vigil/uploads/gas.txt."),
+                         ["/var/lib/vigil/uploads/gas.txt"])
         self.assertEqual(self.named("read /var/lib/a/b, then stop"),
                          ["/var/lib/a/b"])
 

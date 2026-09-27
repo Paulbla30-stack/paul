@@ -17,7 +17,7 @@ codebase exists for.
 
 import unittest
 
-from jarvis.agent import bearing as b
+from vigil.agent import bearing as b
 
 
 class TestItFindsThePointing(unittest.TestCase):
@@ -226,8 +226,8 @@ class TestItReachesTheAgent(unittest.TestCase):
 
     def agent(self, **cfg):
         import logging
-        from jarvis.agent.core import AgentCore
-        settings = {"name": "Jarvis", "profile": "cloud"}
+        from vigil.agent.core import AgentCore
+        settings = {"name": "Vigil", "profile": "cloud"}
         settings.update(cfg)
         return AgentCore(settings, {}, logging.getLogger("test"))
 

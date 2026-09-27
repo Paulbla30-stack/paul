@@ -14,7 +14,7 @@ anything, or that could be answered by looking, is not asked at all.
 import logging
 import unittest
 
-from jarvis.agent import questions as q
+from vigil.agent import questions as q
 
 LOG = logging.getLogger("test")
 NOW = 1_800_000_000.0
@@ -196,7 +196,7 @@ class TestAnAnswerReachesIt(unittest.TestCase):
 class TestTheAgentSide(unittest.TestCase):
 
     def make_agent(self):
-        from jarvis.agent.core import AgentCore
+        from vigil.agent.core import AgentCore
         return AgentCore({"name": "t", "profile": "cloud"},
                          {"display": None, "input": None, "memory": None,
                           "storage": None}, LOG)

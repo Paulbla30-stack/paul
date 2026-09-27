@@ -18,10 +18,10 @@ import subprocess
 import unittest
 from unittest import mock
 
-from jarvis.agent import authority, tools
-from jarvis.agent.executor import TaskExecutor
-from jarvis.agent.memory import AgentMemory
-from jarvis.agent.planner import Task, TaskType
+from vigil.agent import authority, tools
+from vigil.agent.executor import TaskExecutor
+from vigil.agent.memory import AgentMemory
+from vigil.agent.planner import Task, TaskType
 
 LOG = logging.getLogger("test")
 
@@ -68,7 +68,7 @@ class TestNothingIsHalfWired(unittest.TestCase):
 
     def test_every_plannable_tool_reaches_the_model(self):
         """The exact failure: complete everywhere, absent from the one list read."""
-        from jarvis.brain.llm import PLANNABLE_TASK_TYPES
+        from vigil.brain.llm import PLANNABLE_TASK_TYPES
         for t in tools.TOOLS:
             if not t.plannable:
                 continue
@@ -76,7 +76,7 @@ class TestNothingIsHalfWired(unittest.TestCase):
                           f"{t.name} is declared plannable and the model cannot choose it")
 
     def test_an_operator_only_tool_is_not_offered_to_the_model(self):
-        from jarvis.brain.llm import PLANNABLE_TASK_TYPES
+        from vigil.brain.llm import PLANNABLE_TASK_TYPES
         self.assertNotIn("user_command", PLANNABLE_TASK_TYPES)
 
     def test_the_authority_spine_reads_the_register(self):
@@ -218,8 +218,8 @@ class TestGatedVersusBroken(unittest.TestCase):
                          brain.build_context(agent, {}, mode="plan")["mandate"]["right_now"])
 
     def _brain_and_agent(self, **cfg):
-        from jarvis.agent.core import AgentCore
-        from jarvis.brain.llm import BaseBrain
+        from vigil.agent.core import AgentCore
+        from vigil.brain.llm import BaseBrain
 
         class Offline(BaseBrain):
             provider = "test"
@@ -236,8 +236,8 @@ class TestGatedVersusBroken(unittest.TestCase):
         return brain, agent
 
     def test_the_note_reaches_the_model(self):
-        from jarvis.agent.core import AgentCore
-        from jarvis.brain.llm import BaseBrain
+        from vigil.agent.core import AgentCore
+        from vigil.brain.llm import BaseBrain
 
         class Offline(BaseBrain):
             provider = "test"
@@ -290,7 +290,7 @@ class TestReadLogs(unittest.TestCase):
 
     def test_the_refusal_names_what_is_allowed(self):
         out = self.executor().execute(self.task(unit="audit"))
-        for unit in ("jarvis", "cloudflared"):
+        for unit in ("vigil", "cloudflared"):
             self.assertIn(unit, out["error"])
 
     def test_the_window_is_capped(self):
@@ -310,7 +310,7 @@ class TestReadLogs(unittest.TestCase):
     def test_no_shell_is_involved(self):
         with mock.patch("subprocess.run") as run:
             run.return_value = subprocess.CompletedProcess([], 0, "x\n", "")
-            self.executor().execute(self.task(unit="jarvis", grep="a; rm -rf /"))
+            self.executor().execute(self.task(unit="vigil", grep="a; rm -rf /"))
             argv = run.call_args[0][0]
             self.assertIsInstance(argv, list)
             self.assertEqual(argv[0], "journalctl")
@@ -374,7 +374,7 @@ class TestThePlanSchemaStaysInStep(unittest.TestCase):
     """
 
     def test_every_tool_that_takes_a_path_is_named_in_the_command_field(self):
-        from jarvis.brain.llm import PLAN_SCHEMA
+        from vigil.brain.llm import PLAN_SCHEMA
         described = PLAN_SCHEMA["properties"]["command"]["description"]
         for name in tools.path_takers():
             self.assertIn(name, described,
@@ -391,16 +391,16 @@ class TestThePlanSchemaStaysInStep(unittest.TestCase):
         model put the path exactly where it was told to and got "read_file
         needs a path" three cycles running.
         """
-        from jarvis.brain.llm import BaseBrain
+        from vigil.brain.llm import BaseBrain
         parse = BaseBrain._to_decision
         for name in tools.path_takers():
             raw = {"reasoning": "r", "task_type": name, "description": "d",
-                   "priority": 3, "command": "/var/lib/jarvis/uploads/note.txt",
+                   "priority": 3, "command": "/var/lib/vigil/uploads/note.txt",
                    "goal": "", "completed_goals": [], "note": "", "proposal": ""}
             decision = parse(None, raw)
             self.assertIsNotNone(decision.task, f"{name} produced no task")
             self.assertEqual(decision.task.metadata.get("path"),
-                             "/var/lib/jarvis/uploads/note.txt",
+                             "/var/lib/vigil/uploads/note.txt",
                              f"{name} lost its path between the plan and the task")
 
     def test_a_new_path_tool_needs_no_second_edit(self):

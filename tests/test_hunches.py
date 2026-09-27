@@ -15,8 +15,8 @@ import os
 import tempfile
 import unittest
 
-from jarvis.agent import hunches as h
-from jarvis.agent.store import build_store
+from vigil.agent import hunches as h
+from vigil.agent.store import build_store
 
 NOW = 1_800_000_000.0
 DAY = 86_400.0
@@ -117,8 +117,8 @@ class TestItAuthorisesWatchingAndNothingElse(Base):
         self.assertIn("bedside", said)
 
     def test_the_only_effect_is_a_watch_list(self):
-        self.one(about="/var/lib/jarvis/ledger.jsonl")
-        self.assertEqual(self.reg.watch_list(), ["/var/lib/jarvis/ledger.jsonl"])
+        self.one(about="/var/lib/vigil/ledger.jsonl")
+        self.assertEqual(self.reg.watch_list(), ["/var/lib/vigil/ledger.jsonl"])
 
     def test_looking_at_the_subject_is_counted(self):
         item = self.one(about="the ledger anchor")
@@ -287,8 +287,8 @@ class TestTheModelCanFileOne(unittest.TestCase):
 
     def agent(self):
         import logging
-        from jarvis.agent.core import AgentCore
-        return AgentCore({"name": "Jarvis", "profile": "cloud"}, {},
+        from vigil.agent.core import AgentCore
+        return AgentCore({"name": "Vigil", "profile": "cloud"}, {},
                          logging.getLogger("test"))
 
     def decision(self, **hunch):
@@ -302,14 +302,14 @@ class TestTheModelCanFileOne(unittest.TestCase):
         return D()
 
     def test_the_schema_carries_the_four_conditions(self):
-        from jarvis.brain.llm import PLAN_SCHEMA
+        from vigil.brain.llm import PLAN_SCHEMA
         field = PLAN_SCHEMA["properties"]["hunch"]
         self.assertEqual(sorted(field["required"]),
                          ["about", "confidence", "despite", "expect", "feeling"])
         self.assertIn("hunch", PLAN_SCHEMA["required"])
 
     def test_the_schema_says_most_cycles_have_none(self):
-        from jarvis.brain.llm import PLAN_SCHEMA
+        from vigil.brain.llm import PLAN_SCHEMA
         said = PLAN_SCHEMA["properties"]["hunch"]["description"]
         self.assertIn("most cycles", said)
         self.assertIn("watching and nothing else", said)

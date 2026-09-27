@@ -11,9 +11,9 @@ it.
 
 import unittest
 
-from jarvis.browser import guard
-from jarvis.browser.driver import BrowserUnavailable
-from jarvis.browser.service import BrowserService, main
+from vigil.browser import guard
+from vigil.browser.driver import BrowserUnavailable
+from vigil.browser.service import BrowserService, main
 
 
 class FakeDriver:
@@ -33,27 +33,27 @@ class FakeDriver:
 
     def read(self):
         self._maybe("read")
-        from jarvis.browser.page import Page
+        from vigil.browser.page import Page
         return Page(url="https://e.test/", title="t", text="body")
 
     def open(self, url):
         self._maybe("open")
-        from jarvis.browser.page import Page
+        from vigil.browser.page import Page
         return Page(url=url, title="t", text="body")
 
     def follow(self, ref):
         self._maybe("follow")
-        from jarvis.browser.page import Page
+        from vigil.browser.page import Page
         return Page(url="https://e.test/b", title="t", text="body")
 
     def act(self, kind, ref="", text="", approved=(), operator=False):
         self._maybe("act")
-        from jarvis.browser.page import Page
+        from vigil.browser.page import Page
         return Page(url="https://e.test/", title="t", text="body")
 
     def move(self, kind, amount=0):
         self._maybe("move")
-        from jarvis.browser.page import Page
+        from vigil.browser.page import Page
         return Page(url="https://e.test/", title="t", text="body")
 
     def reset(self):

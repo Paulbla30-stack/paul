@@ -17,8 +17,8 @@ import sqlite3
 import tempfile
 import unittest
 
-from jarvis.agent.backup import MemoryBackup
-from jarvis.agent.store import build_store
+from vigil.agent.backup import MemoryBackup
+from vigil.agent.store import build_store
 
 LOG = logging.getLogger("test")
 NOW = 1_800_000_000.0
@@ -67,7 +67,7 @@ class Base(unittest.TestCase):
         self.store.close()
 
     def backup(self, **cfg):
-        settings = {"bucket": "jarvis-memory", "prefix": "memory",
+        settings = {"bucket": "vigil-memory", "prefix": "memory",
                     "state_file": os.path.join(self.tmp, "backup.state")}
         settings.update(cfg)
         return MemoryBackup(settings, self.store, LOG, client=self.s3,
@@ -102,7 +102,7 @@ class TestTheCopyIsConsistent(Base):
         self.assertEqual(os.stat(out).st_mode & 0o777, 0o600)
 
     def test_a_store_with_no_database_cannot_pretend_to_snapshot(self):
-        from jarvis.agent.store import NullStore
+        from vigil.agent.store import NullStore
         self.assertFalse(NullStore().snapshot_to(os.path.join(self.tmp, "x.db")))
 
 
@@ -141,7 +141,7 @@ class TestItActuallyLandsSomewhere(Base):
         before = set(os.listdir(tempfile.gettempdir()))
         self.backup().run(NOW)
         leftovers = [d for d in set(os.listdir(tempfile.gettempdir())) - before
-                     if d.startswith("jarvis-backup-")]
+                     if d.startswith("vigil-backup-")]
         self.assertEqual(leftovers, [])
 
 

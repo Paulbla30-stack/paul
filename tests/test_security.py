@@ -1,11 +1,11 @@
-"""Tests for Jarvis Security Scanner."""
+"""Tests for Vigil Security Scanner."""
 
 import os
 import tempfile
 import unittest
 
-from jarvis.security.scanner import SecurityScanner, Finding, SystemAuditor
-from jarvis.security.hardening import SystemHardener, HardeningAction
+from vigil.security.scanner import SecurityScanner, Finding, SystemAuditor
+from vigil.security.hardening import SystemHardener, HardeningAction
 
 
 class TestFinding(unittest.TestCase):

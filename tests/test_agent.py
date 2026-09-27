@@ -1,12 +1,12 @@
-"""Tests for Jarvis Agent Core."""
+"""Tests for Vigil Agent Core."""
 
 import unittest
 import logging
 
-from jarvis.agent.core import AgentCore
-from jarvis.agent.planner import Task, TaskPlanner, TaskType, TaskStatus
-from jarvis.agent.executor import TaskExecutor
-from jarvis.agent.memory import AgentMemory
+from vigil.agent.core import AgentCore
+from vigil.agent.planner import Task, TaskPlanner, TaskType, TaskStatus
+from vigil.agent.executor import TaskExecutor
+from vigil.agent.memory import AgentMemory
 
 
 class TestAgentMemory(unittest.TestCase):

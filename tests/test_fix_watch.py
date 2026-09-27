@@ -9,7 +9,7 @@ then stayed put was not acted on until the hourly heartbeat.
 import logging
 import unittest
 
-from jarvis.agent.watch import ASLEEP, AWAKE, Watch
+from vigil.agent.watch import ASLEEP, AWAKE, Watch
 
 LOG = logging.getLogger("test.fix_watch")
 LOG.addHandler(logging.NullHandler())

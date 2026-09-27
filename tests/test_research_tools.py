@@ -6,9 +6,9 @@ import json
 import subprocess
 import unittest
 
-from jarvis.agent import research as R
-from jarvis.agent.research_tools import ResearchTools, _unwrap
-from jarvis.agent.sandbox import Busy, CodeSandbox, SandboxUnavailable
+from vigil.agent import research as R
+from vigil.agent.research_tools import ResearchTools, _unwrap
+from vigil.agent.sandbox import Busy, CodeSandbox, SandboxUnavailable
 from tests.test_research import Clock, Script, make
 
 
@@ -28,7 +28,7 @@ class TestSandbox(unittest.TestCase):
         joined = " ".join(argv)
         for prop in ("DynamicUser=yes", "PrivateNetwork=yes", "IPAddressDeny=any", "ProtectSystem=strict",
                      "NoNewPrivileges=yes", "MemoryMax=384M", "MemorySwapMax=0", "RuntimeMaxSec=60",
-                     "InaccessiblePaths=-/var/lib/jarvis", "InaccessiblePaths=-/etc/jarvis",
+                     "InaccessiblePaths=-/var/lib/vigil", "InaccessiblePaths=-/etc/vigil",
                      "CapabilityBoundingSet="):
             self.assertIn(prop, argv, prop)
         self.assertEqual(argv[-4:], ["/usr/bin/python3.11", "-I", "-S", "-"],

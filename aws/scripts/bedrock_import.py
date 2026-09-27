@@ -114,7 +114,7 @@ def fetch_to_s3(args, session):
             "VolumeSize": args.disk_gb, "VolumeType": "gp3", "DeleteOnTermination": True}}],
         MetadataOptions={"HttpTokens": "required"},
         TagSpecifications=[{"ResourceType": "instance", "Tags": [
-            {"Key": "Name", "Value": f"jarvis-model-fetch-{args.name}"}, {"Key": "Project", "Value": "jarvis"}]}],
+            {"Key": "Name", "Value": f"vigil-model-fetch-{args.name}"}, {"Key": "Project", "Value": "jarvis"}]}],
         InstanceInitiatedShutdownBehavior="terminate",
     )["Instances"][0]
     iid = inst["InstanceId"]

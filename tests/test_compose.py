@@ -15,7 +15,7 @@ import tempfile
 import unittest
 import zipfile
 
-from jarvis.agent import compose
+from vigil.agent import compose
 
 NL = chr(10)
 

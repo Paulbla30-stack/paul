@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run a command on the Jarvis instance over SSM and print what it said.
+"""Run a command on the Vigil instance over SSM and print what it said.
 
 There is no inbound SSH to the box, so SSM Run Command is the only way in.
 Doing it inline with boto3 each time meant a fresh throwaway script per
@@ -10,7 +10,7 @@ authenticate as the wrong principal, so they are cleared here rather than
 left to a caller who remembers the `env -u` incantation.
 
 Usage:
-    ssm_run.py --command "systemctl is-active jarvis"
+    ssm_run.py --command "systemctl is-active vigil"
     ssm_run.py --commands-file batch.json          # a JSON list of strings
     ssm_run.py --command "..." --instance i-0123 --region eu-west-2
 

@@ -42,7 +42,7 @@ class LedgerRefused(LedgerError):
 
 class LedgerClient:
     def __init__(self, socket_path: "str | None" = None, timeout: float = 5.0):
-        self.socket_path = socket_path or os.environ.get("JARVIS_LEDGER_SOCKET", DEFAULT_SOCKET)
+        self.socket_path = socket_path or os.environ.get("VIGIL_LEDGER_SOCKET", DEFAULT_SOCKET)
         self.timeout = timeout
 
     def append(self, kind: str, payload: dict, model: "str | None" = None) -> Receipt:

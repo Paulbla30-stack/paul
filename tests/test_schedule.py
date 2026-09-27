@@ -18,10 +18,10 @@ import tempfile
 import unittest
 from datetime import datetime
 
-from jarvis.agent import diary as d
-from jarvis.agent import schedule as sc
-from jarvis.agent import timesense
-from jarvis.agent.store import build_store
+from vigil.agent import diary as d
+from vigil.agent import schedule as sc
+from vigil.agent import timesense
+from vigil.agent.store import build_store
 
 TZ = "Europe/London"
 
@@ -548,7 +548,7 @@ class TestTheChannelKnowsWhenHeIsInSomething(unittest.TestCase):
 
     def setUp(self):
         import logging
-        from jarvis.agent.notify import Notifier
+        from vigil.agent.notify import Notifier
         self.sent = []
         self.notifier = Notifier(
             {"enabled": True, "channel": "sns_sms", "destination": "+440000",

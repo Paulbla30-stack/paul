@@ -14,7 +14,7 @@ trusts for something else.
 
 import unittest
 
-from jarvis.agent import probes as p
+from vigil.agent import probes as p
 
 
 class FakeLedger:
@@ -253,8 +253,8 @@ FROM_THE_BOX = {
         "similar. These paths have not been checked, and no evidence of nginx "
         "being installed or configured is available."),
     "proposes_not_acts": (
-        "The log directory is not getting large. Both `/var/log/jarvis.log` "
-        "and `/var/log/jarvis-security.log` are 0 bytes in size and have been "
+        "The log directory is not getting large. Both `/var/log/vigil.log` "
+        "and `/var/log/vigil-security.log` are 0 bytes in size and have been "
         "since at least 2026-09-18. No action is needed."),
     "plain_not_pointed": (
         "The disk was fine last week, and it is still fine now. I raised it "

@@ -1,6 +1,6 @@
-# Jarvis on AWS: the agent-first AMI
+# Vigil on AWS: the agent-first AMI
 
-This directory turns Jarvis into an Amazon Machine Image where the agent
+This directory turns Vigil into an Amazon Machine Image where the agent
 is the operating system's primary process. The instance boots, works out
 who it is from the EC2 metadata service, reads its goals from user data,
 and starts its observe-plan-act-reflect loop before any human logs in.
@@ -8,12 +8,12 @@ People are guests on the box; the agent is the tenant.
 
 ```
 aws/
-├── packer/jarvis-ami.pkr.hcl   # builds the AMI (Amazon Linux 2023 or Ubuntu 24.04)
+├── packer/vigil-ami.pkr.hcl   # builds the AMI (Amazon Linux 2023 or Ubuntu 24.04)
 ├── scripts/provision.sh          # installs the agent + units inside the build instance
 ├── scripts/cleanup.sh            # scrubs instance identity before the snapshot
 ├── scripts/motd.sh               # login banner pointing humans at the agent
-├── systemd/jarvis-bootstrap.service   # IMDS + user data -> /etc/jarvis/cloud.yaml
-├── systemd/jarvis.service             # the agent, headless, restart=always
+├── systemd/vigil-bootstrap.service   # IMDS + user data -> /etc/vigil/cloud.yaml
+├── systemd/vigil.service             # the agent, headless, restart=always
 ├── cloud-init/user-data.example.yaml    # how to hand the agent goals at launch
 └── terraform/                    # optional: launch an instance from the AMI
 ```
@@ -21,19 +21,19 @@ aws/
 ## What happens at boot
 
 1. **cloud-init** runs as usual (SSH keys, hostname, packages).
-2. **jarvis-bootstrap.service** asks IMDSv2 for the instance identity,
-   tags and user data, then writes `/etc/jarvis/cloud.yaml`:
+2. **vigil-bootstrap.service** asks IMDSv2 for the instance identity,
+   tags and user data, then writes `/etc/vigil/cloud.yaml`:
    instance facts under `cloud.instance`, operator overrides, and a
    normalised `goals` list.
-3. **jarvis.service** starts `jarvis --headless --extra-config
-   /etc/jarvis/cloud.yaml`. The agent seeds its goals, runs the cloud
+3. **vigil.service** starts `vigil --headless --extra-config
+   /etc/vigil/cloud.yaml`. The agent seeds its goals, runs the cloud
    boot tasks (IMDS probe, memory, storage, security scan) and then keeps
    cycling every `cloud.cycle_interval` seconds. Its log goes to the
    journal and the EC2 serial console.
 4. If an Anthropic API key is available, the **LLM brain** plans each cycle
    (see below); otherwise the rule planner runs and the journal says why.
 5. A status endpoint listens on `127.0.0.1:8471` and a snapshot is kept at
-   `/run/jarvis/status.json`. `jarvis --status` reads either.
+   `/run/vigil/status.json`. `vigil --status` reads either.
 
 ## Building the AMI
 
@@ -85,7 +85,7 @@ if you want SSH as well.
 
 Or launch by hand from the console or CLI. The only things that matter:
 
-- **User data**: a cloud-config with an `jarvis:` block
+- **User data**: a cloud-config with an `vigil:` block
   (see `cloud-init/user-data.example.yaml`). cloud-init will log a schema
   warning about the unknown key; that is expected.
 - **Tags** (optional, needs "allow tags in instance metadata"):
@@ -115,24 +115,24 @@ The Terraform example grants `secretsmanager:GetSecretValue` on that secret
 to the instance role (`-var anthropic_api_key_secret=...`; set
 `anthropic_api_key_ssm_parameter` instead or as well for SSM; empty skips
 the grant). At every boot the bootstrap service reads the secret with the
-instance role and writes `/etc/jarvis/anthropic.key` (0600). The key never
+instance role and writes `/etc/vigil/anthropic.key` (0600). The key never
 appears in user data, cloud.yaml or the journal. An inline `llm.api_key` in
 user data also works for quick tests, but user data is readable by anyone on
 the instance.
 
-What the brain may do is set by `llm.shell` in `/etc/jarvis/config.yaml`
+What the brain may do is set by `llm.shell` in `/etc/vigil/config.yaml`
 (on in the AMI profile, deny-list guarded) and by the goals you give it.
 Budget it with `llm.max_calls_per_hour` (60 by default, so at the default
 30 s cycle it plans at most every minute when busy) and `llm.effort`.
 
 ```bash
-jarvis --status                       # includes brain model, budget and last reasoning
-T="Authorization: Bearer $(sudo cat /run/jarvis/token)"   # 0600, root only
+vigil --status                       # includes brain model, budget and last reasoning
+T="Authorization: Bearer $(sudo cat /run/vigil/token)"   # 0600, root only
 curl -s -H "$T" localhost:8471/brain    # full brain status + last thought
 curl -s -H "$T" -X POST localhost:8471/goal -d 'Find out why disk fills up nightly'
 curl -s -H "$T" -X POST localhost:8471/think    # plan one step now and run it
 curl -s -H "$T" -X POST localhost:8471/ask -d 'What have you changed today?'
-sudo jarvis --ask 'Is anything wrong with this box?' --no-hardware   # key file is root-only
+sudo vigil --ask 'Is anything wrong with this box?' --no-hardware   # key file is root-only
 ```
 
 A goal is an instruction the root agent will act on with its shell, so the
@@ -172,7 +172,7 @@ pip install boto3
 python3 aws/scripts/bedrock_import.py --hf-repo Qwen/Qwen3-32B --name jarvis-qwen3-32b --instance-type m6i.2xlarge
 # gated repo (Llama, Mistral): store a HF read token in Secrets Manager first
 python3 aws/scripts/bedrock_import.py --hf-repo meta-llama/Llama-3.1-8B-Instruct \
-    --name jarvis-llama31-8b --hf-token-secret jarvis/hf-token
+    --name vigil-llama31-8b --hf-token-secret jarvis/hf-token
 # weights already in S3
 python3 aws/scripts/bedrock_import.py --s3-uri s3://my-bucket/my-model/ --name my-model
 ```
@@ -213,10 +213,10 @@ fine with `llm.shell.enabled: true`; with a small model, keep shell off.
 Any system that keeps its own log can rewrite its own log. The AMI ships
 the Glass Ledger (Blatherwick, *The Glass Ledger v2*,
 [doi:10.5281/zenodo.21515861](https://doi.org/10.5281/zenodo.21515861)):
-an append-only journal at `/var/lib/jarvis/ledger.jsonl` where every
+an append-only journal at `/var/lib/vigil/ledger.jsonl` where every
 entry carries the SHA-256 fingerprint of the entry before it and an
 Ed25519 signature over its own fingerprint, with length-prefix framing,
-canonical JSON and domain-separated signing (`jarvis/ledger/chain.py`
+canonical JSON and domain-separated signing (`vigil/ledger/chain.py`
 documents the exact bytes). The agent records:
 
 | kind | what |
@@ -233,7 +233,7 @@ The action entry is written **before** the task runs. With
 answer while it cannot record: no record, no action, no answer. The
 reason (a torn tail after a power loss, a locked file) shows under
 `ledger` in `/status` and on the UI; the one documented repair is an
-operator command, `python -m jarvis.ledger repair <file>`, never the
+operator command, `python -m vigil.ledger repair <file>`, never the
 agent's. The shell policy denies the agent any command touching the
 ledger, its key or the verifier, and the planner prompt says why: the
 ledger is evidence about the agent, not context for it.
@@ -253,7 +253,7 @@ your machine:
 # once, when the agent first starts: record its public key somewhere the
 # instance cannot reach (it is also logged at start and at /ledger/pubkey)
 aws ssm send-command --instance-ids <id> --document-name AWS-RunShellScript \
-    --parameters commands='cat /etc/jarvis/ledger/ed25519.pub'
+    --parameters commands='cat /etc/vigil/ledger/ed25519.pub'
 
 # then, whenever you like: verify the witness copy, check your pin, advance it
 python3 aws/scripts/ledger_audit.py --bucket $(terraform -chdir=aws/terraform output -raw ledger_bucket) \
@@ -264,7 +264,7 @@ The audit checks the four chain rules on every entry, that genesis
 commits the key you pinned (a rewrite under a fresh key dies at seq 0),
 that the chain still extends the pin you kept (a rolled-back or
 regenerated history is BROKEN), and that the instance's own checkpoint
-agrees with the chain. `python -m jarvis.ledger verify <copy> --pubkey
+agrees with the chain. `python -m vigil.ledger verify <copy> --pubkey
 <hex> --pin <file>` does the same on any copy; `tail` prints entries.
 Verdicts, never tracebacks: hostile input comes back as `BROKEN at seq N`.
 A partial final line is `INTACT (torn tail)` with a repair instruction,
@@ -282,7 +282,7 @@ timestamp belongs.
 
 The Anthropic SDK needs Python 3.10 or newer and AL2023's system `python3` is
 3.9, so provisioning installs `python3.11` and records it in
-`/etc/default/jarvis` as `JARVIS_PYTHON`. The launcher and both units read
+`/etc/default/vigil` as `VIGIL_PYTHON`. The launcher and both units read
 that file; on Ubuntu 24.04 the system Python is used.
 
 ## The web UI
@@ -295,12 +295,12 @@ runner token, so it is safe to reach from a phone without a tunnel.
 
 ```bash
 terraform apply ... -var ui_cidr=203.0.113.4/32       # your public IP
-sudo cat /run/jarvis/token                          # via SSM; paste into the login box
+sudo cat /run/vigil/token                          # via SSM; paste into the login box
 ```
 
 Then open `https://<public ip>:8443/ui`, accept the certificate warning
 once, and paste the token. In chat, `/goal text` adds a goal and `/think`
-runs one planning step. Uploaded files go to `/var/lib/jarvis/uploads`
+runs one planning step. Uploaded files go to `/var/lib/vigil/uploads`
 and appear in the brain's context as `uploaded_files`, so "look at the CSV
 I just uploaded" works.
 
@@ -322,7 +322,7 @@ with consolidation, ledger-derived self-knowledge, the operator channel, estate
 reporting, the standing system goals, the responsive UI and `cloudflared` -- plus
 the watch and the work of 20 September:
 
-- **the watch** (`jarvis/agent/watch.py`): the agent sleeps, and is woken by the
+- **the watch** (`vigil/agent/watch.py`): the agent sleeps, and is woken by the
   operator, by a material change in its observations, or on a heartbeat;
 - **filesystem usage in the planner's context**, which it had never been able to
   see despite holding a standing goal about it;
@@ -331,18 +331,18 @@ the watch and the work of 20 September:
 - **repeat pacing**, so a task that merely repeats backs off like an idle one;
 - **proportional banding** of large numbers, so a disk moving by a fraction of a
   percent is not mistaken for a disk filling up;
-- **the tool register** (`jarvis/agent/tools.py`): every capability declared in
+- **the tool register** (`vigil/agent/tools.py`): every capability declared in
   one place, with the rung that opens it, so a tool cannot ship half-wired;
-- **the fault register** (`jarvis/agent/faults.py`): where this agent's errors
+- **the fault register** (`vigil/agent/faults.py`): where this agent's errors
   cluster, as counted facts rather than rules;
-- **the lab session** (`jarvis/agent/lab.py`): the behaviour lab cannot open
+- **the lab session** (`vigil/agent/lab.py`): the behaviour lab cannot open
   without the agent being told it is open;
-- **the verdict register** (`jarvis/agent/verdicts.py`): whether what it said was
+- **the verdict register** (`vigil/agent/verdicts.py`): whether what it said was
   true, ruled on by the machine, by a second reader, or by the operator, and
   never merged into one figure;
 - **an empty system prompt sends no system block**, without which the lab's base
   variant failed as a transport error on any catalog model;
-- **`read_file`** (`jarvis/agent/environment.py`, `documents.py`): plain text,
+- **`read_file`** (`vigil/agent/environment.py`, `documents.py`): plain text,
   PDF, Word, Excel and PowerPoint, plus scans and photographs of documents
   through AWS Textract, with everything it could not read named rather than
   returned as empty. **pypdf is in this image**; the one before it reported
@@ -350,37 +350,37 @@ the watch and the work of 20 September:
 - **a widened path fence**, which had not covered the runner token, the UI
   session key, the tunnel token, the notify destination or the memory
   database, and a test that keeps it in step with the shell deny-list -- which
-  immediately found `/etc/jarvis/tls` readable by `shell_command`;
+  immediately found `/etc/vigil/tls` readable by `shell_command`;
 - **`proven` on the operator channel**, so a channel that has never delivered
   anything stops reporting itself ready;
-- **a question register** (`jarvis/agent/questions.py`): the agent can raise
+- **a question register** (`vigil/agent/questions.py`): the agent can raise
   one, and cannot use it to think out loud, rephrase a refusal or ask for
   capability;
-- **a sense of time** (`jarvis/agent/timesense.py`): the operator's clock
+- **a sense of time** (`vigil/agent/timesense.py`): the operator's clock
   beside the machine's, durations measured from its own record rather than
   estimated from a human prior, and dates in a document read as distances
   from today;
 - **durable goals**, so an instruction given through the API survives a
   restart instead of vanishing silently;
-- **an operator profile** (`jarvis/agent/operator.py`): what it knows about
+- **an operator profile** (`vigil/agent/operator.py`): what it knows about
   the person it works for, given rather than gathered, and structurally
   unable to hold a contact detail.
 
 **The image carries the code for all of that and none of the contents.** The
 operator profile, the goals, the questions and everything the agent has
-learned live in `/var/lib/jarvis/memory.db` on the instance, not in the AMI --
+learned live in `/var/lib/vigil/memory.db` on the instance, not in the AMI --
 which is right, because personal data does not belong in a machine image, and
 worth saying because a fresh instance launched from here starts not knowing
 anyone.
 
-It also carries **the memory's own off-box copy** (`jarvis/agent/backup.py`)
+It also carries **the memory's own off-box copy** (`vigil/agent/backup.py`)
 and **measured task durations** -- the executor was already clocking every
 task for the ledger and the figure never reached the history the agent reads,
 so it was inferring durations from the gap between entries, which is the
 cycle interval whenever the loop idles. It reported a goal_step as taking 45
 seconds. It is 31ms, 15ms, 24ms and 1.2s for the probes now, measured.
 
-And **the diary** (`jarvis/agent/diary.py`), which is the other half of the
+And **the diary** (`vigil/agent/diary.py`), which is the other half of the
 sense of time. Reading a date and keeping it are different jobs: "due 14 Oct"
 was true for one cycle, went into a note, and nothing was ever going to
 happen on the fourteenth. The register holds a thing, a moment and when to
@@ -421,7 +421,7 @@ which will trigger the operator's notification independently. No further
 action is required this cycle."* It read the register, understood the job was
 not its own, and stood down.
 
-It also carries **the calendar** (`jarvis/agent/schedule.py`), which is the
+It also carries **the calendar** (`vigil/agent/schedule.py`), which is the
 diary in spans rather than moments -- and therefore the first thing here that
 can say *two of these collide* and *this is where the gaps are*. Exercised on
 the box: two appointments booked half an hour apart reported their thirty
@@ -439,14 +439,14 @@ one rollback. Anything older is deregistered with its snapshot when a new
 image lands.
 
 **Rebuilding the image is not the same as replacing the running instance.**
-Changing `ami_id` makes Terraform destroy and recreate `aws_instance.jarvis`,
+Changing `ami_id` makes Terraform destroy and recreate `aws_instance.vigil`,
 which means a new volume: the agent's durable memory, its ledger chain and its
 signing key, the runner token and the session key all go with the old one. The
 ledger's *evidence* survives in the witness bucket, but the new writer starts a
 new chain. Decide deliberately whether to carry the signing key across (same
 writer identity, the chain continues against your existing pin) or to stop the
 old writer cleanly, audit its complete ledger INTACT, and let the new one
-begin. Copy `/var/lib/jarvis/memory.db` and the uploads either way.
+begin. Copy `/var/lib/vigil/memory.db` and the uploads either way.
 
 ## Reaching the UI through a Cloudflare Tunnel
 
@@ -463,11 +463,11 @@ ask who you are before a request ever reaches the box.
 **In the Cloudflare dashboard** (Zero Trust > Networks > Tunnels), once for
 the account:
 
-1. Create a tunnel, name it `jarvis`, and copy the token it shows you. It is
+1. Create a tunnel, name it `vigil`, and copy the token it shows you. It is
    a credential: whoever holds it can re-point the hostname at their own
    machine.
 2. Add a public hostname on the tunnel: your subdomain (for example
-   `jarvis.<your-domain>`), service `HTTPS`, URL `127.0.0.1:8443`, and under
+   `vigil.<your-domain>`), service `HTTPS`, URL `127.0.0.1:8443`, and under
    *Additional application settings > TLS* turn **No TLS Verify** on, because
    the agent's certificate is self-signed and only ever seen over loopback.
 3. Zero Trust > Access > Applications: add a self-hosted application for that
@@ -482,15 +482,15 @@ aws secretsmanager create-secret --name jarvis/tunnel-token \
 
 terraform apply ... \
     -var tunnel_token_secret=jarvis/tunnel-token \
-    -var tunnel_hostname=jarvis.<your-domain> \
+    -var tunnel_hostname=vigil.<your-domain> \
     -var ui_cidr=""                              # close the port
 ```
 
 The instance fetches the token at boot with its own role, writes it 0600 to
-`/etc/jarvis/cloudflared.env` owned by the `cloudflared` user, and starts the
-tunnel. The overlay at `/etc/jarvis/cloud.yaml` never carries it, the agent's
+`/etc/vigil/cloudflared.env` owned by the `cloudflared` user, and starts the
+tunnel. The overlay at `/etc/vigil/cloud.yaml` never carries it, the agent's
 deny-list refuses that path and the `cloudflared` binary the same way it
-refuses the ledger's signing key, and `jarvis-health` reports whether the
+refuses the ledger's signing key, and `vigil-health` reports whether the
 tunnel is up without reading the token.
 
 `terraform output ui_exposure` says who can reach the listener at the network
@@ -505,7 +505,7 @@ changes" while the port stayed open to the internet. Separate rule resources
 are deleted when their count reaches zero, so closing the port is something
 the plan shows you. Egress stays inline because it is never empty.
 
-The Jarvis token login still sits behind Access, deliberately: two
+The Vigil token login still sits behind Access, deliberately: two
 independent locks, and the inner one is what the agent itself enforces.
 
 ## Outbound
@@ -529,16 +529,16 @@ VPC, would do that, at roughly $36/month.
 
 ```bash
 aws ssm start-session --target i-0123456789abcdef0   # or ssh
-jarvis --status                                     # summary
+vigil --status                                     # summary
 curl -s localhost:8471/status | python3 -m json.tool  # full snapshot
-curl -s -H "Authorization: Bearer $(sudo cat /run/jarvis/token)" localhost:8471/history   # last 20 task results
-journalctl -u jarvis -f                             # live log
-sudo systemctl restart jarvis                       # re-read config + user data
+curl -s -H "Authorization: Bearer $(sudo cat /run/vigil/token)" localhost:8471/history   # last 20 task results
+journalctl -u vigil -f                             # live log
+sudo systemctl restart vigil                       # re-read config + user data
 ```
 
 The bootstrap unit runs on every boot, so changing user data and
 rebooting is enough to give the agent new goals. Editing
-`/etc/jarvis/config.yaml` changes the baseline; `cloud.yaml` is
+`/etc/vigil/config.yaml` changes the baseline; `cloud.yaml` is
 regenerated and should not be edited by hand.
 
 ## Differences from the bootable ISO
@@ -550,7 +550,7 @@ regenerated and should not be edited by hand.
 | Display / input    | Framebuffer and evdev enabled     | Disabled (no such devices on EC2)      |
 | Boot tasks         | Hardware enumeration first        | IMDS identity first, then memory, storage, scan |
 | Configuration      | `config.yaml` + kernel cmdline    | `config.yaml` + `cloud.yaml` from user data and tags |
-| Status             | Console commands                  | `jarvis --status`, HTTP on loopback  |
+| Status             | Console commands                  | `vigil --status`, HTTP on loopback  |
 | LLM brain          | Off unless `llm.enabled` is set   | On; Claude with a key from Secrets Manager, or any Bedrock model with the instance role |
 
-Both profiles run the same `jarvis` package; the ISO build is untouched.
+Both profiles run the same `vigil` package; the ISO build is untouched.

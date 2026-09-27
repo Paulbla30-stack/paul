@@ -12,12 +12,12 @@ import tempfile
 import unittest
 from unittest import mock
 
-from jarvis.agent.core import AgentCore
-from jarvis.brain.bedrock import BedrockBrain
-from jarvis.brain.llm import BaseBrain
-from jarvis.security import scanner as scanner_mod
-from jarvis.security.hardening import SystemHardener
-from jarvis.security.scanner import Finding, SecurityScanner, SystemAuditor
+from vigil.agent.core import AgentCore
+from vigil.brain.bedrock import BedrockBrain
+from vigil.brain.llm import BaseBrain
+from vigil.security import scanner as scanner_mod
+from vigil.security.hardening import SystemHardener
+from vigil.security.scanner import Finding, SecurityScanner, SystemAuditor
 
 LOG = logging.getLogger("test")
 NO_HW = {"display": None, "input": None, "memory": None, "storage": None}
@@ -340,7 +340,7 @@ class TestRpFilterHardening(unittest.TestCase):
 
 class TestConsoleFStrings(unittest.TestCase):
     def test_no_f_string_without_a_placeholder(self):
-        path = os.path.join(REPO, "jarvis", "ui", "console.py")
+        path = os.path.join(REPO, "vigil", "ui", "console.py")
         with open(path) as fh:
             tree = ast.parse(fh.read())
         # A format spec such as ":<12s" is itself a JoinedStr; not a finding.

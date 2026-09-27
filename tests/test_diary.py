@@ -17,9 +17,9 @@ import tempfile
 import unittest
 from datetime import datetime, timedelta
 
-from jarvis.agent import diary as d
-from jarvis.agent import timesense
-from jarvis.agent.store import build_store
+from vigil.agent import diary as d
+from vigil.agent import timesense
+from vigil.agent.store import build_store
 
 TZ = "Europe/London"
 HAVE_TZ = timesense.zone(TZ).utcoffset(datetime(2026, 7, 1)) == timedelta(hours=1)
@@ -615,8 +615,8 @@ class TestItIsActuallyWiredIn(unittest.TestCase):
 
     def agent(self, **cfg):
         import logging
-        from jarvis.agent.core import AgentCore
-        settings = {"name": "Jarvis", "profile": "cloud", "diary": {"timezone": TZ}}
+        from vigil.agent.core import AgentCore
+        settings = {"name": "Vigil", "profile": "cloud", "diary": {"timezone": TZ}}
         settings.update(cfg)
         return AgentCore(settings, {}, logging.getLogger("test"))
 
@@ -640,7 +640,7 @@ class TestItIsActuallyWiredIn(unittest.TestCase):
         tomorrow, as something he can rule on."""
         import os
         import tempfile
-        from jarvis.agent.planner import Task, TaskType
+        from vigil.agent.planner import Task, TaskType
         agent = self.agent()
         path = os.path.join(tempfile.mkdtemp(), "bill.txt")
         with open(path, "w") as fh:
@@ -659,7 +659,7 @@ class TestItIsActuallyWiredIn(unittest.TestCase):
     def test_a_document_with_no_dates_leaves_the_diary_alone(self):
         import os
         import tempfile
-        from jarvis.agent.planner import Task, TaskType
+        from vigil.agent.planner import Task, TaskType
         agent = self.agent()
         path = os.path.join(tempfile.mkdtemp(), "plain.txt")
         with open(path, "w") as fh:
@@ -673,7 +673,7 @@ class TestItIsActuallyWiredIn(unittest.TestCase):
         full of dates beside words like "expires". None of them is his."""
         import os
         import tempfile
-        from jarvis.agent.planner import Task, TaskType
+        from vigil.agent.planner import Task, TaskType
         agent = self.agent()
         path = os.path.join(tempfile.mkdtemp(), "some.conf")
         with open(path, "w") as fh:
@@ -724,7 +724,7 @@ class TestItDoesNotWaitOnTheLoopsConvenience(Base):
 
     def test_the_runner_shortens_its_sleep_to_the_next_moment(self):
         import logging
-        from jarvis.cloud.headless import HeadlessRunner
+        from vigil.cloud.headless import HeadlessRunner
         self.agent.diary = self.diary
         runner = HeadlessRunner(self.agent, logging.getLogger("test"), interval=30,
                                 status_port=None, token=None, token_file=None)
@@ -735,7 +735,7 @@ class TestItDoesNotWaitOnTheLoopsConvenience(Base):
     def test_the_runner_never_shortens_its_sleep_to_nothing(self):
         """A moment one second away must not turn the loop into a spin."""
         import logging
-        from jarvis.cloud.headless import HeadlessRunner
+        from vigil.cloud.headless import HeadlessRunner
         self.agent.diary = self.diary
         runner = HeadlessRunner(self.agent, logging.getLogger("test"), interval=30,
                                 status_port=None, token=None, token_file=None)

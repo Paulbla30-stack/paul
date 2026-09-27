@@ -16,7 +16,7 @@ import logging
 import time
 import unittest
 
-from jarvis.agent import marketing
+from vigil.agent import marketing
 
 LOG = logging.getLogger("test")
 NOW = 1_800_000_000.0
@@ -201,7 +201,7 @@ class TestItIsReachableFromTheUi(unittest.TestCase):
     register exists to stop -- and this one was noticed by its absence."""
 
     def setUp(self):
-        from jarvis.cloud.headless import UI_HTML_PATH
+        from vigil.cloud.headless import UI_HTML_PATH
         with open(UI_HTML_PATH, encoding="utf-8") as fh:
             self.page = fh.read()
 
@@ -221,7 +221,7 @@ class TestItIsReachableFromTheUi(unittest.TestCase):
 
     def test_the_endpoint_is_declared_and_read_only(self):
         import inspect
-        from jarvis.cloud import headless
+        from vigil.cloud import headless
         source = inspect.getsource(headless)
         self.assertIn('"/marketing"', source)
         self.assertNotIn('"/marketing/decide"', source)

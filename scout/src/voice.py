@@ -23,7 +23,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
-# Anything that ties JARVIS to the professional estate. Firewalled by rule.
+# Anything that ties Vigil to the professional estate. Firewalled by rule.
 FORBIDDEN_NAMES = [
     r"\barkin\b", r"\bthearkinsystem\b", r"\barkin engine\b",
 ]

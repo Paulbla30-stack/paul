@@ -12,13 +12,13 @@ import tempfile
 import os
 import unittest
 
-from jarvis.agent import authority
-from jarvis.agent.core import AgentCore
-from jarvis.agent.executor import TaskExecutor
-from jarvis.agent.memory import AgentMemory
-from jarvis.agent.planner import Task, TaskType
-from jarvis.agent.store import MemoryStore
-from jarvis.brain.llm import BaseBrain, Decision
+from vigil.agent import authority
+from vigil.agent.core import AgentCore
+from vigil.agent.executor import TaskExecutor
+from vigil.agent.memory import AgentMemory
+from vigil.agent.planner import Task, TaskType
+from vigil.agent.store import MemoryStore
+from vigil.brain.llm import BaseBrain, Decision
 
 LOG = logging.getLogger("test")
 NO_HW = {"display": None, "input": None, "memory": None, "storage": None}
@@ -94,14 +94,14 @@ class TestCommandClassification(unittest.TestCase):
         self.assertEqual(authority.classify_command(command), authority.CHANGE, command)
 
     def test_looking_at_the_machine_is_reading(self):
-        for command in ["df -h /", "cat /proc/cpuinfo", "ls -la /var/lib/jarvis",
-                        "ps aux", "journalctl -u jarvis -n 50", "systemctl status jarvis",
+        for command in ["df -h /", "cat /proc/cpuinfo", "ls -la /var/lib/vigil",
+                        "ps aux", "journalctl -u vigil -n 50", "systemctl status vigil",
                         "sysctl -a", "sysctl kernel.yama.ptrace_scope",
                         "find /etc -name '*.conf'", "stat /etc/hosts"]:
             self.read(command)
 
     def test_pipes_and_quoted_pipes_are_handled(self):
-        self.read('grep -E "warning|critical" /var/log/jarvis.log | wc -l')
+        self.read('grep -E "warning|critical" /var/log/vigil.log | wc -l')
         self.read("cat /etc/hosts|wc -l")
         self.read("ps aux | grep python | head -3")
 
@@ -120,8 +120,8 @@ class TestCommandClassification(unittest.TestCase):
         self.change("find /tmp -exec rm {} ;")
 
     def test_writing_subcommands_are_changes(self):
-        self.read("systemctl is-active jarvis")
-        self.change("systemctl restart jarvis")
+        self.read("systemctl is-active vigil")
+        self.change("systemctl restart vigil")
         self.change("ip addr add 10.0.0.1/24 dev eth0")
 
     def test_unknown_programs_are_changes(self):
@@ -254,10 +254,10 @@ class TestExecutorBackstop(unittest.TestCase):
         return ex
 
     def test_a_change_reaching_the_executor_directly_is_refused(self):
-        result = self.executor("proposer").execute(shell("touch /tmp/jarvis-authority-test"))
+        result = self.executor("proposer").execute(shell("touch /tmp/vigil-authority-test"))
         self.assertFalse(result["success"])
         self.assertIn("outside mandate", result["error"])
-        self.assertFalse(os.path.exists("/tmp/jarvis-authority-test"))
+        self.assertFalse(os.path.exists("/tmp/vigil-authority-test"))
 
     def test_a_read_reaching_the_executor_runs(self):
         self.assertTrue(self.executor("proposer").execute(shell("echo hello"))["success"])
@@ -274,10 +274,10 @@ class TestExecutorBackstop(unittest.TestCase):
         ex = TaskExecutor(dict(NO_HW), AgentMemory(), LOG,
                           shell_policy={"enabled": True, "timeout": 5})
         self.assertIsNone(ex.rung)
-        result = ex.execute(shell("touch /tmp/jarvis-unset-rung-test"))
+        result = ex.execute(shell("touch /tmp/vigil-unset-rung-test"))
         self.assertFalse(result["success"])
         self.assertIn("outside mandate", result["error"])
-        self.assertFalse(os.path.exists("/tmp/jarvis-unset-rung-test"))
+        self.assertFalse(os.path.exists("/tmp/vigil-unset-rung-test"))
 
     def test_an_executor_with_no_rung_still_reads(self):
         # Failing closed means the default rung, not no rung at all.
@@ -287,9 +287,9 @@ class TestExecutorBackstop(unittest.TestCase):
 
     def test_a_garbage_rung_is_the_default_rung(self):
         for rung in (None, "", "ACTOR", "ACT", 2, True, ["actor"], b"actor"):
-            result = self.executor(rung).execute(shell("touch /tmp/jarvis-garbage-rung"))
+            result = self.executor(rung).execute(shell("touch /tmp/vigil-garbage-rung"))
             self.assertFalse(result["success"], repr(rung))
-            self.assertFalse(os.path.exists("/tmp/jarvis-garbage-rung"), repr(rung))
+            self.assertFalse(os.path.exists("/tmp/vigil-garbage-rung"), repr(rung))
 
 
 class TestGoalWithdrawal(unittest.TestCase):
@@ -340,13 +340,13 @@ class TestStatedProposals(unittest.TestCase):
 
     def _agent(self):
         import logging
-        from jarvis.agent.core import AgentCore
+        from vigil.agent.core import AgentCore
         return AgentCore({"name": "t", "profile": "cloud", "rung": "proposer"},
                          {"display": None, "input": None, "memory": None,
                           "storage": None}, logging.getLogger("test"))
 
     def _decision(self, proposal, note=""):
-        from jarvis.brain.llm import Decision
+        from vigil.brain.llm import Decision
         return Decision(reasoning="because the scan flagged it", note=note,
                         proposal=proposal)
 

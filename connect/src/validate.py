@@ -3,7 +3,7 @@
 Every connection names exactly one host. This module is the one place that
 decides whether that host is acceptable, first as written and then again
 after DNS, because a name that looks public can resolve somewhere that is
-not. It runs in the broker, off Jarvis's box, and it trusts nothing the box
+not. It runs in the broker, off Vigil's box, and it trusts nothing the box
 or a manifest says about an address.
 
 Refused outright, whatever resolves:
@@ -11,7 +11,7 @@ Refused outright, whatever resolves:
   - IP literals in any spelling (dotted, decimal, octal, hex, v4-mapped v6)
   - localhost, .local, .internal, .localdomain, cloud metadata names
   - Arkin: thearkinsystem.co.uk and every subdomain. Paul's professional
-    system is firewalled from Jarvis, and a connection is exactly the kind of
+    system is firewalled from Vigil, and a connection is exactly the kind of
     thing that would quietly join the two. It is refused here, in code, so the
     firewall does not depend on anyone remembering it.
 """
@@ -23,7 +23,7 @@ from typing import Iterable, List, Optional
 
 DENIED_SUFFIXES = (
     "localhost", "local", "internal", "localdomain", "home.arpa", "lan",
-    # Paul's professional system. Never a Jarvis connection.
+    # Paul's professional system. Never a Vigil connection.
     "thearkinsystem.co.uk",
 )
 DENIED_NAMES = (

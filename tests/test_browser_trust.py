@@ -1,6 +1,6 @@
 """Per-origin trust: the control that makes staying signed in survivable.
 
-Jarvis's design, given when it was asked what it would want structurally now
+Vigil's design, given when it was asked what it would want structurally now
 that Paul had decided to let it act without asking. Acting and staying signed
 in are each survivable alone; together they mean an injected instruction on
 any page can act as him on any site he is signed into, and no care about the
@@ -18,7 +18,7 @@ anyone remembering to.
 
 import unittest
 
-from jarvis.browser import trust
+from vigil.browser import trust
 
 
 class TestWhatAnOriginIs(unittest.TestCase):

@@ -21,7 +21,7 @@ FALLBACK = "Paulbla30@hotmail.com"
 CFG = {"email": {
     "to": REAL, "sender": REAL,
     "fallback_to": FALLBACK, "fallback_sender": FALLBACK,
-    "fallback_enabled": True, "subject_prefix": "JARVIS scout"}}
+    "fallback_enabled": True, "subject_prefix": "Vigil scout"}}
 
 
 def mailer(verified, cfg=None):
@@ -53,7 +53,7 @@ class ResolveTest(unittest.TestCase):
         self.assertTrue(fell)
 
     def test_the_warning_names_the_address_once(self):
-        with self.assertLogs("jarvis.scout", level="WARNING") as cap:
+        with self.assertLogs("vigil.scout", level="WARNING") as cap:
             mailer({FALLBACK}).resolve()
         msg = "\n".join(cap.output)
         self.assertIn(REAL, msg)
@@ -64,7 +64,7 @@ class ResolveTest(unittest.TestCase):
 
     def test_the_warning_names_both_ends_when_they_differ(self):
         cfg = {"email": dict(CFG["email"], sender="scout@heartbeat-framework.org")}
-        with self.assertLogs("jarvis.scout", level="WARNING") as cap:
+        with self.assertLogs("vigil.scout", level="WARNING") as cap:
             mailer({FALLBACK}, cfg).resolve()
         msg = "\n".join(cap.output)
         self.assertIn(REAL, msg)

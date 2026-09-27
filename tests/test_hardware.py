@@ -1,13 +1,13 @@
-"""Tests for Jarvis Hardware Access Layer."""
+"""Tests for Vigil Hardware Access Layer."""
 
 import unittest
 import os
 import tempfile
 
-from jarvis.hardware.display import DisplayManager, FramebufferInfo
-from jarvis.hardware.input_devices import InputManager, InputDevice
-from jarvis.hardware.mem import MemoryManager, MemoryRegion
-from jarvis.hardware.storage import StorageManager, BlockDevice
+from vigil.hardware.display import DisplayManager, FramebufferInfo
+from vigil.hardware.input_devices import InputManager, InputDevice
+from vigil.hardware.mem import MemoryManager, MemoryRegion
+from vigil.hardware.storage import StorageManager, BlockDevice
 
 
 class TestFramebufferInfo(unittest.TestCase):

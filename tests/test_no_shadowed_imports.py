@@ -22,10 +22,10 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # The long-lived request handlers: big functions, many branches, and the place
 # where a local import is most likely to be added to one branch of many.
 WATCHED = (
-    os.path.join("jarvis", "cloud", "headless.py"),
-    os.path.join("jarvis", "browser", "service.py"),
-    os.path.join("jarvis", "agent", "executor.py"),
-    os.path.join("jarvis", "agent", "core.py"),
+    os.path.join("vigil", "cloud", "headless.py"),
+    os.path.join("vigil", "browser", "service.py"),
+    os.path.join("vigil", "agent", "executor.py"),
+    os.path.join("vigil", "agent", "core.py"),
 )
 
 

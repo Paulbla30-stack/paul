@@ -19,7 +19,7 @@ from urllib.parse import urlsplit, urljoin
 
 from validate import Refused, check_url, resolve_public
 
-USER_AGENT = "jarvis-connect/1 (personal assistant; contact via heartbeat-framework.org)"
+USER_AGENT = "vigil-connect/1 (personal assistant; contact via heartbeat-framework.org)"
 MAX_REDIRECTS = 2
 
 

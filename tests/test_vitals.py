@@ -19,8 +19,8 @@ import os
 import tempfile
 import unittest
 
-from jarvis.agent import vitals as v
-from jarvis.agent.store import build_store
+from vigil.agent import vitals as v
+from vigil.agent.store import build_store
 
 LOG = logging.getLogger("test")
 NOW = 1_800_000_000.0
@@ -241,8 +241,8 @@ class TestTheAgentIsNeverToldItsOwnVitals(Base):
 class TestItReachesTheAgent(unittest.TestCase):
 
     def agent(self, **cfg):
-        from jarvis.agent.core import AgentCore
-        settings = {"name": "Jarvis", "profile": "cloud"}
+        from vigil.agent.core import AgentCore
+        settings = {"name": "Vigil", "profile": "cloud"}
         settings.update(cfg)
         return AgentCore(settings, {}, LOG)
 
@@ -252,7 +252,7 @@ class TestItReachesTheAgent(unittest.TestCase):
     def test_the_model_is_not_given_them(self):
         """The one integration that must NOT exist."""
         import inspect
-        from jarvis.brain import llm
+        from vigil.brain import llm
         source = inspect.getsource(llm)
         self.assertNotIn("vitals.read", source)
         self.assertNotIn("agent.vitals", source)

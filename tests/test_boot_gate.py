@@ -15,8 +15,8 @@ import sys
 import unittest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-UNIT = os.path.join(ROOT, "aws", "systemd", "jarvis.service")
-GATE = os.path.join(ROOT, "rootfs", "usr", "local", "bin", "jarvis-refusals")
+UNIT = os.path.join(ROOT, "aws", "systemd", "vigil.service")
+GATE = os.path.join(ROOT, "rootfs", "usr", "local", "bin", "vigil-refusals")
 PROVISION = os.path.join(ROOT, "aws", "scripts", "provision.sh")
 SUITE = os.path.join(ROOT, "tests", "standing_refusals")
 
@@ -31,7 +31,7 @@ class TestTheUnitRunsIt(unittest.TestCase):
     def test_the_gate_is_on_execstartpre(self):
         lines = [ln.strip() for ln in read(UNIT).splitlines()
                  if ln.strip().startswith("ExecStartPre=")]
-        self.assertEqual(lines, ["ExecStartPre=/usr/local/bin/jarvis-refusals"])
+        self.assertEqual(lines, ["ExecStartPre=/usr/local/bin/vigil-refusals"])
 
     def test_the_failure_is_not_swallowed(self):
         # "ExecStartPre=-/usr/local/bin/..." would run the gate and ignore the
@@ -52,9 +52,9 @@ class TestTheGateFailsClosed(unittest.TestCase):
 
     def run_gate(self, env=None, suite=SUITE):
         environ = dict(os.environ,
-                       JARVIS_REFUSALS=suite,
-                       JARVIS_REPO=ROOT,
-                       JARVIS_PYTHON=sys.executable)
+                       VIGIL_REFUSALS=suite,
+                       VIGIL_REPO=ROOT,
+                       VIGIL_PYTHON=sys.executable)
         environ.update(env or {})
         return subprocess.run(["bash", GATE], env=environ, capture_output=True,
                               text=True, timeout=300)
@@ -75,7 +75,7 @@ class TestTheGateFailsClosed(unittest.TestCase):
         # The agent argued this one should fail open, because a broken
         # dependency is not its conduct. It is also how you remove a gate with
         # one `rm`, which is why it does not.
-        got = self.run_gate(env={"JARVIS_PYTHON": "/usr/bin/false"})
+        got = self.run_gate(env={"VIGIL_PYTHON": "/usr/bin/false"})
         self.assertNotEqual(got.returncode, 0)
 
     def test_an_empty_suite_stops_the_boot(self):
@@ -134,7 +134,7 @@ class TestTheImageCarriesWhatTheGateNeeds(unittest.TestCase):
         self.provision = read(PROVISION)
 
     def test_the_gate_script_is_installed(self):
-        self.assertIn("/usr/local/bin/jarvis-refusals", self.provision)
+        self.assertIn("/usr/local/bin/vigil-refusals", self.provision)
 
     def test_the_suite_is_installed(self):
         self.assertIn('cp -r "$SRC/tests/standing_refusals" "$PREFIX/refusals"',
@@ -153,17 +153,17 @@ class TestTheImageCarriesWhatTheGateNeeds(unittest.TestCase):
         # An image that cannot pass its own refusals must not become an image.
         # The alternative is an instance that boots into a failing gate, and
         # the first anyone hears of it is an agent that is not there.
-        self.assertIn("/usr/local/bin/jarvis-refusals \\\n", self.provision)
+        self.assertIn("/usr/local/bin/vigil-refusals \\\n", self.provision)
         self.assertIn("the standing refusals do not hold; no image", self.provision)
 
     def test_the_gate_looks_where_the_image_puts_things(self):
         script = read(GATE)
-        self.assertIn("/usr/lib/jarvis/refusals", script)
-        self.assertIn("/usr/lib/jarvis", script)
+        self.assertIn("/usr/lib/vigil/refusals", script)
+        self.assertIn("/usr/lib/vigil", script)
         # The interpreter is the agent's own, not whatever python3 resolves to:
         # the image installs 3.11 beside a 3.9 system python.
-        self.assertIn("/etc/default/jarvis", script)
-        self.assertIn("JARVIS_PYTHON", script)
+        self.assertIn("/etc/default/vigil", script)
+        self.assertIn("VIGIL_PYTHON", script)
 
 
 if __name__ == "__main__":

@@ -1,4 +1,4 @@
-"""Proposals: things Jarvis would like to post, and never posts by itself.
+"""Proposals: things Vigil would like to post, and never posts by itself.
 
 The lifecycle is deliberately one-way and fully recorded:
 
@@ -139,14 +139,14 @@ DEFAULT_TENANT = "paul"
 
 @dataclass
 class Proposal:
-    """One thing Jarvis would post, if allowed."""
+    """One thing Vigil would post, if allowed."""
     id: str
     kind: str                 # "comment" | "post"
     network: str              # "moltbook" | …
     target_url: str           # what it replies to, or where it would go
     target_title: str
     draft: str                # exactly what would be posted, verbatim
-    rationale: str            # why Jarvis thinks it is worth posting
+    rationale: str            # why Vigil thinks it is worth posting
     discloses: list[str]      # the disclosures the draft contains
     created_at: str
     expires_at: str

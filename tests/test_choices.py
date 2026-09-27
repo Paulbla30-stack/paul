@@ -1,11 +1,11 @@
-"""The option window in chat: Jarvis offers choices, Paul taps one."""
+"""The option window in chat: Vigil offers choices, Paul taps one."""
 
 import json
 import tempfile
 import unittest
 
-from jarvis.agent import choices
-from jarvis.cloud.headless import UI_HTML_PATH
+from vigil.agent import choices
+from vigil.cloud.headless import UI_HTML_PATH
 from tests.test_brain import FakeClaude, make_brain, message, needs_sdk
 from tests.test_ui import TestUiListener, call, make_agent
 
@@ -53,7 +53,7 @@ class TestSplit(unittest.TestCase):
         self.assertNotIn("```", text)
 
     def test_the_prompt_tells_the_model_about_it(self):
-        from jarvis.brain.llm import ASK_PROMPT
+        from vigil.brain.llm import ASK_PROMPT
         self.assertIn("choices", ASK_PROMPT)
         self.assertIn("never for yes/no", ASK_PROMPT)
 

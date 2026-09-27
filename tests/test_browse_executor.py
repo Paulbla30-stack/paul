@@ -11,9 +11,9 @@ find anything in.
 import logging
 import unittest
 
-from jarvis.agent.executor import TaskExecutor
-from jarvis.agent.memory import AgentMemory
-from jarvis.agent.planner import Task, TaskType
+from vigil.agent.executor import TaskExecutor
+from vigil.agent.memory import AgentMemory
+from vigil.agent.planner import Task, TaskType
 
 LOG = logging.getLogger("test.browse")
 LOG.addHandler(logging.NullHandler())
@@ -244,7 +244,7 @@ class TestWaitingForPaulIsNotAFailure(unittest.TestCase):
 
     def test_it_is_written_to_the_journal_as_waiting(self):
         import tempfile, os
-        from jarvis.agent.browse import BrowserJournal
+        from vigil.agent.browse import BrowserJournal
         view = FakeView({"error": "x", "reason": "needs-approval", "gate": "publish",
                          "detail": "would post"})
         view.journal = BrowserJournal(os.path.join(tempfile.mkdtemp(), "j.jsonl"))
@@ -256,7 +256,7 @@ class TestWaitingForPaulIsNotAFailure(unittest.TestCase):
 
     def test_a_good_action_is_journalled_as_ok(self):
         import tempfile, os
-        from jarvis.agent.browse import BrowserJournal
+        from vigil.agent.browse import BrowserJournal
         view = FakeView()
         view.journal = BrowserJournal(os.path.join(tempfile.mkdtemp(), "j.jsonl"))
         executor(view).execute(task(TaskType.BROWSE_OPEN, url="https://example.com/a"))
@@ -267,7 +267,7 @@ class TestTheDebriefTool(unittest.TestCase):
 
     def test_it_reads_the_journal_back(self):
         import tempfile, os
-        from jarvis.agent.browse import BrowserJournal
+        from vigil.agent.browse import BrowserJournal
         view = FakeView()
         view.journal = BrowserJournal(os.path.join(tempfile.mkdtemp(), "j.jsonl"))
         view.journal.record("opened https://a.test/", "https://a.test/", "ok")

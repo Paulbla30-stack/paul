@@ -24,9 +24,9 @@ import tempfile
 import time
 import unittest
 
-from jarvis.agent.consolidate import CONFIRMATIONS_TO_STAND, Consolidator
-from jarvis.agent.core import AgentCore
-from jarvis.agent.store import MemoryStore
+from vigil.agent.consolidate import CONFIRMATIONS_TO_STAND, Consolidator
+from vigil.agent.core import AgentCore
+from vigil.agent.store import MemoryStore
 
 LOG = logging.getLogger("test")
 

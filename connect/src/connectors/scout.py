@@ -1,14 +1,14 @@
 """The scout's finds, read from its own table (Paul, 27 September: option 1).
 
 The scout runs on its own every morning and emails Paul a digest. Until now
-Jarvis saw none of what it found: his only window onto the scout looked at
+Vigil saw none of what it found: his only window onto the scout looked at
 draft posts, a stage that is not switched on, so it showed empty lists while
 the table held 46 finds. This is the read side of that link, built but not
-yet wired to Jarvis.
+yet wired to Vigil.
 
 It reads; it never writes. The scout's hash chain stays the scout's own
-record, separate from Jarvis's ledger, which is the safer way round: the
-scout finds things and Jarvis thinks about them.
+record, separate from Vigil's ledger, which is the safer way round: the
+scout finds things and Vigil thinks about them.
 
 What comes back is typed. The source is one of the scout's known sources,
 the link must be on that source's own host, and the keywords are the scout's

@@ -16,7 +16,7 @@ changes in between.
 
 import unittest
 
-from jarvis.browser import guard
+from vigil.browser import guard
 
 
 def resolves_to(*addresses):
@@ -122,7 +122,7 @@ class TestSchemes(unittest.TestCase):
     def test_file_urls_are_refused(self):
         # The browser runs on the box. file:// is how a page asks it to read
         # the disk it is standing on.
-        self.assertEqual(self.refuse("file:///etc/jarvis/token").reason,
+        self.assertEqual(self.refuse("file:///etc/vigil/token").reason,
                          guard.REASON_SCHEME)
 
     def test_javascript_urls_are_refused(self):

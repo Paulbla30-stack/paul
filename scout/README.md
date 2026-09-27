@@ -1,4 +1,4 @@
-# JARVIS scout — Stage 1
+# Vigil scout — Stage 1
 
 Finds online discussions relevant to Paul's work, scores them against rules,
 logs them to a hash-chained record, and emails a daily digest at 07:00 UK.
@@ -7,7 +7,7 @@ logs them to a hash-chained record, and emails a daily digest at 07:00 UK.
 In Stage 1 it calls no model at all. Paul reads the digest and posts as
 himself.
 
-Personal to JARVIS, strictly firewalled from Arkin Engine Ltd: no Arkin
+Personal to Vigil, strictly firewalled from Arkin Engine Ltd: no Arkin
 code, accounts or data. No access to the `heartbeat-memory` server.
 
 ---
@@ -16,9 +16,9 @@ code, accounts or data. No access to the `heartbeat-memory` server.
 
 **Deployed and running** (checked 27 September 2026). The `jarvis-scout` stack was created on 21 September 2026 and last updated on 27 September. The schedule `jarvis-scout-daily` is enabled and runs at 07:00 UK. By 27 September it had logged 46 finds, with the hash chain at 46 entries.
 
-- **The digest goes to Paul directly.** The scout emails it itself; Jarvis is not involved.
-- **Jarvis could not see the finds.** His only window onto the scout (`jarvis/agent/marketing.py`) read draft proposals from Stage 2, which is not switched on, so it showed empty lists.
-- **The fix, on Paul's choice of 27 September ("option 1"):** the finds become a read-only connection, `scout`, in `connect/`. It returns typed fields, and titles only for Paul's screen. The scout's chain stays its own record. It is built and tested but **not yet linked to Jarvis**.
+- **The digest goes to Paul directly.** The scout emails it itself; Vigil is not involved.
+- **Vigil could not see the finds.** His only window onto the scout (`vigil/agent/marketing.py`) read draft proposals from Stage 2, which is not switched on, so it showed empty lists.
+- **The fix, on Paul's choice of 27 September ("option 1"):** the finds become a read-only connection, `scout`, in `connect/`. It returns typed fields, and titles only for Paul's screen. The scout's chain stays its own record. It is built and tested but **not yet linked to Vigil**.
 
 The sections below are the pre-deployment record. They are kept as written, because they explain the thresholds.
 
@@ -469,7 +469,7 @@ own framework argues for. *Before the Machine* is instrument zero: the
 document that says when not to deploy. The gate exists; the drafting it
 gates does not yet.
 
-Nothing Jarvis proposes can reach a network without passing through here.
+Nothing Vigil proposes can reach a network without passing through here.
 
 ```
 pending ──approve──> approved ──send──> sent

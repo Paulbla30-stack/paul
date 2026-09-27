@@ -1,6 +1,6 @@
 """Saying something in public is not the same as reading, and needs asking.
 
-Paul's hard rule: "if jarvis wants to post on something he get approval first."
+Paul's hard rule: "if vigil wants to post on something he get approval first."
 The classifier's direction is the whole design and is what these tests pin:
 an action is publishing unless it is *recognisably* not. The structural
 signals -- a submit, a press inside a form, text composed on the page -- force
@@ -11,7 +11,7 @@ submission is.
 
 import unittest
 
-from jarvis.browser import publish as P
+from vigil.browser import publish as P
 
 
 class TestWhatIsPlainlyNotPublishing(unittest.TestCase):

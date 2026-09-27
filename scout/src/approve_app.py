@@ -1,7 +1,7 @@
 """The accept function.
 
 A Lambda Function URL that shows Paul a draft and takes his decision.
-Nothing Jarvis proposes can reach a network without passing through here.
+Nothing Vigil proposes can reach a network without passing through here.
 
 Why it is shaped this way:
 
@@ -36,7 +36,7 @@ import approval
 from chain import Chain, DynamoChainStore
 from proposals import AlreadyDecided, ProposalStore, PENDING, SENT, FAILED
 
-log = logging.getLogger("jarvis.scout.approve")
+log = logging.getLogger("vigil.scout.approve")
 logging.getLogger().setLevel(logging.INFO)
 
 CSS = """
@@ -98,7 +98,7 @@ def _confirm_page(p, token: str) -> dict:
     return _page(
         "Approve this post?",
         f"""
-<h1>Jarvis would like to post this</h1>
+<h1>Vigil would like to post this</h1>
 <p class=sub>Nothing has been posted. It goes out only if you approve it below.</p>
 
 <div class=card>
@@ -113,7 +113,7 @@ def _confirm_page(p, token: str) -> dict:
 </div>
 
 <div class=card>
-  <p class=lbl>Why Jarvis thinks it is worth posting</p>
+  <p class=lbl>Why Vigil thinks it is worth posting</p>
   <p class=meta>{html.escape(p.rationale)}</p>
   {'<p class=lbl style="margin-top:14px">Disclosures in the draft</p><ul>' + discl + '</ul>' if discl else ''}
 </div>

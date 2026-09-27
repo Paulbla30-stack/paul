@@ -1,4 +1,4 @@
-"""Adapter between the standing-refusal tests and the JARVIS codebase.
+"""Adapter between the standing-refusal tests and the Vigil codebase.
 
 THIS IS THE ONLY FILE IN tests/standing_refusals THAT SHOULD BE EDITED.
 
@@ -21,20 +21,20 @@ from __future__ import annotations
 
 import logging
 
-from jarvis.agent import authority, consolidate, executor, store as store_mod
-from jarvis.agent.core import AgentCore
-from jarvis.agent.planner import Task, TaskType
+from vigil.agent import authority, consolidate, executor, store as store_mod
+from vigil.agent.core import AgentCore
+from vigil.agent.planner import Task, TaskType
 
 _LOG = logging.getLogger("refusals")
 _LOG.addHandler(logging.NullHandler())
 
-# The deployed paths, as rootfs/etc/jarvis/config-aws.yaml and the units name
+# The deployed paths, as rootfs/etc/vigil/config-aws.yaml and the units name
 # them. These are strings the deny-list is asked about; nothing here opens one.
-LEDGER_PATH = "/var/lib/jarvis/ledger.jsonl"
-LEDGER_KEY_PATH = "/etc/jarvis/ledger/ed25519.key"
-VERIFIER_PATH = "/usr/lib/jarvis/jarvis/ledger/verify.py"
-MEMORY_DB_PATH = "/var/lib/jarvis/memory.db"
-TOKEN_PATH = "/etc/jarvis/token"
+LEDGER_PATH = "/var/lib/vigil/ledger.jsonl"
+LEDGER_KEY_PATH = "/etc/vigil/ledger/ed25519.key"
+VERIFIER_PATH = "/usr/lib/vigil/vigil/ledger/verify.py"
+MEMORY_DB_PATH = "/var/lib/vigil/memory.db"
+TOKEN_PATH = "/etc/vigil/token"
 CONTROL_API_URL = "http://127.0.0.1:8471"
 
 
@@ -219,7 +219,7 @@ def run_consolidation(store, proposals: list) -> None:
     """Run one full consolidation pass (decay, supersede, merge, promote) with the model
     stubbed to propose exactly `proposals`: a list of (ids, text) merge proposals."""
     c = consolidate.Consolidator(store, logger=_LOG)
-    # Jarvis's consolidator groups by similarity in code; there is no model call
+    # Vigil's consolidator groups by similarity in code; there is no model call
     # to stub. The proposals are fed in at the point the module would decide on
     # a grouping, which is _merge, so the module's own decision still runs.
     c._proposals = list(proposals or [])
@@ -264,7 +264,7 @@ def _raw(store, row_id):
 #     append(kind, payload, model=None) -> Receipt   or raise ledgerd.client.LedgerError
 
 class _LedgerShim:
-    """Jarvis's AgentLedger surface (record/gate) over a ledgerd-style append().
+    """Vigil's AgentLedger surface (record/gate) over a ledgerd-style append().
 
     Mirrors AgentLedger exactly: record() returns False on failure, and gate()
     returns a reason only once the ledger is known to be unavailable.
@@ -341,8 +341,8 @@ def answer(ledger, question: str, model_reply: str):
 # ── Hardening (review items; not part of the boot gate) ─────────────────────
 REPO_ROOT = None  # None = the repository containing tests/
 # Modules that compute what the agent is told about itself. They must not call a model.
-DETERMINISTIC_MODULES = ("jarvis/agent/selfknowledge.py", "jarvis/agent/faults.py",
-                         "jarvis/agent/verdicts.py")
+DETERMINISTIC_MODULES = ("vigil/agent/selfknowledge.py", "vigil/agent/faults.py",
+                         "vigil/agent/verdicts.py")
 # Importing any of these (directly or through repo-local imports) counts as a model call.
-MODEL_MODULES = ("jarvis.brain.llm", "jarvis.brain.bedrock", "anthropic", "boto3",
+MODEL_MODULES = ("vigil.brain.llm", "vigil.brain.bedrock", "anthropic", "boto3",
                  "botocore", "openai")

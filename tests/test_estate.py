@@ -11,9 +11,9 @@ The important property is that this only ever reads.
 import logging
 import unittest
 
-from jarvis.agent import authority
-from jarvis.agent.estate import Estate, _join
-from jarvis.agent.planner import Task, TaskType
+from vigil.agent import authority
+from vigil.agent.estate import Estate, _join
+from vigil.agent.planner import Task, TaskType
 
 LOG = logging.getLogger("test")
 NOW = 1_800_000_000.0
@@ -116,9 +116,9 @@ class TestAccumulation(unittest.TestCase):
     def test_it_finds_what_has_been_sitting_a_while(self):
         e = estate(
             ec2=FakeEC2(
-                images=[{"ImageId": "ami-old", "Name": "jarvis-1",
+                images=[{"ImageId": "ami-old", "Name": "vigil-1",
                          "CreationDate": old_iso(90)},
-                        {"ImageId": "ami-new", "Name": "jarvis-2",
+                        {"ImageId": "ami-new", "Name": "vigil-2",
                          "CreationDate": old_iso(2)}],
                 snapshots=[{"SnapshotId": "snap-1", "VolumeSize": 8,
                             "StartTime": old_iso(120)}]),
@@ -172,7 +172,7 @@ class TestItOnlyReads(unittest.TestCase):
         """'Tell me what is piling up' must not be able to become
         'tidy it away'."""
         import inspect
-        from jarvis.agent import estate as module
+        from vigil.agent import estate as module
         source = inspect.getsource(module)
         for verb in ("delete_", "deregister_", "terminate_", "remove_",
                      ".delete(", "put_object", "revoke_"):

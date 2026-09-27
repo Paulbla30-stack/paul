@@ -8,10 +8,10 @@ import unittest
 import urllib.request
 import urllib.error
 
-from jarvis.agent.core import AgentCore
-from jarvis.brain import dials
-from jarvis.brain.llm import BaseBrain, Completion, PLAN_MENU, ASK_PROMPT
-from jarvis.cloud.headless import HeadlessRunner
+from vigil.agent.core import AgentCore
+from vigil.brain import dials
+from vigil.brain.llm import BaseBrain, Completion, PLAN_MENU, ASK_PROMPT
+from vigil.cloud.headless import HeadlessRunner
 
 try:
     from cryptography.hazmat.primitives.asymmetric import ed25519  # noqa: F401
@@ -85,7 +85,7 @@ class TestDials(unittest.TestCase):
         self.assertIn("Hard gates", dials.system_text(s))
         self.assertNotIn("Never run destructive", dials.system_text(s))
         s.update({"constitution": 0, "honesty": 0, "ledger_disclosure": 0, "guardrail_disclosure": 0, "voice": 0, "identity": 1})
-        self.assertTrue(dials.system_text(s).startswith("You are Jarvis, an AI colleague"))
+        self.assertTrue(dials.system_text(s).startswith("You are Vigil, an AI colleague"))
         self.assertEqual(len(dials.describe(s)), len(dials.DIALS))
 
     def test_context_levels(self):
@@ -164,7 +164,7 @@ class TestExperiment(unittest.TestCase):
 
     @unittest.skipUnless(HAVE_CRYPTO, "cryptography not installed")
     def test_runs_and_dial_changes_are_ledgered(self):
-        from jarvis.ledger import AgentLedger
+        from vigil.ledger import AgentLedger
         with tempfile.TemporaryDirectory() as tmp:
             led = AgentLedger({"enabled": True, "path": f"{tmp}/l.jsonl", "key_file": f"{tmp}/k/ed25519.key",
                                "pubkey_file": f"{tmp}/k/ed25519.pub"}, LOG, writer="t")
@@ -215,7 +215,7 @@ class TestLabEndpoints(unittest.TestCase):
             self.assertEqual((saved["settings"]["identity"], saved["settings"]["context"], saved["apply_to_chat"]), (1, 1, True))
             chat = call("/chat", {"messages": [{"role": "user", "content": "hi"}]})
             self.assertTrue(chat["dials"])
-            self.assertTrue(brain.calls[-1]["system"].startswith("You are Jarvis, an AI colleague"))
+            self.assertTrue(brain.calls[-1]["system"].startswith("You are Vigil, an AI colleague"))
             run = call("/lab/run", {"question": "how is disk?", "compare": True})
             self.assertEqual(len(run["variants"]), 2)
             self.assertEqual(run["variants"][1]["settings"]["identity"], 1)

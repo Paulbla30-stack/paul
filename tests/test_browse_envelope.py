@@ -18,7 +18,7 @@ create illusion, not security.
 
 import unittest
 
-from jarvis.agent import browse
+from vigil.agent import browse
 
 
 def page(**over):
@@ -127,7 +127,7 @@ class TestLinksAndFields(unittest.TestCase):
 
 
 class TestProvenance(unittest.TestCase):
-    """Jarvis's labelling instinct, in the place where it does something."""
+    """Vigil's labelling instinct, in the place where it does something."""
 
     def test_a_citation_names_the_address_and_the_time(self):
         line = browse.cite(page())

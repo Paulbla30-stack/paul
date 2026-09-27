@@ -11,9 +11,9 @@ import os
 import tempfile
 import unittest
 
-from jarvis.agent import authority, notify
-from jarvis.agent.executor import check_command_allowed, normalise_shell_policy
-from jarvis.agent.planner import Task, TaskType
+from vigil.agent import authority, notify
+from vigil.agent.executor import check_command_allowed, normalise_shell_policy
+from vigil.agent.planner import Task, TaskType
 
 
 class FakeClock:
@@ -57,7 +57,7 @@ class TestItSends(unittest.TestCase):
         self.assertTrue(verdict["sent"])
         destination, text = box.sent[0]
         self.assertEqual(destination, "+447700900123")
-        self.assertTrue(text.startswith("Jarvis: disk at 84%"))
+        self.assertTrue(text.startswith("Vigil: disk at 84%"))
         self.assertIn("threshold 80", text)
 
     def test_a_long_body_is_truncated_not_split(self):
@@ -162,9 +162,9 @@ class TestTheDestinationIsNotTheModelsToChoose(unittest.TestCase):
 
     def test_the_agent_cannot_read_or_edit_the_destination_file(self):
         policy = normalise_shell_policy({"enabled": True})
-        for command in ("cat /etc/jarvis/notify.dest",
-                        "echo +44777 > /etc/jarvis/notify.dest",
-                        "grep . /etc/jarvis/notify.dest"):
+        for command in ("cat /etc/vigil/notify.dest",
+                        "echo +44777 > /etc/vigil/notify.dest",
+                        "grep . /etc/vigil/notify.dest"):
             self.assertIsNotNone(check_command_allowed(command, policy), command)
 
 

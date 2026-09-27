@@ -269,7 +269,7 @@ class TestScoutConnection(unittest.TestCase):
         self.assertTrue(out["ok"], out)
         self.assertEqual(tables, ["jarvis-scout"])
         with self.assertRaises(manifest.CallRefused):
-            call(b, "scout", "recent", {"days": 7, "limit": 5, "table": "jarvis-connections"})
+            call(b, "scout", "recent", {"days": 7, "limit": 5, "table": "vigil-connections"})
 
 
 class TestBroker(unittest.TestCase):
@@ -304,7 +304,7 @@ class TestBroker(unittest.TestCase):
         self.assertEqual(out["error"], "hourly_limit")
         self.assertEqual(len(self.get.seen), 2)
 
-    def test_jarvis_can_switch_off_but_not_on(self):
+    def test_vigil_can_switch_off_but_not_on(self):
         b = self.broker()
         self.assertTrue(b.disable({"connection": "zenodo", "reason": "anomaly"})["ok"])
         out = call(b, "zenodo", "record", {"record": "21516401"})

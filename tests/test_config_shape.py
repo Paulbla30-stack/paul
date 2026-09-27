@@ -21,7 +21,7 @@ import unittest
 import yaml
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-CONFIG = os.path.join(ROOT, "rootfs", "etc", "jarvis", "config-aws.yaml")
+CONFIG = os.path.join(ROOT, "rootfs", "etc", "vigil", "config-aws.yaml")
 
 # Where each section has to live for the code that reads it to find it.
 # Written as full paths, because "it is in the file somewhere" is exactly the
@@ -91,7 +91,7 @@ class TestTheAgentReadsWhatTheFileSays(unittest.TestCase):
         import logging
         with open(CONFIG, encoding="utf-8") as fh:
             cfg = yaml.safe_load(fh)
-        from jarvis.agent.core import AgentCore
+        from vigil.agent.core import AgentCore
         agent = AgentCore(dict(cfg.get("agent") or {}, **{
             k: cfg[k] for k in ("documents", "marketing") if k in cfg}),
             {"display": None, "input": None, "memory": None, "storage": None},
@@ -117,9 +117,9 @@ class TestTheAgentIsHandedWhatItReads(unittest.TestCase):
     def setUp(self):
         import ast
         import inspect
-        from jarvis.agent import core
+        from vigil.agent import core
         self.core_src = inspect.getsource(core)
-        with open(os.path.join(ROOT, "jarvis", "main.py"), encoding="utf-8") as fh:
+        with open(os.path.join(ROOT, "vigil", "main.py"), encoding="utf-8") as fh:
             self.main_src = fh.read()
         with open(CONFIG, encoding="utf-8") as fh:
             self.cfg = yaml.safe_load(fh)

@@ -1,0 +1,22 @@
+[Unit]
+Description=Vigil cloud bootstrap (IMDS + user data -> /etc/vigil/cloud.yaml)
+Documentation=https://github.com/Paulbla30-stack/paul
+After=network-online.target cloud-init.service
+Wants=network-online.target
+Before=vigil.service
+ConditionPathExists=/usr/lib/vigil/vigil/cloud/bootstrap.py
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+Environment=PYTHONPATH=/usr/lib/vigil
+Environment=PYTHONUNBUFFERED=1
+Environment=VIGIL_PYTHON=/usr/bin/python3
+EnvironmentFile=-/etc/default/vigil
+ExecStart=/bin/sh -c 'exec "$VIGIL_PYTHON" -m vigil.cloud.bootstrap --output /etc/vigil/cloud.yaml --config /etc/vigil/config.yaml'
+TimeoutStartSec=90
+StandardOutput=journal+console
+StandardError=journal+console
+
+[Install]
+WantedBy=multi-user.target

@@ -12,12 +12,12 @@ import tempfile
 import unittest
 from datetime import datetime
 
-from jarvis.agent import diary as d
-from jarvis.agent import notify
-from jarvis.agent import operator as op
-from jarvis.agent import questions as q
-from jarvis.agent import schedule as sc
-from jarvis.agent import timesense
+from vigil.agent import diary as d
+from vigil.agent import notify
+from vigil.agent import operator as op
+from vigil.agent import questions as q
+from vigil.agent import schedule as sc
+from vigil.agent import timesense
 
 TZ = "Europe/London"
 LOG = logging.getLogger("test")
@@ -105,8 +105,8 @@ class TestForgettingNothingForgetsNothing(unittest.TestCase):
 class TestTaskHistoryIsBounded(unittest.TestCase):
 
     def test_it_keeps_the_last_thousand(self):
-        from jarvis.agent.core import AgentCore
-        from jarvis.agent.planner import Task, TaskType
+        from vigil.agent.core import AgentCore
+        from vigil.agent.planner import Task, TaskType
         agent = AgentCore({"name": "t", "profile": "cloud"},
                           {"display": None, "input": None, "memory": None,
                            "storage": None}, LOG)
@@ -123,8 +123,8 @@ class TestTaskHistoryIsBounded(unittest.TestCase):
         self.assertEqual(agent.task_history[0]["task"]["description"], "old 1")
 
     def test_completed_tasks_keeps_counting_past_the_trim(self):
-        from jarvis.agent.core import AgentCore
-        from jarvis.agent.planner import Task, TaskType
+        from vigil.agent.core import AgentCore
+        from vigil.agent.planner import Task, TaskType
         agent = AgentCore({"name": "t", "profile": "cloud"},
                           {"display": None, "input": None, "memory": None,
                            "storage": None}, LOG)

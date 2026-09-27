@@ -11,12 +11,12 @@ import os
 import tempfile
 import unittest
 
-from jarvis.agent import environment as env
-from jarvis.agent.core import AgentCore
-from jarvis.agent.executor import TaskExecutor
-from jarvis.agent.memory import AgentMemory
-from jarvis.agent.planner import Task, TaskType
-from jarvis.brain.llm import BaseBrain, Decision
+from vigil.agent import environment as env
+from vigil.agent.core import AgentCore
+from vigil.agent.executor import TaskExecutor
+from vigil.agent.memory import AgentMemory
+from vigil.agent.planner import Task, TaskType
+from vigil.brain.llm import BaseBrain, Decision
 
 LOG = logging.getLogger("test")
 NO_HW = {"display": None, "input": None, "memory": None, "storage": None}
@@ -82,17 +82,17 @@ class TestStatPath(unittest.TestCase):
 class TestFence(unittest.TestCase):
 
     def test_ledger_and_its_key_are_fenced(self):
-        self.assertIsNotNone(env.fenced_reason("/var/lib/jarvis/ledger.jsonl"))
-        self.assertIsNotNone(env.fenced_reason("/etc/jarvis/ledger/key"))
+        self.assertIsNotNone(env.fenced_reason("/var/lib/vigil/ledger.jsonl"))
+        self.assertIsNotNone(env.fenced_reason("/etc/vigil/ledger/key"))
 
     def test_agent_control_plane_is_fenced(self):
-        self.assertIsNotNone(env.fenced_reason("/run/jarvis"))
-        self.assertIsNotNone(env.fenced_reason("/run/jarvis/token"))
+        self.assertIsNotNone(env.fenced_reason("/run/vigil"))
+        self.assertIsNotNone(env.fenced_reason("/run/vigil/token"))
 
     def test_fence_matches_path_components_not_prefixes(self):
-        # /run/jarvisx is someone else's directory, not the agent's.
-        self.assertIsNone(env.fenced_reason("/run/jarvisx"))
-        self.assertIsNone(env.fenced_reason("/etc/jarvis"))
+        # /run/vigilx is someone else's directory, not the agent's.
+        self.assertIsNone(env.fenced_reason("/run/vigilx"))
+        self.assertIsNone(env.fenced_reason("/etc/vigil"))
 
     def test_the_two_fences_agree(self):
         """One secret, two mechanisms, and they had drifted.
@@ -104,7 +104,7 @@ class TestFence(unittest.TestCase):
         Two lists of the same thing is how a fence gets a hole in it, so this
         asserts they cover the same ground.
         """
-        from jarvis.agent.executor import DEFAULT_SHELL_DENY_PATTERNS
+        from vigil.agent.executor import DEFAULT_SHELL_DENY_PATTERNS
         import re as _re
         for path in env.SECRET_PATHS:
             self.assertIsNotNone(
@@ -119,7 +119,7 @@ class TestFence(unittest.TestCase):
         self.assertIsNotNone(env.fenced_reason("/root/.aws/credentials"))
 
     def test_fenced_path_stats_as_fenced_with_a_reason(self):
-        info = env.stat_path("/run/jarvis/token")
+        info = env.stat_path("/run/vigil/token")
         self.assertEqual(info["kind"], "fenced")
         self.assertTrue(info["reason"])
         self.assertNotIn("size", info)
@@ -155,7 +155,7 @@ class TestTree(unittest.TestCase):
         self.assertIn("note", result)
 
     def test_fenced_root_is_refused(self):
-        result = env.tree("/run/jarvis")
+        result = env.tree("/run/vigil")
         self.assertIn("refused", result)
         self.assertNotIn("entries", result)
 
@@ -185,8 +185,8 @@ class TestSnapshot(unittest.TestCase):
 class TestExtractAndVerify(unittest.TestCase):
 
     def test_extracts_absolute_paths(self):
-        found = env.extract_paths("write /opt/jarvis/run.sh then read /var/log/app/x.log")
-        self.assertEqual(found, ["/opt/jarvis/run.sh", "/var/log/app/x.log"])
+        found = env.extract_paths("write /opt/vigil/run.sh then read /var/log/app/x.log")
+        self.assertEqual(found, ["/opt/vigil/run.sh", "/var/log/app/x.log"])
 
     def test_ignores_urls_and_relative_paths(self):
         found = env.extract_paths("see https://example.com/a/b or docs/readme.md")
@@ -201,10 +201,10 @@ class TestExtractAndVerify(unittest.TestCase):
         self.assertEqual(found, ["/opt"])
 
     def test_verify_separates_real_missing_and_fenced(self):
-        result = env.verify("/etc/hosts and /no/such/place and /run/jarvis/token")
+        result = env.verify("/etc/hosts and /no/such/place and /run/vigil/token")
         self.assertIn("/etc/hosts", result["present"])
         self.assertIn("/no/such/place", result["missing"])
-        self.assertIn("/run/jarvis/token", result["fenced"])
+        self.assertIn("/run/vigil/token", result["fenced"])
 
     def test_note_is_none_when_nothing_was_invented(self):
         self.assertIsNone(env.verification_note(env.verify("/etc/hosts")))
@@ -212,9 +212,9 @@ class TestExtractAndVerify(unittest.TestCase):
     def test_note_names_the_invented_paths(self):
         # The exact failure: both of these were invented by the planner.
         note = env.verification_note(
-            env.verify("save to /opt/jarvis/check.sh, grep /var/log/jarvis/security_scan.log"))
-        self.assertIn("/opt/jarvis/check.sh", note)
-        self.assertIn("/var/log/jarvis/security_scan.log", note)
+            env.verify("save to /opt/vigil/check.sh, grep /var/log/vigil/security_scan.log"))
+        self.assertIn("/opt/vigil/check.sh", note)
+        self.assertIn("/var/log/vigil/security_scan.log", note)
         self.assertIn("do not exist", note)
 
 
@@ -244,7 +244,7 @@ class TestInspectPathTask(unittest.TestCase):
         self.assertIs(result["output"]["exists"], False)
 
     def test_refuses_a_fenced_path(self):
-        result = self._run("/var/lib/jarvis/ledger.jsonl")
+        result = self._run("/var/lib/vigil/ledger.jsonl")
         self.assertFalse(result["success"])
         self.assertIn("refused", result["error"])
 
@@ -300,9 +300,9 @@ class TestPlanAndAnswerChecks(unittest.TestCase):
 
     def test_command_naming_a_missing_path_is_flagged(self):
         task = Task(priority=1, description="run it", task_type=TaskType.SHELL_COMMAND,
-                    metadata={"command": "grep warning /var/log/jarvis/security_scan.log"})
+                    metadata={"command": "grep warning /var/log/vigil/security_scan.log"})
         self.assertEqual(self.agent._unverified_paths(task),
-                         ["/var/log/jarvis/security_scan.log"])
+                         ["/var/log/vigil/security_scan.log"])
 
     def test_command_naming_a_real_path_is_not_flagged(self):
         task = Task(priority=1, description="run it", task_type=TaskType.SHELL_COMMAND,
@@ -312,25 +312,25 @@ class TestPlanAndAnswerChecks(unittest.TestCase):
     def test_inspect_path_is_exempt(self):
         # Asking whether a path exists is the cure, not the disease.
         task = Task(priority=1, description="look", task_type=TaskType.INSPECT_PATH,
-                    metadata={"path": "/var/log/jarvis/security_scan.log"})
+                    metadata={"path": "/var/log/vigil/security_scan.log"})
         self.assertEqual(self.agent._unverified_paths(task), [])
 
     def test_flagged_paths_reach_the_model_and_the_ledger(self):
         recorded = []
         self.agent.ledger.record = lambda kind, body: recorded.append((kind, body)) or True
         task = Task(priority=1, description="check the log", task_type=TaskType.SHELL_COMMAND,
-                    metadata={"command": "cat /var/log/jarvis/security_scan.log", "source": "llm"})
+                    metadata={"command": "cat /var/log/vigil/security_scan.log", "source": "llm"})
         self.agent._apply_decision(Decision(reasoning="r", task=task))
         self.assertEqual(self.agent.last_thought["unverified_paths"],
-                         ["/var/log/jarvis/security_scan.log"])
+                         ["/var/log/vigil/security_scan.log"])
         alerts = [b for k, b in recorded if k == "alert"]
         self.assertEqual(alerts[0]["alert"], "unverified_path")
 
     def test_answer_inventing_a_path_gets_a_visible_check(self):
         answer, result = self.agent._check_answer_paths(
-            "Save the script to /opt/jarvis/system_health_check.sh and run it.")
+            "Save the script to /opt/vigil/system_health_check.sh and run it.")
         self.assertIn("[path check]", answer)
-        self.assertIn("/opt/jarvis/system_health_check.sh", result["missing"])
+        self.assertIn("/opt/vigil/system_health_check.sh", result["missing"])
 
     def test_answer_with_only_real_paths_is_left_alone(self):
         answer, result = self.agent._check_answer_paths("The file is at /etc/hosts.")

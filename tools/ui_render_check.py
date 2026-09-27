@@ -23,8 +23,8 @@ import os
 import sys
 import tempfile
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from jarvis.agent.core import AgentCore
-from jarvis.cloud.headless import HeadlessRunner
+from vigil.agent.core import AgentCore
+from vigil.cloud.headless import HeadlessRunner
 from playwright.sync_api import sync_playwright
 
 LOG = logging.getLogger("render"); logging.basicConfig(level=logging.ERROR)
@@ -33,10 +33,10 @@ ap.add_argument("--out", default=None, help="Directory for the screenshots; defa
 ap.add_argument("--browser", default=os.environ.get("CHROMIUM_PATH", "/opt/pw-browsers/chromium-1194/chrome-linux/chrome"),
                 help="Chromium executable; default: $CHROMIUM_PATH")
 args = ap.parse_args()
-OUT = args.out or tempfile.mkdtemp(prefix="jarvis-ui-")
+OUT = args.out or tempfile.mkdtemp(prefix="vigil-ui-")
 os.makedirs(OUT, exist_ok=True)
 tmp = tempfile.mkdtemp()
-agent = AgentCore({"name": "jarvis", "profile": "cloud"},
+agent = AgentCore({"name": "vigil", "profile": "cloud"},
                   {"display": None, "input": None, "memory": None, "storage": None}, LOG)
 agent.planner._boot_tasks_generated = True
 agent.planner.add_goal("Keep the box healthy and report posture", 5)

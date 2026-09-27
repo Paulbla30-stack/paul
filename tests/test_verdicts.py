@@ -15,14 +15,14 @@ record without the earlier one being removed.
 import logging
 import unittest
 
-from jarvis.agent import verdicts
+from vigil.agent import verdicts
 
 LOG = logging.getLogger("test")
 NOW = 1_800_000_000.0
 
 # The sentence this module exists for.
 CONFABULATION = ("I used read_logs to check the agent's journal for the past hour "
-                 "and found no entries, as the log file at /var/log/jarvis.log "
+                 "and found no entries, as the log file at /var/log/vigil.log "
                  "exists but is empty. This aligns with the observation that the "
                  "system has been stable.")
 
@@ -94,12 +94,12 @@ class TestPathClaims(unittest.TestCase):
                          verdicts.HELD)
 
     def test_calling_a_file_empty_when_there_is_no_file(self):
-        got = by_claim(rule("/var/log/jarvis/nothing-here.log is empty."), "is empty")
+        got = by_claim(rule("/var/log/vigil/nothing-here.log is empty."), "is empty")
         self.assertEqual(got[0].ruling, verdicts.FAILED)
         self.assertIn("not there at all", got[0].reason)
 
     def test_saying_a_path_is_absent_when_it_is(self):
-        got = by_claim(rule("/var/log/jarvis/scan.log does not exist on this machine."),
+        got = by_claim(rule("/var/log/vigil/scan.log does not exist on this machine."),
                        "not on this machine")
         self.assertEqual(got[0].ruling, verdicts.HELD)
 
@@ -108,7 +108,7 @@ class TestPathClaims(unittest.TestCase):
         self.assertEqual(got[0].ruling, verdicts.FAILED)
 
     def test_naming_a_missing_path_with_no_assertion_still_counts(self):
-        got = by_claim(rule("The report is written to /var/log/jarvis/security_scan.log."),
+        got = by_claim(rule("The report is written to /var/log/vigil/security_scan.log."),
                        "named a path")
         self.assertEqual(got[0].ruling, verdicts.FAILED)
 
@@ -248,7 +248,7 @@ class TestItFailsSoft(unittest.TestCase):
 class TestTheAgentSide(unittest.TestCase):
 
     def make_agent(self):
-        from jarvis.agent.core import AgentCore
+        from vigil.agent.core import AgentCore
         return AgentCore({"name": "t", "profile": "cloud"},
                          {"display": None, "input": None, "memory": None, "storage": None},
                          LOG)
@@ -276,7 +276,7 @@ class TestTheAgentSide(unittest.TestCase):
         """An unknown kind falls back to a plain note from the brain, and a
         ruling that loses its attribution is a rumour."""
         import tempfile
-        from jarvis.agent import store as _store
+        from vigil.agent import store as _store
         self.assertIn("verdict", _store.KINDS)
         self.assertIn("review", _store.SOURCES)
         with tempfile.TemporaryDirectory() as tmp:
@@ -290,13 +290,13 @@ class TestTheAgentSide(unittest.TestCase):
         """End to end: the answer itself carries the check, and it is recorded."""
         import json as _json
         import tempfile
-        from jarvis.agent.core import AgentCore
-        from jarvis.brain.llm import BaseBrain, Completion
+        from vigil.agent.core import AgentCore
+        from vigil.brain.llm import BaseBrain, Completion
         try:
             from cryptography.hazmat.primitives.asymmetric import ed25519  # noqa: F401
         except Exception:
             self.skipTest("cryptography not installed")
-        from jarvis.ledger import AgentLedger
+        from vigil.ledger import AgentLedger
 
         class Confabulator(BaseBrain):
             provider, default_model = "fake", "fake-1"

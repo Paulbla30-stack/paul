@@ -10,10 +10,10 @@ import os
 import tempfile
 import unittest
 
-from jarvis.agent.core import AgentCore
-from jarvis.agent.executor import check_command_allowed, normalise_shell_policy
-from jarvis.agent.store import MemoryStore, NullStore, build_store
-from jarvis.brain.llm import BaseBrain
+from vigil.agent.core import AgentCore
+from vigil.agent.executor import check_command_allowed, normalise_shell_policy
+from vigil.agent.store import MemoryStore, NullStore, build_store
+from vigil.brain.llm import BaseBrain
 
 LOG = logging.getLogger("test")
 NO_HW = {"display": None, "input": None, "memory": None, "storage": None}
@@ -185,9 +185,9 @@ class TestMemoryIsNotShellEditable(unittest.TestCase):
         self.policy = normalise_shell_policy({"enabled": True}, LOG)
 
     def test_the_memory_database_is_denied(self):
-        for command in ("sqlite3 /var/lib/jarvis/memory.db 'delete from memories'",
-                        "rm /var/lib/jarvis/memory.db",
-                        "cat /var/lib/jarvis/memory.db"):
+        for command in ("sqlite3 /var/lib/vigil/memory.db 'delete from memories'",
+                        "rm /var/lib/vigil/memory.db",
+                        "cat /var/lib/vigil/memory.db"):
             self.assertIsNotNone(check_command_allowed(command, self.policy), command)
 
     def test_ordinary_commands_still_run(self):

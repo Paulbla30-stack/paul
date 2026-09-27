@@ -5,7 +5,7 @@ evidence source; no network, no real model."""
 import json
 import unittest
 
-from jarvis.agent import research as R
+from vigil.agent import research as R
 
 
 class Clock:
@@ -69,7 +69,7 @@ class TestStarting(unittest.TestCase):
         self.assertEqual((p["status"], p["origin"], p["phase"]), ("active", "paul", "plan"))
         self.assertTrue(any(k == "decision" for k, _ in agent.ledger.entries))
 
-    def test_jarvis_proposes_and_nothing_runs_until_paul_accepts(self):
+    def test_vigil_proposes_and_nothing_runs_until_paul_accepts(self):
         script = Script()
         reg, agent = make(think=script)
         p = reg.propose("Checklists", "Do checklists reduce handover error?", "caught my eye", 0.6, 0.7)
@@ -241,7 +241,7 @@ class TestPullAndIntrigue(unittest.TestCase):
         clock = Clock()
         reg, _ = make(clock=clock)
         pid = reg.create("H", "handovers")["id"]
-        reg._add_thread(pid, "why do some night teams simply feel calmer", R.INTRIGUE, "jarvis",
+        reg._add_thread(pid, "why do some night teams simply feel calmer", R.INTRIGUE, "vigil",
                         caught_by="the way two ward managers described it")
         with reg.store.lock:
             reg.store.run("UPDATE threads SET calls = 5 WHERE project=?", (pid,))
@@ -257,7 +257,7 @@ class TestPullAndIntrigue(unittest.TestCase):
     def test_pauls_verdicts_calibrate_and_are_recorded(self):
         reg, agent = make()
         pid = reg.create("H", "handovers")["id"]
-        reg._add_thread(pid, "checklists at handover", R.RESULTS, "jarvis")
+        reg._add_thread(pid, "checklists at handover", R.RESULTS, "vigil")
         tid = reg.project(pid)["threads"][0]["id"]
         with reg.store.lock:
             reg.store.run("UPDATE threads SET held=3, calls=3 WHERE id=?", (tid,))
@@ -298,7 +298,7 @@ class TestLessonsAndSpinOffs(unittest.TestCase):
     def test_a_pulling_intrigue_thread_becomes_a_proposal_for_paul(self):
         reg, agent = make()
         pid = reg.create("H", "night shift handovers")["id"]
-        reg._add_thread(pid, "orchestral musicians and fatigue at dawn", R.INTRIGUE, "jarvis",
+        reg._add_thread(pid, "orchestral musicians and fatigue at dawn", R.INTRIGUE, "vigil",
                         caught_by="a rota pattern")
         tid = reg.project(pid)["threads"][0]["id"]
         with reg.store.lock:
@@ -322,8 +322,8 @@ class TestRoutes(unittest.TestCase):
         import logging
         import os
         import tempfile
-        from jarvis.agent.core import AgentCore
-        from jarvis.cloud.headless import HeadlessRunner
+        from vigil.agent.core import AgentCore
+        from vigil.cloud.headless import HeadlessRunner
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         d = self.tmp.name

@@ -1,6 +1,13 @@
-# Jarvis Agent-First OS
+# Vigil Agent-First OS
 
-Jarvis is an agentic agent that owns the machine it runs on. It ships in
+> **The name.** This agent was called Jarvis until 27 September 2026. Paul asked
+> it to choose a name that suited it, and it chose Vigil: "I am a witness: I observe,
+> I remember, I report." Dated documents under `docs/`, the ledger's history and
+> its writer (`jarvis`), and the AWS-side names (buckets, the scout, secrets,
+> tags, Terraform) still say Jarvis. The sleep/wake mechanism that used to be
+> called the vigil is now the watch; on the ledger its kind is still `vigil`.
+
+Vigil is an agentic agent that owns the machine it runs on. It ships in
 two forms built from the same code:
 
 - **Bootable ISO** for bare metal or a VM: the agent is PID 1 with full
@@ -14,8 +21,8 @@ Both include the integrated security vulnerability scanner.
 ## Architecture
 
 ```
-jarvis/
-├── jarvis/           # Core agent software
+vigil/
+├── vigil/           # Core agent software
 │   ├── agent/          # Agentic AI core (planner, executor, memory)
 │   ├── brain/          # LLM planner (Claude), credentials
 │   ├── cloud/          # IMDS client, boot-time bootstrap, headless runner
@@ -39,7 +46,7 @@ jarvis/
 - **Security Scanner**: Integrated vulnerability detection and system hardening
 - **Bootable ISO**: Standalone environment bootable from USB/CD/VM
 - **AWS AMI**: Agent-first EC2 image; goals arrive via user data or tags,
-  status via `jarvis --status` or a loopback HTTP endpoint
+  status via `vigil --status` or a loopback HTTP endpoint
 - **Glass Ledger**: a signed, hash-chained, append-only journal of every decision, action and outcome that the agent cannot rewrite, verified off-box with a pinned public key ([The Glass Ledger v2](https://doi.org/10.5281/zenodo.21515861)); see `aws/README.md`
 - **The Watch**: the agent sleeps. An imported model bills per minute a copy is
   warm, not per call, so the cost of thinking is the length of the silences
@@ -47,37 +54,37 @@ jarvis/
   which costs nothing and still observes, records and acts; the model is woken
   by the operator, by a material change in observations, or on a heartbeat,
   and does its thinking in one burst before going quiet again. Sleep removes
-  the model, not the agent. See `jarvis/agent/watch.py`
+  the model, not the agent. See `vigil/agent/watch.py`
 - **The Diary**: a register of what is coming. Reading a date off a page and
   keeping it are different jobs; this is the second one. A date found in a
   document is proposed and waits for the operator, never held on its own
   authority. A held message is not a delivered one, a moment missed while
   nothing was running says so, and a month of downtime is one message and a
-  count rather than thirty. See `jarvis/agent/diary.py`
+  count rather than thirty. See `vigil/agent/diary.py`
 - **Hunches**: it may say something is wrong when the readings say otherwise —
   under four conditions, the fourth being that it authorises watching and
   nothing else. Every one resolves and is scored, so an instinct earns the
-  right to be listened to by being counted. See `jarvis/agent/hunches.py`
+  right to be listened to by being counted. See `vigil/agent/hunches.py`
 - **Probes**: six standing questions, a baseline written once, and drift read
-  over deterministic markers rather than prose. See `jarvis/agent/probes.py`
+  over deterministic markers rather than prose. See `vigil/agent/probes.py`
 - **The Floor Test's nine vitals**: the estate's own instrument, turned on this
   deployment. Two of the nine name the two failures that actually happened
   here and none were computed. Built as counters now so a baseline exists the
   day it enters service; every reading says whether it means anything yet, and
   the agent is never shown them — signals, never targets. See
-  `jarvis/agent/vitals.py`
+  `vigil/agent/vitals.py`
 - **Bearing**: everything else asks whether a thing is true; this asks what it
   costs to say it to somebody. The distinction is plain (about the world)
   against pointed (aimed at a person) — identical information, and the bill
   falls on whoever said it. It reports and never rewrites, never softens a
   claim, and never touches a finding, a refusal or the agent's own mistakes.
-  See `jarvis/agent/bearing.py`
+  See `vigil/agent/bearing.py`
 - **The Calendar**: the diary holds moments, this holds spans -- which is what
   makes a clash and a gap expressible at all. A collision is reported and
   never resolved; a gap is never called free time, because an empty calendar
   is a calendar with nothing in it and not a free day. It does not learn to
   speak: an appointment registers a commitment and the diary says it. See
-  `jarvis/agent/schedule.py`
+  `vigil/agent/schedule.py`
 
 ## Building the ISO
 
@@ -115,7 +122,7 @@ make scan && make iso
 ## Booting
 
 The ISO boots into a minimal Linux environment that automatically launches
-the Jarvis agent. The agent has full access to:
+the Vigil agent. The agent has full access to:
 
 | Resource     | Access Method          | Permission |
 |-------------|------------------------|------------|
@@ -133,7 +140,7 @@ make ami-init                    # once: install the Packer amazon plugin
 make ami AWS_REGION=eu-west-2    # build; AMI id lands in build/ami-manifest.json
 ```
 
-Launch the AMI with an `jarvis:` block in the user data to hand the
+Launch the AMI with an `vigil:` block in the user data to hand the
 agent its goals (example in `aws/cloud-init/user-data.example.yaml`), or
 use the Terraform in `aws/terraform/`. Full details in
 [`aws/README.md`](aws/README.md).
@@ -151,7 +158,7 @@ signal, and any goals the evidence shows are complete.
 export ANTHROPIC_API_KEY=sk-ant-...
 make headless CYCLES=5                      # cloud profile has llm.enabled: true
 make ask Q="what is using the most memory?" # one-shot question, no loop
-PYTHONPATH=. python3 -m jarvis.main --no-hardware --llm   # console: think / ask / brain / goals
+PYTHONPATH=. python3 -m vigil.main --no-hardware --llm   # console: think / ask / brain / goals
 ```
 
 Key points:
@@ -160,7 +167,7 @@ Key points:
   `bedrock` (any Amazon Bedrock model, including your own imported weights,
   using the instance role and no API key). Both share the same loop, context
   and shell policy; see `aws/README.md` for the Bedrock setup.
-- **Model**: `claude-opus-5` by default (`llm.model`, `--model`, `JARVIS_MODEL`).
+- **Model**: `claude-opus-5` by default (`llm.model`, `--model`, `VIGIL_MODEL`).
   Adaptive thinking is on (`llm.thinking: adaptive` or `disabled`); `llm.effort`
   (default `medium`) sets how hard it thinks. `xhigh` and `max` need
   `llm.max_tokens` of at least 64000 and are clamped to `high` otherwise. Models
@@ -193,7 +200,7 @@ Key points:
   is disabled with a logged reason and the agent still runs.
 - **Failure modes**: refusals, truncation, rate limits, network and API errors
   all fall back to the rule planner for that cycle; authentication failures
-  disable the brain until restart. `jarvis --status` and `curl localhost:8471/brain`
+  disable the brain until restart. `vigil --status` and `curl localhost:8471/brain`
   show what it last reasoned and why it is off, if it is.
 
 The ISO profile leaves `llm.enabled` false; nothing changes there unless you
@@ -244,9 +251,9 @@ telling. API: `GET /lab`, `POST /lab/session {open: true|false, purpose}`,
 ## Filesystem grounding
 
 A language model asked about a path it cannot see does not say "I don't
-know": it produces a plausible one. Jarvis's planner once wrote a health
-script that grepped `/var/log/jarvis/security_scan.log` and installed itself
-into `/opt/jarvis`. Neither exists. Nothing in the context described the
+know": it produces a plausible one. Vigil's planner once wrote a health
+script that grepped `/var/log/vigil/security_scan.log` and installed itself
+into `/opt/vigil`. Neither exists. Nothing in the context described the
 filesystem, so every path in that script was a guess, and the script would
 have reported zero security findings forever.
 
@@ -257,7 +264,7 @@ Three things close that, and all three are on by default:
   actually been checked, each with its kind, size, mode and modification
   time. Missing paths are listed *as missing* rather than left out, because
   an absence a model cannot see is one it invents something to fill. The set
-  is `llm.environment_paths` (null uses the standard Jarvis paths).
+  is `llm.environment_paths` (null uses the standard Vigil paths).
 - **The model can look.** `inspect_path` is a task type like any other: the
   planner puts an absolute path in `command` and gets back a real bounded
   directory listing, or a file's size and modification time, or the fact
@@ -748,7 +755,7 @@ way to tell it a verdict would be a way to forge one.
 
 Two stores, kept apart on purpose.
 
-**The agent's own** (`jarvis/agent/store.py`) is what it learned about the
+**The agent's own** (`vigil/agent/store.py`) is what it learned about the
 machine it runs on. Before it, the agent's working memory was bounded and
 evictable and its notes were a twenty-entry deque, both living only in the
 process: a restart, a crash or a deploy left it knowing nothing it had
@@ -835,23 +842,23 @@ and approval cards that are not built yet.
 The UI's credential is the runner token, and the login now lasts.
 
 Two things used to break it. The token was minted fresh at every start and
-written only to `/run/jarvis/token`, which systemd deletes and recreates on
-each restart (`RuntimeDirectory=jarvis`), so every deploy silently replaced
+written only to `/run/vigil/token`, which systemd deletes and recreates on
+each restart (`RuntimeDirectory=vigil`), so every deploy silently replaced
 the credential sitting in the browser. And there was no session: each request
 re-sent the token, so when the token changed there was nothing to fall back
 on. The operator was not being timed out. His credential was being swapped
 underneath him.
 
 - **The token persists.** It is read from `cloud.status_token_persist_file`
-  (default `/etc/jarvis/token`, 0600) and generated there once if absent, then
-  also written to the runtime path for the existing `cat /run/jarvis/token`
+  (default `/etc/vigil/token`, 0600) and generated there once if absent, then
+  also written to the runtime path for the existing `cat /run/vigil/token`
   habit. Set `cloud.status_token` to pin it explicitly; delete the persisted
   file to rotate it.
 - **A login mints a signed session.** `POST /login` with the token returns a
   cookie that is HttpOnly, SameSite=Strict and Secure over TLS, valid for
   `cloud.ui.session_days` (default 30). It is stateless: value, expiry and an
   HMAC over both, signed with a key at `cloud.session_key_file` (default
-  `/etc/jarvis/session.key`, 0600, created on first start). Because the key is
+  `/etc/vigil/session.key`, 0600, created on first start). Because the key is
   on disk rather than in the runtime directory, a restart does not end the
   session. `POST /logout` clears it, and deleting the key file invalidates
   every session at once, which is the only revocation a single operator needs.
@@ -875,7 +882,7 @@ all.
 
 ## Headless mode
 
-`jarvis --headless` runs the same agent loop without the console. It is
+`vigil --headless` runs the same agent loop without the console. It is
 what the AMI uses, and it works anywhere:
 
 ```bash
@@ -891,18 +898,18 @@ The status endpoint also accepts `POST /goal` (body is the goal text),
 `POST /think` (one LLM planning step, executed) and `POST /ask`, and serves
 `GET /brain`, `GET /goals`, `GET /history` and `GET /memory`. Everything
 except `/health` and `/status` needs the runner token, generated at start and
-written 0600 to `cloud.status_token_file` (default `/run/jarvis/token`):
+written 0600 to `cloud.status_token_file` (default `/run/vigil/token`):
 
 ```bash
-curl -s -H "Authorization: Bearer $(sudo cat /run/jarvis/token)" localhost:8471/brain
+curl -s -H "Authorization: Bearer $(sudo cat /run/vigil/token)" localhost:8471/brain
 ```
 
 ## Configuration
 
-Edit `rootfs/etc/jarvis/config.yaml` to customize agent behavior,
+Edit `rootfs/etc/vigil/config.yaml` to customize agent behavior,
 hardware access policies, and security scan settings. The AMI installs
-`rootfs/etc/jarvis/config-aws.yaml` instead (cloud profile: display and
-input off, headless on) and merges `/etc/jarvis/cloud.yaml`, generated
+`rootfs/etc/vigil/config-aws.yaml` instead (cloud profile: display and
+input off, headless on) and merges `/etc/vigil/cloud.yaml`, generated
 at boot from user data and instance tags. Top-level `goals:` in either
 file are handed to the agent at start.
 

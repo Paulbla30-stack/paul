@@ -15,21 +15,21 @@ try:
 except Exception:  # pragma: no cover
     HAVE_CRYPTO = False
 
-from jarvis.ledger import chain, verify
-from jarvis.ledger.chain import (FORMAT, GENESIS_PREV, LedgerWriter, LedgerLocked, TornTail,
+from vigil.ledger import chain, verify
+from vigil.ledger.chain import (FORMAT, GENESIS_PREV, LedgerWriter, LedgerLocked, TornTail,
                                    canonical_json, entry_hash, frame, generate_key,
                                    load_private_key, make_entry, repair_torn_tail, scan_tail,
                                    verify_signature, encode_line)
-from jarvis.ledger.verify import verify_file, verify_lines, load_pin, save_pin
-from jarvis.ledger.anchor import LedgerAnchor
-from jarvis.ledger.agent_ledger import AgentLedger
-from jarvis.ledger import __main__ as cli
-from jarvis.agent.core import AgentCore, NullLedger
-from jarvis.agent.planner import Task, TaskType
-from jarvis.agent.executor import check_command_allowed, normalise_shell_policy
-from jarvis.cloud.headless import HeadlessRunner
-from jarvis.cloud import bootstrap
-from jarvis.main import load_config, JarvisSystem
+from vigil.ledger.verify import verify_file, verify_lines, load_pin, save_pin
+from vigil.ledger.anchor import LedgerAnchor
+from vigil.ledger.agent_ledger import AgentLedger
+from vigil.ledger import __main__ as cli
+from vigil.agent.core import AgentCore, NullLedger
+from vigil.agent.planner import Task, TaskType
+from vigil.agent.executor import check_command_allowed, normalise_shell_policy
+from vigil.cloud.headless import HeadlessRunner
+from vigil.cloud import bootstrap
+from vigil.main import load_config, VigilSystem
 
 needs_crypto = unittest.skipUnless(HAVE_CRYPTO, "cryptography not installed")
 LOG = logging.getLogger("test")
@@ -245,7 +245,7 @@ class TestWriterAndVerifier(unittest.TestCase):
         with self.assertRaises(TornTail) as cm:
             LedgerWriter(self.path, self.key)
         self.assertEqual(cm.exception.offset, r.torn_offset)
-        self.assertIn("jarvis.ledger repair", str(cm.exception))
+        self.assertIn("vigil.ledger repair", str(cm.exception))
         # the documented repair removes only the partial line
         removed = repair_torn_tail(self.path)
         self.assertEqual(removed, len(b'{"seq": 4, "ts": "2026-'))
@@ -493,7 +493,7 @@ class FakeBrain:
     model = "fake-1"
 
     def __init__(self, decisions):
-        from jarvis.brain.llm import Decision
+        from vigil.brain.llm import Decision
         self.Decision = Decision
         self.decisions = list(decisions)
         self.chats = 0
@@ -537,7 +537,7 @@ class TestAgentIntegration(unittest.TestCase):
         self.tmp.cleanup()
 
     def decisions(self):
-        from jarvis.brain.llm import Decision
+        from vigil.brain.llm import Decision
         shell = Task(priority=2, description="Measure root", task_type=TaskType.SHELL_COMMAND,
                      metadata={"source": "llm", "command": "echo hi", "goal": "Keep root under 80%"})
         denied = Task(priority=2, description="Wipe", task_type=TaskType.SHELL_COMMAND,
@@ -612,7 +612,7 @@ class TestAgentIntegration(unittest.TestCase):
         status = agent.get_status()["ledger"]
         self.assertEqual((status["available"], status["head"]["seq"]), (True, len(entries) - 1))
         # the brain's context never carries the ledger
-        from jarvis.brain.llm import BaseBrain
+        from vigil.brain.llm import BaseBrain
         ctx_keys = set(BaseBrain.build_context.__code__.co_names)
         self.assertNotIn("ledger", ctx_keys)
 
@@ -682,7 +682,7 @@ class TestAgentIntegration(unittest.TestCase):
         agent = self.agent(self.led, brain)
         # A real store, or the "nothing further was written" assertion below
         # passes against a NullStore that never writes anything anyway.
-        from jarvis.agent.store import MemoryStore
+        from vigil.agent.store import MemoryStore
         agent.store = MemoryStore(os.path.join(self.tmp.name, "chat-memory.db"), logger=LOG)
         self.addCleanup(agent.store.close)
         self.assertTrue(agent.store.available)
@@ -701,7 +701,7 @@ class TestAgentIntegration(unittest.TestCase):
     def test_an_answer_the_chain_did_take_is_shown(self):
         # The control: without it the test above passes for a working ledger too.
         agent = self.agent(self.led, FakeBrain([]))
-        from jarvis.agent.store import MemoryStore
+        from vigil.agent.store import MemoryStore
         agent.store = MemoryStore(os.path.join(self.tmp.name, "chat-memory-ok.db"), logger=LOG)
         self.addCleanup(agent.store.close)
         out = agent.chat([{"role": "user", "content": "How full is the root volume?"}])
@@ -720,11 +720,11 @@ class TestAgentIntegration(unittest.TestCase):
 
     def test_shell_policy_denies_reading_or_touching_the_ledger(self):
         policy = normalise_shell_policy({"enabled": True}, LOG)
-        for cmd in ("cat /var/lib/jarvis/ledger.jsonl", "ls /etc/jarvis/ledger",
-                    "python3 -m jarvis.ledger repair /var/lib/jarvis/ledger.jsonl",
-                    "echo x >> /var/lib/jarvis/ledger.jsonl", "cp /etc/jarvis/ledger/ed25519.key /tmp"):
+        for cmd in ("cat /var/lib/vigil/ledger.jsonl", "ls /etc/vigil/ledger",
+                    "python3 -m vigil.ledger repair /var/lib/vigil/ledger.jsonl",
+                    "echo x >> /var/lib/vigil/ledger.jsonl", "cp /etc/vigil/ledger/ed25519.key /tmp"):
             self.assertIsNotNone(check_command_allowed(cmd, policy), cmd)
-        self.assertIsNone(check_command_allowed("df -h /var/lib/jarvis/uploads", policy))
+        self.assertIsNone(check_command_allowed("df -h /var/lib/vigil/uploads", policy))
 
     def test_headless_ledger_endpoints(self):
         import urllib.request
@@ -760,7 +760,32 @@ class TestAgentIntegration(unittest.TestCase):
                 return {"jarvis:ledger-bucket": "jarvis-ledger-1-agent", "jarvis:name": "agent"}
         config = bootstrap.build_cloud_config(Imds())
         self.assertEqual(config["ledger"]["anchor"]["bucket"], "jarvis-ledger-1-agent")
-        self.assertEqual(config["agent"]["name"], "agent")
+        # jarvis:name names the chain (its writer and anchor prefix), not the agent
+        self.assertEqual(config["ledger"]["writer"], "agent")
+        self.assertNotIn("name", config.get("agent", {}))
+
+    def test_the_agent_name_tag_is_vigil_name(self):
+        class Imds:
+            def user_data(self):
+                return "jarvis:\n  goals: [\"keep the lights on\"]\n"
+            def summary(self):
+                return {"instance_id": "i-1", "region": "us-west-2"}
+            def tags(self):
+                return {"jarvis:name": "jarvis", "vigil:name": "Vigil"}
+        config = bootstrap.build_cloud_config(Imds())
+        self.assertEqual((config["agent"]["name"], config["ledger"]["writer"]), ("Vigil", "jarvis"))
+
+    def test_the_writer_setting_wins_over_the_agent_name(self):
+        from vigil.main import VigilSystem
+        system = VigilSystem.__new__(VigilSystem)
+        system.config = {"agent": {"name": "Vigil"},
+                         "ledger": {"enabled": True, "writer": "jarvis",
+                                    "path": os.path.join(self.tmp.name, "l.jsonl"),
+                                    "key_file": os.path.join(self.tmp.name, "k"),
+                                    "pubkey_file": os.path.join(self.tmp.name, "k.pub")}}
+        system.log = logging.getLogger("t")
+        ledger = system.build_ledger()
+        self.assertEqual(ledger.writer_name, "jarvis")
 
     def test_system_opens_ledger_from_config(self):
         cfg_path = os.path.join(self.tmp.name, "config.yaml")
@@ -778,7 +803,7 @@ ledger:
         config = load_config(cfg_path)
         self.assertTrue(config["ledger"]["enabled"])
         self.assertTrue(config["ledger"]["fail_closed"])
-        system = JarvisSystem(config, LOG)
+        system = VigilSystem(config, LOG)
         led = system.build_ledger()
         self.assertTrue(led.available)
         led.close()

@@ -9,8 +9,8 @@ import tempfile
 import unittest
 import urllib.error
 
-from jarvis.cloud import session
-from jarvis.cloud.headless import HeadlessRunner, UI_HTML_PATH, UI_NONCE_PLACEHOLDER
+from vigil.cloud import session
+from vigil.cloud.headless import HeadlessRunner, UI_HTML_PATH, UI_NONCE_PLACEHOLDER
 from tests.test_ui import LOG, call, make_agent
 
 
@@ -74,8 +74,8 @@ class TestUiSecurity(unittest.TestCase):
     def test_the_page_never_stores_the_token_in_local_storage(self):
         with open(UI_HTML_PATH, encoding="utf-8") as fh:
             html = fh.read()
-        self.assertNotIn('localStorage.setItem("jarvis.token"', html)
-        self.assertIn('localStorage.removeItem("jarvis.token")', html)
+        self.assertNotIn('localStorage.setItem("vigil.token"', html)
+        self.assertIn('localStorage.removeItem("vigil.token")', html)
 
     # ---- cross-site requests ---------------------------------------------
 
@@ -102,7 +102,7 @@ class TestUiSecurity(unittest.TestCase):
         self.assertEqual(status, 200)
 
     def test_a_bearer_token_does_not_need_an_origin(self):
-        # Scripts on the box (jarvis_chat.py) authenticate with the header,
+        # Scripts on the box (vigil_chat.py) authenticate with the header,
         # which no other site can make a browser send.
         _, status = self._post("/goal", b"a goal", Authorization="Bearer t0k")
         self.assertEqual(status, 200)

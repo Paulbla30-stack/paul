@@ -2,7 +2,7 @@
 
 The operator kept being asked for a new code. The cause was not a timeout: the
 runner minted a fresh token at every start and wrote it only under
-/run/jarvis, which systemd deletes and recreates on restart, so every deploy
+/run/vigil, which systemd deletes and recreates on restart, so every deploy
 replaced the credential sitting in his browser.
 """
 
@@ -12,10 +12,10 @@ import tempfile
 import time
 import unittest
 
-from jarvis.agent.core import AgentCore
-from jarvis.agent.executor import check_command_allowed, normalise_shell_policy
-from jarvis.cloud import session
-from jarvis.cloud.headless import HeadlessRunner
+from vigil.agent.core import AgentCore
+from vigil.agent.executor import check_command_allowed, normalise_shell_policy
+from vigil.cloud import session
+from vigil.cloud.headless import HeadlessRunner
 
 LOG = logging.getLogger("test")
 NO_HW = {"display": None, "input": None, "memory": None, "storage": None}
@@ -152,7 +152,7 @@ class TestRunnerCredentials(unittest.TestCase):
         persist, key_file = temp("token"), temp("session.key")
         first = self.runner(persist, key_file)
         first.start_status_server = None                   # not needed for this
-        from jarvis.cloud.headless import write_token_file
+        from vigil.cloud.headless import write_token_file
         write_token_file(first.token, persist)
         second = self.runner(persist, key_file)
         self.assertEqual(second.token, first.token)
@@ -175,7 +175,7 @@ class TestRunnerCredentials(unittest.TestCase):
     def test_no_cookie_is_no_session(self):
         runner = self.runner(temp("token"), temp("session.key"))
         self.assertFalse(runner.session_valid(None))
-        self.assertFalse(runner.session_valid("jarvis_session=rubbish"))
+        self.assertFalse(runner.session_valid("vigil_session=rubbish"))
 
     def test_the_runner_issues_a_lax_cookie_by_default(self):
         runner = self.runner(temp("token"), temp("session.key"))
@@ -195,15 +195,15 @@ class TestRunnerCredentials(unittest.TestCase):
         runner = self.runner(temp("token"), "/proc/nowhere/session.key")
         self.assertIsNone(runner.session_key)
         self.assertIsNone(runner.new_session_cookie())
-        self.assertFalse(runner.session_valid("jarvis_session=anything"))
+        self.assertFalse(runner.session_valid("vigil_session=anything"))
 
 
 class TestCredentialsAreFencedFromTheAgent(unittest.TestCase):
 
     def test_the_agent_cannot_read_its_operator_s_credentials(self):
         policy = normalise_shell_policy({"enabled": True}, LOG)
-        for command in ("cat /etc/jarvis/token", "cat /etc/jarvis/session.key",
-                        "cat /run/jarvis/token"):
+        for command in ("cat /etc/vigil/token", "cat /etc/vigil/session.key",
+                        "cat /run/vigil/token"):
             self.assertIsNotNone(check_command_allowed(command, policy), command)
 
 

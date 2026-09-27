@@ -1,10 +1,10 @@
-"""connect-broker: Jarvis's connections, run off his box.
+"""connect-broker: Vigil's connections, run off his box.
 
 Stage 1 of docs/connections-plan-2026-09-27.md. Built, tested, not deployed
-and not wired to Jarvis (Paul, 27 September: "don't link anything up yet,
+and not wired to Vigil (Paul, 27 September: "don't link anything up yet,
 just build it first and off box").
 
-Why off the box: Jarvis runs as root on a machine it can read end to end, so
+Why off the box: Vigil runs as root on a machine it can read end to end, so
 anything that holds Paul's keys or sign-ins must live somewhere it cannot
 reach. Stage 1 holds no keys at all -- weather, bank holidays and Paul's own
 Zenodo records are public -- but it is the framework every later stage

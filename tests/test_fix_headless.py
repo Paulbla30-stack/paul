@@ -22,8 +22,8 @@ import unittest
 import urllib.error
 import urllib.request
 
-from jarvis.agent.core import AgentCore
-from jarvis.cloud.headless import HeadlessRunner, UI_HTML_PATH
+from vigil.agent.core import AgentCore
+from vigil.cloud.headless import HeadlessRunner, UI_HTML_PATH
 
 NO_HW = {"display": None, "input": None, "memory": None, "storage": None}
 LOG = logging.getLogger("test")

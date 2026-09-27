@@ -72,7 +72,7 @@ guarantee `voice.py`'s own doctrine warns about.
 
 ## Two decisions settled, 23 September
 
-**Jarvis sees what it needs to.** Paul: it should be able to see all the
+**Vigil sees what it needs to.** Paul: it should be able to see all the
 information it needs to complete its objectives. So the instance reads the
 scout's table, and the agent — which serves the UI from the same process —
 sees it too. Read-only, one direction. The write path stays in the Lambda

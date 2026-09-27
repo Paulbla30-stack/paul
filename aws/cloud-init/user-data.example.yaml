@@ -1,15 +1,15 @@
 #cloud-config
-# Example EC2 user data for a Jarvis agent-first instance.
+# Example EC2 user data for a Vigil agent-first instance.
 #
-# jarvis-bootstrap.service reads this block through IMDS at every boot
-# and writes /etc/jarvis/cloud.yaml, which the agent merges on top of
-# /etc/jarvis/config.yaml.  Everything under `jarvis:` is optional.
+# vigil-bootstrap.service reads this block through IMDS at every boot
+# and writes /etc/vigil/cloud.yaml, which the agent merges on top of
+# /etc/vigil/config.yaml.  Everything under `vigil:` is optional.
 #
 # Goals may also be given without user data by tagging the instance with
 #   jarvis:goal = "<text>"     and/or     jarvis:name = "<agent name>"
 # (enable "Allow tags in instance metadata" on the instance).
 
-jarvis:
+vigil:
   agent:
     name: paul-life-agent
 
@@ -30,7 +30,7 @@ jarvis:
 
   # LLM planner. The key itself never goes in user data: point at an AWS
   # Secrets Manager secret (or an SSM SecureString) the instance role can
-  # read and the bootstrap writes it to /etc/jarvis/anthropic.key (0600)
+  # read and the bootstrap writes it to /etc/vigil/anthropic.key (0600)
   # at every boot.  (An inline `api_key:` is accepted for quick tests; it is
   # moved to the key file and stripped from cloud.yaml, but anyone who can
   # read user data can read it.)
@@ -53,6 +53,6 @@ jarvis:
     shell:
       enabled: true          # brain may run deny-list-guarded commands
 
-# Regular cloud-init keys still work alongside the jarvis block:
+# Regular cloud-init keys still work alongside the vigil block:
 # packages:
 #   - htop

@@ -13,9 +13,9 @@ import os
 import tempfile
 import unittest
 
-from jarvis.agent.selfknowledge import SelfKnowledge, _to_epoch
-from jarvis.ledger.agent_ledger import AgentLedger
-from jarvis.ledger.chain import KINDS
+from vigil.agent.selfknowledge import SelfKnowledge, _to_epoch
+from vigil.ledger.agent_ledger import AgentLedger
+from vigil.ledger.chain import KINDS
 
 LOG = logging.getLogger("test")
 

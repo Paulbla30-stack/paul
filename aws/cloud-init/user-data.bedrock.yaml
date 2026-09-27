@@ -1,8 +1,8 @@
 #cloud-config
-# Jarvis user data: plan with an open-weight model on Amazon Bedrock.
+# Vigil user data: plan with an open-weight model on Amazon Bedrock.
 # No API key: the instance role calls Bedrock (terraform -var llm_provider=bedrock).
 
-jarvis:
+vigil:
   agent:
     name: paul-life-agent
 

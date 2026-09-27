@@ -16,7 +16,7 @@ from typing import NamedTuple
 
 PROTOCOL_VERSION = 1
 MAX_LINE = 64 * 1024
-DEFAULT_SOCKET = "/run/jarvis-ledger/append.sock"
+DEFAULT_SOCKET = "/run/vigil-ledger/append.sock"
 
 # The six entry kinds named in the architecture note, plus deploy records.
 DEFAULT_KINDS = frozenset({"decision", "action", "outcome", "gate", "alert", "thought", "deploy"})

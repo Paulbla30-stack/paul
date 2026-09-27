@@ -5,13 +5,13 @@ import logging
 import unittest
 from unittest import mock
 
-from jarvis.agent.core import AgentCore
-from jarvis.agent.planner import TaskType
-from jarvis.brain import build_brain
-from jarvis.brain.bedrock import (BedrockBrain, JSON_INSTRUCTIONS, NO_THINK_PREFILL,
+from vigil.agent.core import AgentCore
+from vigil.agent.planner import TaskType
+from vigil.brain import build_brain
+from vigil.brain.bedrock import (BedrockBrain, JSON_INSTRUCTIONS, NO_THINK_PREFILL,
                                     render_prompt, guess_template, strip_thinking)
-from jarvis.brain.llm import BaseBrain, ClaudeBrain
-from jarvis.main import JarvisSystem, load_config
+from vigil.brain.llm import BaseBrain, ClaudeBrain
+from vigil.main import VigilSystem, load_config
 
 try:
     from botocore.exceptions import ClientError, NoCredentialsError
@@ -192,7 +192,7 @@ class TestBedrockBrain(unittest.TestCase):
         self.assertIn("region", brain.status()["disabled_reason"])
 
     def test_without_boto3(self):
-        with mock.patch("jarvis.brain.bedrock.boto3", None):
+        with mock.patch("vigil.brain.bedrock.boto3", None):
             brain = BedrockBrain({"model": "x", "region": "eu-west-2"}, LOG)
         self.assertIsNone(brain.client)
         self.assertIn("boto3", brain.status()["disabled_reason"])
@@ -223,8 +223,8 @@ class TestTheSystemBlock(unittest.TestCase):
 
     def test_a_real_system_prompt_is_still_sent(self):
         brain, fake = make_brain([converse_response("hello")])
-        brain._chat("You are Jarvis.", [{"role": "user", "content": "hi"}], structured=False)
-        self.assertEqual(fake.calls[0]["system"], [{"text": "You are Jarvis."}])
+        brain._chat("You are Vigil.", [{"role": "user", "content": "hi"}], structured=False)
+        self.assertEqual(fake.calls[0]["system"], [{"text": "You are Vigil."}])
 
     def test_botocore_itself_rejects_the_empty_block(self):
         """Not a guess about the API: the client refuses it without a call."""
@@ -387,7 +387,7 @@ class TestFactory(unittest.TestCase):
     def test_build_brain_selects_provider(self):
         with mock.patch.dict("os.environ", {"ANTHROPIC_API_KEY": "sk-test"}):
             self.assertIsInstance(build_brain({"provider": "anthropic"}, LOG), ClaudeBrain)
-        with mock.patch("jarvis.brain.bedrock.boto3", None):
+        with mock.patch("vigil.brain.bedrock.boto3", None):
             b = build_brain({"provider": "bedrock", "model": "m"}, LOG, region="eu-west-2")
         self.assertIsInstance(b, BedrockBrain)
         self.assertEqual(b.region, "eu-west-2")
@@ -399,9 +399,9 @@ class TestFactory(unittest.TestCase):
         cfg["llm"].update(enabled=True, provider="bedrock", model="meta.llama3-3-70b-instruct-v1:0")
         cfg["cloud"]["instance"] = {"region": "eu-west-2"}
         fake_client = FakeBedrock([])
-        with mock.patch("jarvis.brain.bedrock.boto3") as boto:
+        with mock.patch("vigil.brain.bedrock.boto3") as boto:
             boto.client.return_value = fake_client
-            brain = JarvisSystem(cfg, LOG).build_brain()
+            brain = VigilSystem(cfg, LOG).build_brain()
         self.assertIsInstance(brain, BedrockBrain)
         self.assertEqual(brain.region, "eu-west-2")
         self.assertIs(brain.client, fake_client)

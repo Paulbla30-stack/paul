@@ -18,8 +18,8 @@ import tempfile
 import unittest
 import zipfile
 
-from jarvis.agent import documents as doc
-from jarvis.agent import environment as env
+from vigil.agent import documents as doc
+from vigil.agent import environment as env
 
 try:
     import pypdf  # noqa: F401
