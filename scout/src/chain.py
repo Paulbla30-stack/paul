@@ -109,6 +109,14 @@ class Chain:
         # removing the last N entries leaves every remaining link intact. The
         # head record moves with every append, so it says where the chain
         # should end. An empty chain must have the genesis head, (0, zeros).
+        # A head derived from the entries themselves agrees with any
+        # truncation, so a store that can tell must have a real head record
+        # for the end to count as checked. Only an empty chain may lack one.
+        has_record = getattr(self.store, "has_head_record", None)
+        if count and callable(has_record) and not has_record():
+            return _bad(count, "no head record",
+                        f"{count} entries but no head record, so where the "
+                        f"chain should end cannot be checked", count)
         head_seq, head_hash = self.store.head()
         head_seq = int(head_seq)
         if head_seq != count or head_hash != prev:
@@ -149,8 +157,13 @@ class LocalChainStore:
             return int(h["seq"]), str(h["entry_hash"])
         except FileNotFoundError:
             # A chain written before the head file existed. Its last line is
-            # the best head there is; the next append writes the file.
+            # the best head there is to append after, and the next append
+            # writes the file. verify() does not accept it as a head record.
             return self._last_line_head()
+
+    def has_head_record(self) -> bool:
+        """True when head() reads the head file, not the chain's last line."""
+        return os.path.exists(self.head_path)
 
     def _last_line_head(self) -> tuple[int, str]:
         last = None

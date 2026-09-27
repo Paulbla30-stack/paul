@@ -129,6 +129,67 @@ class TestAFailedSendKeepsTheDigest(unittest.TestCase):
         store = LocalHitStore(self.hits)
         self.assertEqual(store.count(), 1)
 
+    # Review of 0597f83: the cap was applied after the merge, so carried items
+    # scoring below the fresh ones were cut, marked sent, and never mailed,
+    # while the email still said they were carried over.
+    def _hot(self, n):
+        return Item(source="arxiv", external_id=f"x{n}",
+                    url=f"https://arxiv.org/abs/x{n}",
+                    title=f"Clinical AI governance and healthcare AI safety "
+                          f"oversight audit {n}",
+                    author="a", published=NOW - timedelta(hours=2),
+                    body="clinical AI governance and healthcare AI oversight, "
+                         "AI assurance, algorithmic accountability in health "
+                         "systems, medical AI regulation")
+
+    def test_the_cap_never_drops_a_carried_item(self):
+        self.cfg["run"]["digest_max_items"] = 2
+        self.batch = [_item(1), _item(2)]
+        with self.assertRaises(RuntimeError):
+            self._run(_Mail(fail=True))
+        self.batch = [self._hot(3), self._hot(4)]
+        mail = _Mail()
+        r = self._run(mail)
+        ids = sorted(x["external_id"] for x in r["digest"])
+        low = max(x["score"] for x in r["digest"] if x["external_id"] in ("x1", "x2"))
+        self.assertLess(low, min(x["score"] for x in r["all_new"]),
+                        "the fresh items must outscore the carried ones")
+        self.assertEqual(ids, ["x1", "x2"])
+        self.assertEqual(r["stats"]["carried_over"], 2)
+        self.assertIn("Healthcare AI governance in practice 1", mail.sent[0][1])
+        self.assertIn("Healthcare AI governance in practice 2", mail.sent[0][1])
+        self.assertIsNone(LocalHitStore(self.hits).pending_digest())
+
+    def test_fresh_items_fill_the_room_the_carried_ones_leave(self):
+        self.cfg["run"]["digest_max_items"] = 2
+        self.batch = [_item(1)]
+        with self.assertRaises(RuntimeError):
+            self._run(_Mail(fail=True))
+        self.batch = [self._hot(3), self._hot(4), self._hot(5)]
+        mail = _Mail()
+        r = self._run(mail)
+        ids = [x["external_id"] for x in r["digest"]]
+        self.assertEqual(len(ids), 2)
+        self.assertIn("x1", ids)
+        self.assertEqual(r["stats"]["carried_over"], 1)
+        self.assertIn("1 carried over from an earlier digest", mail.sent[0][1])
+
+    def test_a_digest_that_could_not_be_saved_is_not_called_kept(self):
+        self.batch = [_item(1)]
+
+        class _NoSave(LocalHitStore):
+            def put_digest(self, status, items):
+                raise OSError("disk full")
+
+        with self.assertLogs("jarvis.scout", level="ERROR") as cap:
+            with self.assertRaises(RuntimeError):
+                _app.run(self.cfg, hit_store=_NoSave(self.hits),
+                         chain_store=LocalChainStore(self.chain),
+                         mailer=_Mail(fail=True), now=NOW)
+        out = "\n".join(cap.output)
+        self.assertIn("NOT sent", out)
+        self.assertNotIn("kept for the next run", out)
+
 
 class _FakeTable:
     def __init__(self):
@@ -450,11 +511,47 @@ class TestTheChainEndsAtItsHead(unittest.TestCase):
         self.assertEqual(r["kind"], "head mismatch")
 
     def test_a_chain_written_before_the_head_file_still_verifies(self):
+        # Without a head file the end of the chain cannot be checked, so it
+        # does not verify until an append writes one (review of 0597f83).
         self._grow(3)
         os.remove(self.path + ".head")
-        self.assertTrue(Chain(LocalChainStore(self.path)).verify()["ok"])
+        r = Chain(LocalChainStore(self.path)).verify()
+        self.assertFalse(r["ok"])
+        self.assertEqual(r["kind"], "no head record")
         self._grow(1)                      # and appending carries on from it
         self.assertEqual(Chain(LocalChainStore(self.path)).verify()["entries"], 4)
+
+    def test_truncating_and_removing_the_head_file_is_not_a_pass(self):
+        self._grow(4)
+        self._drop_last()
+        os.remove(self.path + ".head")
+        r = Chain(LocalChainStore(self.path)).verify()
+        self.assertFalse(r["ok"], r)
+        self.assertEqual(r["kind"], "no head record")
+        self.assertEqual(r["entries_verified_before_failure"], 3)
+
+    def test_the_verify_script_does_not_claim_a_head_it_never_read(self):
+        import verify_chain
+        self._grow(3)
+        self._drop_last()
+        os.remove(self.path + ".head")
+        out = io.StringIO()
+        with mock.patch.object(sys, "argv", ["verify_chain.py", "--file", self.path]), \
+             contextlib.redirect_stdout(out):
+            code = verify_chain.main()
+        self.assertEqual(code, 1)
+        self.assertIn("no head record", out.getvalue())
+        self.assertNotIn("the head record points at", out.getvalue())
+        self.assertIn("could not be checked", out.getvalue())
+
+    def test_the_verify_script_on_an_empty_chain_claims_no_last_entry(self):
+        import verify_chain
+        out = io.StringIO()
+        with mock.patch.object(sys, "argv", ["verify_chain.py", "--file", self.path]), \
+             contextlib.redirect_stdout(out):
+            code = verify_chain.main()
+        self.assertEqual(code, 0)
+        self.assertNotIn("last", out.getvalue())
 
     def test_the_verify_script_reports_it(self):
         import verify_chain

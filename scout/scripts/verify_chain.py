@@ -4,8 +4,9 @@
 Walks every entry from the first, recomputes each hash from the stored
 content, and checks each entry's prev_hash against the actual hash of the
 entry before it. Then checks that the last entry is the one the head record
-points at, which is the only way to see entries missing from the end.
-Reports the first failure and stops there.
+points at, which is the only way to see entries missing from the end. A
+chain that has entries but no head record fails, because that check cannot
+be made. Reports the first failure and stops there.
 
 A scout run appending while this reads can show as a head mismatch; if the
 run was in progress, run this again once it has finished.
@@ -51,6 +52,9 @@ def main() -> int:
     if r["ok"]:
         print(f"  VERIFIED  {r['entries']} entries")
         print(f"  head hash {r['head_hash']}")
+        if not r["entries"]:
+            print("\n  The chain is empty and no head record points past it.")
+            return 0
         print("\n  Each entry's stored hash was recomputed from its own content and")
         print("  matched, each prev_hash matched the entry before it, and the last")
         print("  entry is the one the head record points at.")
@@ -66,6 +70,11 @@ def main() -> int:
         print("\n  The entries verify as far as they go, but the chain does not end")
         print("  where the head says it should: entries are missing from the end,")
         print("  or the head was moved.")
+    elif r["kind"] == "no head record":
+        print("\n  The entries verify as far as they go, but there is no head record")
+        print("  to say where the chain should end, so entries missing from the end")
+        print("  could not be checked. A chain written before the head file existed")
+        print("  gets one on its next append.")
     return 1
 
 

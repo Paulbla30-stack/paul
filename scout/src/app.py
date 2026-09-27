@@ -309,7 +309,8 @@ def run(cfg: dict, *, hit_store, chain_store, mailer, now: datetime | None = Non
 
     above = sorted([r for r in new_records if r["score"] >= threshold],
                    key=lambda r: r["score"], reverse=True)
-    capped = _merge_digest(carried, above)[: int(cfg["run"]["digest_max_items"])]
+    capped, carried_in = _select_digest(carried, above,
+                                        int(cfg["run"]["digest_max_items"]))
 
     # Drafting runs on what is new this run, not on the digest's selection:
     # the digest is capped for readability and this is capped for cost, and
@@ -329,7 +330,7 @@ def run(cfg: dict, *, hit_store, chain_store, mailer, now: datetime | None = Non
         "sources_truncated": truncated,
         "sources_partial": sorted(partial),
         "sources_partial_why": partial,
-        "carried_over": len(carried),
+        "carried_over": carried_in,
         "threshold": threshold,
         "proposed": stats_propose["proposed"],
         "drafted": stats_propose["drafted"],
@@ -346,9 +347,11 @@ def run(cfg: dict, *, hit_store, chain_store, mailer, now: datetime | None = Non
         # Persisted before the send, because the items are already marked
         # seen: if SES then fails and Lambda retries, the retry finds nothing
         # new and the day's digest would otherwise be gone without a trace.
+        saved = False
         if digest_io is not None:
             try:
                 digest_io[1]("pending", capped)
+                saved = True
             except Exception as e:                 # noqa: BLE001
                 log.error("could not save the digest before sending it; a failed "
                           "send now loses it: %s: %s", type(e).__name__, e)
@@ -361,8 +364,9 @@ def run(cfg: dict, *, hit_store, chain_store, mailer, now: datetime | None = Non
             stats["email_sent"] = False
             stats["email_error"] = f"{type(e).__name__}: {e}"[:300]
             stats["digest_items"] = len(capped)
-            log.error("digest of %d items NOT sent, kept for the next run: %s",
-                      len(capped), stats)
+            log.error("digest of %d items NOT sent, %s: %s", len(capped),
+                      "kept for the next run" if saved
+                      else "and it could not be saved, so it is lost", stats)
             # Re-raised so the invocation is marked failed and retried; the
             # retry picks the saved digest up.
             raise
@@ -394,6 +398,25 @@ def _digest_io(hit_store):
     if callable(read) and callable(write):
         return read, write
     return None
+
+
+def _select_digest(carried: list[dict], fresh: list[dict],
+                   max_items: int) -> tuple[list[dict], int]:
+    """The digest to send, and how many carried-over items are in it.
+
+    Carried items are never cut. They are already marked seen and exist only
+    in the unsent record, which is marked sent once this digest goes, so an
+    item the cap dropped here would never be mailed. The cap applies to the
+    fresh items, in the room the carried ones leave.
+    """
+    def key(r):
+        return (r.get("source"), r.get("external_id"))
+
+    kept = _merge_digest(carried, [])
+    have = {key(r) for r in kept}
+    room = max(0, max_items - len(kept))
+    extra = [r for r in fresh if key(r) not in have][:room]
+    return _merge_digest(kept, extra), len(kept)
 
 
 def _merge_digest(carried: list[dict], fresh: list[dict]) -> list[dict]:
