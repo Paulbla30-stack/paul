@@ -17,14 +17,21 @@ class HardeningAction:
 
     def __init__(self, name: str, description: str, command: str,
                  verify_path: Optional[str] = None,
-                 verify_value: Optional[str] = None):
+                 verify_value: Optional[str] = None,
+                 accept_values: tuple = ()):
         self.name = name
         self.description = description
         self.command = command
         self.verify_path = verify_path
         self.verify_value = verify_value
+        # Other values that already satisfy the action; verify_value is
+        # what gets written when the current value is none of these.
+        self.accept_values = tuple(accept_values)
         self.applied = False
         self.error: Optional[str] = None
+
+    def satisfied_by(self, current: str) -> bool:
+        return current == self.verify_value or current in self.accept_values
 
     def to_dict(self) -> dict:
         return {
@@ -87,9 +94,14 @@ class SystemHardener:
             HardeningAction(
                 name="Enable reverse path filtering",
                 description="Drop packets with spoofed source addresses",
-                command="echo 1 > /proc/sys/net/ipv4/conf/all/rp_filter",
+                # Loose (2), not strict (1): strict drops legitimate replies
+                # where routing is asymmetric, which is common on cloud
+                # instances. Both filter, and the scanner accepts either,
+                # so an existing 1 is left alone.
+                command="echo 2 > /proc/sys/net/ipv4/conf/all/rp_filter",
                 verify_path="/proc/sys/net/ipv4/conf/all/rp_filter",
-                verify_value="1",
+                verify_value="2",
+                accept_values=("1", "2"),
             ),
             HardeningAction(
                 name="Disable ICMP redirects",
@@ -123,7 +135,7 @@ class SystemHardener:
                 try:
                     with open(action.verify_path, "r") as f:
                         current = f.read().strip()
-                    if current == action.verify_value:
+                    if action.satisfied_by(current):
                         action.applied = True
                         return action.to_dict()
                 except (PermissionError, OSError):

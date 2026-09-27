@@ -1032,16 +1032,47 @@ class BaseBrain:
         return decision
 
     @staticmethod
-    def _parse_plan(text: str) -> Any:
-        """Parse the plan JSON; tolerate prose or code fences around it."""
+    def _parse_plan(text: str) -> dict:
+        """Parse the plan JSON; tolerate prose or code fences around it.
+
+        Raises ValueError unless the result is a JSON object. A bare ``null``
+        or a list used to come back as-is, so Bedrock did not re-ask and the
+        cycle idled on "a non-object plan".
+        """
         text = (text or "").strip()
         try:
-            return json.loads(text)
+            whole = json.loads(text)
         except ValueError:
             pass
+        else:
+            if isinstance(whole, dict):
+                return whole
+            raise ValueError(f"plan is a JSON {type(whole).__name__}, not an object")
+        # Try each '{' in turn. Prose such as "I will use {shell_command}"
+        # before the real object used to end the search at the first brace.
         start = text.find("{")
         if start < 0:
             raise ValueError("no JSON object in model output")
+        error = "unterminated JSON object in model output"
+        while start >= 0:
+            end = BaseBrain._matching_brace(text, start)
+            if end < 0:
+                # Unbalanced from here, perhaps a stray brace or quote in
+                # prose; the object may still start further on.
+                start = text.find("{", start + 1)
+                continue
+            try:
+                return json.loads(text[start:end + 1])
+            except ValueError as e:
+                error = str(e)
+            # Resume after the whole candidate, not inside it, so an object
+            # nested in a broken plan is never taken for the plan.
+            start = text.find("{", end + 1)
+        raise ValueError(error)
+
+    @staticmethod
+    def _matching_brace(text: str, start: int) -> int:
+        """Index of the '}' closing the '{' at ``start``, or -1."""
         depth = 0
         in_str = False
         esc = False
@@ -1062,8 +1093,8 @@ class BaseBrain:
             elif ch == "}":
                 depth -= 1
                 if depth == 0:
-                    return json.loads(text[start:i + 1])
-        raise ValueError("unterminated JSON object in model output")
+                    return i
+        return -1
 
     def _to_decision(self, raw: Any) -> Decision:
         if not isinstance(raw, dict):

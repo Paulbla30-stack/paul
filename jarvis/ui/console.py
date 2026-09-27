@@ -66,7 +66,7 @@ class ConsoleUI:
 
         while self.running:
             try:
-                prompt = f"\033[1;36m[jarvis]\033[0m $ "
+                prompt = "\033[1;36m[jarvis]\033[0m $ "
                 line = input(prompt).strip()
                 if not line:
                     continue
@@ -94,7 +94,7 @@ class ConsoleUI:
         status = self.agent.get_status()
 
         hw = status.get("hardware", {})
-        print(f"  Hardware: ", end="")
+        print("  Hardware: ", end="")
         hw_list = [k for k, v in hw.items() if v]
         print(", ".join(hw_list) if hw_list else "none available")
 
@@ -148,9 +148,9 @@ class ConsoleUI:
 
     def _cmd_memory(self, args):
         summary = self.agent.memory.get_summary()
-        print(f"\nAgent Memory:")
+        print("\nAgent Memory:")
         print(f"  Entries: {summary['total_entries']} / {summary['max_entries']}")
-        print(f"  Categories:")
+        print("  Categories:")
         for cat, count in summary.get("categories", {}).items():
             print(f"    {cat}: {count}")
         print()
@@ -328,7 +328,7 @@ class ConsoleUI:
     def _cmd_display(self, args):
         if self.agent.hardware.get("display"):
             state = self.agent.hardware["display"].get_state()
-            print(f"\nDisplay:")
+            print("\nDisplay:")
             for k, v in state.items():
                 print(f"  {k}: {v}")
             vmem = self.agent.hardware["display"].get_video_memory_info()
