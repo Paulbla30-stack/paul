@@ -10,6 +10,7 @@
 - Every project runs the same four-step cycle: **Plan → Learn → Elevate → Review**, then back to Plan.
 - There is a **value function and a taste function**, used to test and learn new and novel things.
 - It is **shared**. Paul and Jarvis both work in it. Paul gives a direction. Jarvis then runs automated work within that direction and tests his own ideas. Paul can join in at any point.
+- **Either of them can start a project.** Paul describes one. Jarvis can also propose one, and it becomes a proposal card that Paul accepts, edits or declines before any work is done. This uses the permission spine's existing proposal pattern. (Paul, 27 September.)
 
 ## How the brief is read (agreed on 27 September; Paul replied "Cool thanks")
 
