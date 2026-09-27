@@ -225,7 +225,19 @@ class Notifier:
     def _recent_window(self) -> list:
         now = self.clock()
         self._sent_at = [t for t in self._sent_at if now - t < 3600]
+        self._prune_keys(now)
         return self._sent_at
+
+    def _prune_keys(self, now: float):
+        """Forget dedupe keys that can no longer hold anything back.
+
+        Keys are per day, per commitment and per question, so the map only
+        ever grew. A key older than the window is never consulted again:
+        hold_reason ignores it, so dropping it changes no verdict.
+        """
+        window = self.dedupe_window_s
+        self._recent_keys = {k: t for k, t in self._recent_keys.items()
+                             if window and now - t < window}
 
     def _in_quiet_hours(self) -> bool:
         if not self.quiet_hours:
@@ -329,6 +341,9 @@ class Notifier:
                     "severity": severity, "subject": subject}
         now = self.clock()
         self._sent_at.append(now)
+        # Pruned here too: with no hourly cap _recent_window is not called
+        # on the send path, and the keys would grow as before.
+        self._prune_keys(now)
         self._recent_keys[key] = now
         self.last_sent_at = now
         self.last_error = None

@@ -54,6 +54,7 @@ from datetime import datetime, timedelta
 from typing import Optional
 
 from jarvis.agent import timesense
+from jarvis.agent.diary import STANDING as DIARY_STANDING
 from jarvis.agent.diary import (
     DAILY, MONTHLY, ONCE, WEEKLY, YEARLY, Refused,
     _instant, _naive, _occurrence, parse_duration, parse_every, parse_when,
@@ -84,8 +85,21 @@ MIN_SLOT_MINUTES = 30.0
 _FOR = re.compile(r"\bfor\s+(.+)$", re.IGNORECASE)
 _UNTIL = re.compile(r"\b(?:to|until|till|-|–)\s*"
                     r"(\d{1,2}(?:[:.]\d{2})?\s*(?:am|pm)?)\s*$", re.IGNORECASE)
-_AT_PLACE = re.compile(r"\b(?:at|in)\s+(?!\d)([A-Za-z][^,;]{1,60})$")
+_AT_PLACE = re.compile(r"\b(?:at|in)\s+", re.IGNORECASE)
 _CLOCKISH = re.compile(r"\d")
+# Where a place stops. It used to run from "at" or "in" to the end of the
+# line, so "dentist in Leeds tomorrow" took "Leeds tomorrow" as the place and
+# then found no date in what was left. A place ends at the first word that is
+# part of the when: a day, a time, a length, or anything with a digit in it.
+_WEEKDAY_WORDS = frozenset(
+    ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday",
+     "sunday"))
+_PLACE_STOPS = _WEEKDAY_WORDS | frozenset(
+    ("today", "tomorrow", "tonight", "morning", "afternoon", "evening",
+     "midday", "noon", "midnight", "for", "to", "until", "till"))
+# Words that join a place to the when ("at the office on friday") and so are
+# left with the when rather than kept on the end of the place.
+_PLACE_TRAILERS = frozenset(("on", "at", "in", "from", "by", "the", "a", "an"))
 
 # What every answer about free time has to carry with it. Stated once here so
 # it cannot be given without it.
@@ -112,6 +126,39 @@ def _span_minutes(text: str) -> Optional[float]:
         return None
 
 
+def _split_place(raw: str) -> tuple:
+    """(where, the rest) from what he typed, or ("", raw) when there is none."""
+    for found in _AT_PLACE.finditer(raw):
+        tail = raw[found.end():]
+        words = list(re.finditer(r"\S+", tail))
+        bares = [w.group(0).strip(",;").lower() for w in words]
+        kept = []
+        for i, word in enumerate(words):
+            token, bare = word.group(0), bares[i]
+            if _CLOCKISH.search(token) or bare in _PLACE_STOPS:
+                break
+            if bare in ("next", "this") and bares[i + 1:i + 2] and \
+                    bares[i + 1] in _WEEKDAY_WORDS:
+                break
+            if bare == "day" and bares[i + 1:i + 3] == ["after", "tomorrow"]:
+                break
+            kept.append(word)
+            if token[-1] in ",;":
+                break
+        while kept and (kept[-1].group(0).strip(",;").lower() in _PLACE_TRAILERS
+                        or not any(c.isalnum() for c in kept[-1].group(0))):
+            kept.pop()
+        if not kept or not kept[0].group(0)[0].isalpha():
+            continue                    # "at 2pm", "in the morning": a when
+        end = kept[-1].end()
+        where = tail[kept[0].start():end].strip(",; ")
+        if len(where) > 60:
+            continue
+        rest = (raw[:found.start()] + " " + tail[end:]).strip(" ,;")
+        return where, " ".join(rest.split())
+    return "", raw
+
+
 def parse_span(text: str, now: Optional[float] = None,
                tz: str = timesense.DEFAULT_TZ) -> dict:
     """When it starts and how long it runs, from what he typed.
@@ -125,11 +172,9 @@ def parse_span(text: str, now: Optional[float] = None,
     if not raw:
         raise Refused("nothing to put in the calendar: say when")
 
-    where = ""
-    place = _AT_PLACE.search(raw)
-    if place and not _CLOCKISH.search(place.group(1)):
-        where = place.group(1).strip()
-        raw = raw[:place.start()].strip() or raw
+    where, rest = _split_place(raw)
+    if where:
+        raw = rest or raw
 
     minutes = _span_minutes(raw)
     head = _FOR.sub("", raw).strip() if minutes is not None else raw
@@ -629,7 +674,6 @@ class Schedule:
     def context(self, now: Optional[float] = None) -> Optional[dict]:
         """What the model is told. His time, not the agent's work queue."""
         now = self.clock() if now is None else now
-        today = datetime.fromtimestamp(now, timesense.zone(self.tz))
         ahead, waiting = self.ahead(7, now), self.proposed()
         clashes = self.clashes(30, now)
         running = self.running(now)
@@ -667,7 +711,13 @@ class Schedule:
             if item.ends_at() > now:
                 continue
             skipped = item.roll(now)
-            self._arm(item, now)
+            # The diary commitment was made with the same repeat and rolls
+            # itself. Re-arming every occurrence dropped it and added a new
+            # one each time, and dropped commitments are kept, so the diary
+            # grew by a pinned row per occurrence. Only re-arm when the one
+            # it has is gone, stopped, or no longer on this occurrence.
+            if not self._armed_for(item):
+                self._arm(item, now)
             self._persist(item)
             report["rolled"].append({"id": item.id, "what": item.what,
                                      "skipped": skipped,
@@ -706,6 +756,22 @@ class Schedule:
         except Refused:
             return
         item.commitment = made.id
+
+    def _armed_for(self, item: Appointment) -> bool:
+        """Whether its diary commitment is standing and on this occurrence.
+
+        Compared on the occurrence itself, not just the repeat: a monthly
+        commitment anchored on a clamped day (the 28th standing in for the
+        31st) steps from that day, and would drift off the appointment.
+        """
+        diary = getattr(self.agent, "diary", None)
+        if diary is None or not item.commitment:
+            return False
+        held = diary.find(item.commitment)
+        return (held is not None and held.id == item.commitment
+                and held.state == DIARY_STANDING
+                and held.repeat == item.repeat
+                and held.due_local == item.start_local)
 
     def _disarm(self, item: Appointment):
         diary = getattr(self.agent, "diary", None)

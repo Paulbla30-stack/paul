@@ -57,6 +57,7 @@ out saying how many there were.
 """
 
 import calendar
+import copy
 import hashlib
 import re
 import time
@@ -91,6 +92,9 @@ GIVE_UP_AFTER_S = 3 * 86_400
 # a box that was off or a loop that stalled -- and from the register's side
 # those are the same thing and the same apology.
 BLIND_GAP_S = 600.0
+# How often an unchanged standing commitment is written back anyway, so its
+# row stays among the recent ones load() reads after a restart.
+REFRESH_S = 86_400.0
 STATE_FILE = "/var/lib/jarvis/diary.state"
 
 # Words that make a date on a page mean something is expected of him. Without
@@ -478,6 +482,8 @@ class Diary:
         # apologise for three weeks it was never asked about.
         self.started_at = self.clock()
         self.blind_gap_s = float(cfg.get("blind_gap_s") or BLIND_GAP_S)
+        # When tick() last wrote each commitment, by id. See _tick_one.
+        self._refreshed: dict = {}
         self._load_state()
 
     # ---- writing -------------------------------------------------------
@@ -729,6 +735,25 @@ class Diary:
         return soonest
 
     def _tick_one(self, item: Commitment, now: float, report: dict):
+        before = copy.deepcopy(item.as_meta())
+        try:
+            self._tick_item(item, now, report)
+        finally:
+            # tick() runs every loop iteration, and writing every standing
+            # commitment back each time was a SELECT, an UPDATE and a commit
+            # per commitment per second for state that had not moved. So it
+            # is written when something about it changed -- spoken, passed,
+            # rolled, done -- and otherwise refreshed once a day. The refresh
+            # matters: load() reads back only the most recent commitment rows,
+            # and a yearly reminder nobody touched for months must not fall
+            # out of that window behind newer ones.
+            last = self._refreshed.get(item.id)
+            if (item.as_meta() != before or last is None
+                    or now - last >= REFRESH_S):
+                self._persist(item)
+                self._refreshed[item.id] = now
+
+    def _tick_item(self, item: Commitment, now: float, report: dict):
         behind = item.catch_up(now)
         if behind:
             item.missed += behind
@@ -766,7 +791,6 @@ class Diary:
             else:
                 report["held"].append({"id": item.id, "what": item.what,
                                        "reason": verdict.get("reason")})
-                self._persist(item)
                 return
         due = item.due_at()
         if now >= due and all(item.spoken_for(lead) for lead in item.leads):
@@ -776,7 +800,6 @@ class Diary:
                 item.missed += item.roll(now)
                 report["rolled"].append({"id": item.id, "what": item.what,
                                          "next": item.reads_as()})
-        self._persist(item)
 
     def _speak(self, item: Commitment, lead: float, at: float, now: float,
                late: bool) -> dict:

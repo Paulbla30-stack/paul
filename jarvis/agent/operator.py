@@ -129,6 +129,10 @@ class OperatorProfile:
     def forget(self, text: str) -> bool:
         """Take a line out. His, whenever he wants, without explaining why."""
         wanted = " ".join(str(text or "").split()).lower()
+        # An empty string is a substring of every line, so without this an
+        # empty request would take out whichever fact happened to be first.
+        if not wanted:
+            return False
         for i, fact in enumerate(self.facts):
             if fact.text.lower() == wanted or wanted in fact.text.lower():
                 self.facts.pop(i)

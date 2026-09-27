@@ -969,6 +969,11 @@ class AgentCore:
             "timestamp": time.time(),
             "took_s": (outcome or {}).get("duration_s"),
         })
+        # Each entry carries the full result, page envelopes and shell output
+        # included, so an unbounded list grows for the life of the process.
+        # Every reader slices the tail; 1000 is well past the longest of them.
+        # Trimmed in place so anything holding the list sees the same object.
+        del self.task_history[:-1000]
 
         return result
 

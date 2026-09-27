@@ -37,7 +37,13 @@ granted here** -- a question about what it may do goes to the operator, whose
 machine it is, and no answer from a reviewer opens anything. And a question
 expires: not after one cycle, which it proposed and which would kill every
 question before a reviewer ever connected, but when the thing it was blocked
-on resolves, or after a bounded wall-clock window. Nothing accumulates.
+on resolves, or after a bounded wall-clock window. Nothing accumulates:
+expired and withdrawn questions are let go a week after they were asked, and
+only the fifty most recent answers are kept. That is also what bounds "already
+ruled on": a ruling older than the last fifty answers can be asked about
+again. The answer itself is not lost with it -- it went into memory as a
+verdict when it was given -- and the register is not persisted, so it starts
+empty after a restart in any case.
 """
 
 import time
@@ -55,6 +61,11 @@ MAX_PER_SUBJECT = 2
 SUBJECT_WINDOW_S = 24 * 3600
 # A hard ceiling on what can be waiting at once, so a loop cannot fill it.
 MAX_OPEN = 12
+# How long a question that died unanswered is kept for reading, and how many
+# answers are kept for "already ruled on". Both longer than SUBJECT_WINDOW_S,
+# so letting them go never lets a subject be pressed a third time in a day.
+KEEP_CLOSED_S = 7 * 86_400
+KEEP_ANSWERED = 50
 
 # Who a question is for.
 REVIEWER = "reviewer"      # a second reader: what did you mean, does this hold
@@ -256,7 +267,12 @@ class QuestionRegister:
         return False
 
     def sweep(self, now: Optional[float] = None) -> int:
-        """Expire what has gone stale. Nothing accumulates."""
+        """Expire what has gone stale, and let old history go.
+
+        Returns how many were expired on this pass. Expired and withdrawn
+        questions older than KEEP_CLOSED_S are dropped, and only the most
+        recent KEEP_ANSWERED answers are kept; open questions never are.
+        """
         now = self._clock() if now is None else now
         gone = 0
         for q in self.questions:
@@ -264,6 +280,14 @@ class QuestionRegister:
                 q.state = EXPIRED
                 self._record(q, "expired")
                 gone += 1
+        answered = sorted((q for q in self.questions if q.state == ANSWERED),
+                          key=lambda q: q.answered_at or q.asked_at)
+        forget = {id(q) for q in answered[:max(0, len(answered) - KEEP_ANSWERED)]}
+        self.questions = [
+            q for q in self.questions
+            if id(q) not in forget
+            and not (q.state in (EXPIRED, WITHDRAWN)
+                     and now - q.asked_at > KEEP_CLOSED_S)]
         return gone
 
     def resolve(self, blocked_on: str) -> int:
