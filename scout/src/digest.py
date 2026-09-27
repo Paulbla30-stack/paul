@@ -31,6 +31,19 @@ SOURCE_LABEL = {
 }
 
 
+def _source_caveats(run_stats: dict) -> list[str]:
+    """Sources that answered, but not fully. Neither ok nor failed."""
+    out = []
+    truncated = run_stats.get("sources_truncated") or []
+    if truncated:
+        out.append(f"Truncated at the time budget: {', '.join(truncated)}.")
+    why = run_stats.get("sources_partial_why") or {}
+    for name in run_stats.get("sources_partial") or []:
+        reason = why.get(name)
+        out.append(f"Partial: {name}" + (f" ({reason})" if reason else "") + ".")
+    return out
+
+
 def build(records: list[dict], *, run_stats: dict, threshold: float,
           proposals: list | None = None, approve_url: str = "",
           mint=None) -> tuple[str, str, str]:
@@ -69,6 +82,8 @@ def build(records: list[dict], *, run_stats: dict, threshold: float,
         lines.append("Nothing posts unless you open one of those and approve it.")
         lines.append("")
 
+    caveats = _source_caveats(run_stats)
+    carried = int(run_stats.get("carried_over") or 0)
     lines += [
         "—",
         f"Scanned {run_stats['fetched']} items from "
@@ -76,7 +91,10 @@ def build(records: list[dict], *, run_stats: dict, threshold: float,
         + (f" (failed: {', '.join(run_stats['sources_failed'])})"
            if run_stats.get("sources_failed") else "")
         + ".",
+    ] + caveats + [
         f"{run_stats['new']} new, {run_stats['above']} above threshold.",
+    ] + ([f"{carried} carried over from an earlier digest that was not sent."]
+         if carried else []) + [
         f"Chain entries: {run_stats.get('chain_entries', '?')}.",
         "",
     ] + ([
@@ -150,8 +168,11 @@ def build(records: list[dict], *, run_stats: dict, threshold: float,
         f'<p style="font:12px/1.5 system-ui,sans-serif;color:#666">'
         f"Scanned {run_stats['fetched']} items from "
         f'{html.escape(", ".join(run_stats["sources_ok"]))}.{fail_html} '
-        f"{run_stats['new']} new, {run_stats['above']} above threshold. "
-        f"Chain entries: {run_stats.get('chain_entries','?')}.<br><br>"
+        + "".join(f'<span style="color:#a60">{html.escape(c)}</span> ' for c in caveats)
+        + f"{run_stats['new']} new, {run_stats['above']} above threshold. "
+        + (f"{carried} carried over from an earlier digest that was not sent. "
+           if carried else "")
+        + f"Chain entries: {run_stats.get('chain_entries','?')}.<br><br>"
         + ("The scout finds and logs. It does not post anywhere, and it has not "
            "drafted anything. Every line above is a link for you to judge."
            if not proposals else

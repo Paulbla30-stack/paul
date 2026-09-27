@@ -3,7 +3,12 @@
 
 Walks every entry from the first, recomputes each hash from the stored
 content, and checks each entry's prev_hash against the actual hash of the
-entry before it. Reports the first entry that fails and stops there.
+entry before it. Then checks that the last entry is the one the head record
+points at, which is the only way to see entries missing from the end.
+Reports the first failure and stops there.
+
+A scout run appending while this reads can show as a head mismatch; if the
+run was in progress, run this again once it has finished.
 
     python3 scripts/verify_chain.py --table jarvis-scout --profile openclaw
     python3 scripts/verify_chain.py --file .local/chain.jsonl
@@ -47,7 +52,8 @@ def main() -> int:
         print(f"  VERIFIED  {r['entries']} entries")
         print(f"  head hash {r['head_hash']}")
         print("\n  Each entry's stored hash was recomputed from its own content and")
-        print("  matched, and each prev_hash matched the entry before it.")
+        print("  matched, each prev_hash matched the entry before it, and the last")
+        print("  entry is the one the head record points at.")
         return 0
 
     print("  FAILED")
@@ -55,6 +61,11 @@ def main() -> int:
     print(f"  kind            : {r['kind']}")
     print(f"  detail          : {r['detail']}")
     print(f"  verified before : {r['entries_verified_before_failure']} entries")
+    if "head_seq" in r:
+        print(f"  head record     : seq {r['head_seq']}")
+        print("\n  The entries verify as far as they go, but the chain does not end")
+        print("  where the head says it should: entries are missing from the end,")
+        print("  or the head was moved.")
     return 1
 
 

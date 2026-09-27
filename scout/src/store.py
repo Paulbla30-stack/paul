@@ -4,12 +4,43 @@ A hit is stored once, keyed by source + the source's own id. Re-seeing an
 item on a later run updates nothing and does not re-enter it in the chain:
 the chain records when the scout FIRST saw something, and that fact should
 not change afterwards.
+
+The same store also keeps one digest record: the last digest built, and
+whether it was sent. Hits are marked seen before the email goes, so a digest
+that fails to send exists nowhere else; the next run reads it back and sends
+it. In DynamoDB it sits at pk="DIGEST#LATEST", sk="DIGEST", clear of hits
+(sk "HIT"), proposals (sk "PROPOSAL") and the chain (pk "CHAIN"). It is
+overwritten with PutItem, because the scout has neither UpdateItem nor
+DeleteItem.
 """
 
 from __future__ import annotations
 
 import json
+import os
 from datetime import datetime, timezone
+
+DIGEST_KEY = {"pk": "DIGEST#LATEST", "sk": "DIGEST"}
+PENDING, SENT = "pending", "sent"
+
+
+def _digest_record(status: str, items: list[dict]) -> dict:
+    if status not in (PENDING, SENT):
+        raise ValueError(f"unknown digest status {status!r}")
+    # The body is dropped: the digest does not print it, and 25 abstracts
+    # would push a DynamoDB item toward its 400 KB limit for nothing.
+    slim = [{k: v for k, v in r.items() if k != "body"} for r in items]
+    return {"status": status, "count": len(slim),
+            "updated": datetime.now(timezone.utc).isoformat(),
+            # A JSON string, not a map, for the reason chain.py gives: DynamoDB
+            # has no float, and scores are floats.
+            "items_json": json.dumps(slim, ensure_ascii=False, sort_keys=True)}
+
+
+def _pending_items(rec: dict | None) -> list[dict] | None:
+    if not rec or rec.get("status") != PENDING:
+        return None
+    return list(json.loads(rec.get("items_json") or "[]"))
 
 
 class LocalHitStore:
@@ -31,6 +62,29 @@ class LocalHitStore:
 
     def count(self) -> int:
         return len(self._d)
+
+    @property
+    def _digest_path(self) -> str:
+        return self.path + ".digest.json"
+
+    def pending_digest(self) -> list[dict] | None:
+        """The items of a digest that was built and never sent, or None.
+
+        A corrupt file raises rather than reading as "nothing pending".
+        """
+        try:
+            with open(self._digest_path, encoding="utf-8") as fh:
+                rec = json.load(fh)
+        except FileNotFoundError:
+            return None
+        return _pending_items(rec)
+
+    def put_digest(self, status: str, items: list[dict]) -> None:
+        rec = _digest_record(status, items)
+        tmp = self._digest_path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(rec, fh, indent=1, ensure_ascii=False)
+        os.replace(tmp, self._digest_path)
 
 
 class DynamoHitStore:
@@ -69,6 +123,14 @@ class DynamoHitStore:
 
     def count(self) -> int:
         return int(self.table.item_count)   # approximate; updated ~6-hourly
+
+    def pending_digest(self) -> list[dict] | None:
+        r = self.table.get_item(Key=DIGEST_KEY, ConsistentRead=True)
+        return _pending_items(r.get("Item"))
+
+    def put_digest(self, status: str, items: list[dict]) -> None:
+        # PutItem overwrites: pending before the send, sent after it.
+        self.table.put_item(Item={**DIGEST_KEY, **_digest_record(status, items)})
 
 
 def record_from(item, score, now=None) -> dict:

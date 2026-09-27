@@ -34,7 +34,7 @@ import xml.etree.ElementTree as ET
 from datetime import timedelta
 from email.utils import parsedate_to_datetime
 
-from . import (Item, FetchError, http_get, sanitise, safe_url, utc,
+from . import (BudgetExpired, Item, http_get, sanitise, safe_url, settle, utc,
                MAX_TITLE, MAX_BODY, MAX_AUTHOR)
 
 SOURCE = "arxiv"
@@ -151,24 +151,33 @@ def fetch(cfg: dict, now, lookback_days: int, limit: int) -> list[Item]:
     wide = lookback_days > float(cfg.get("rss_covers_days", 2))
 
     out: dict[str, Item] = {}
-    errors = []
-    for i, cat in enumerate(cats):
+    # Counted per request, not judged by whether anything came back: one
+    # dead category next to a working one used to vanish without a word,
+    # because the only check was "nothing at all, and some errors".
+    succeeded, errors = 0, []
+    requests = []
+    for cat in cats:
+        requests.append(("rss", cat))
+        if wide:
+            requests.append(("api", cat))
+    for i, (via, cat) in enumerate(requests):
         if i:
             time.sleep(interval)
         try:
-            for it in _from_rss(cat, cutoff, per_cat):
-                out.setdefault(it.external_id, it)
-        except Exception as e:                              # noqa: BLE001
-            errors.append(f"rss {cat}: {type(e).__name__}")
+            if via == "rss":
+                got = _from_rss(cat, cutoff, per_cat)
+            else:
+                got = _from_api(cfg["endpoint"], cat, cutoff, per_cat, interval)
+        except BudgetExpired:
+            if not succeeded:
+                raise
+            break                                   # collect() reports it as truncated
+        except Exception as e:                      # noqa: BLE001
+            errors.append(f"{via} {cat}: {type(e).__name__}: {str(e)[-40:]}")
+            continue
+        succeeded += 1
+        for it in got:
+            out.setdefault(it.external_id, it)
 
-        if wide:
-            try:
-                time.sleep(interval)
-                for it in _from_api(cfg["endpoint"], cat, cutoff, per_cat, interval):
-                    out.setdefault(it.external_id, it)
-            except Exception as e:                          # noqa: BLE001
-                errors.append(f"api {cat}: {str(e)[-40:]}")
-
-    if not out and errors:
-        raise FetchError("; ".join(errors[:4]))
+    settle(SOURCE, succeeded, errors)
     return list(out.values())

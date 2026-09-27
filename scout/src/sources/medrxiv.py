@@ -11,7 +11,8 @@ import logging
 
 from datetime import timedelta
 
-from . import BudgetExpired, Item, MAX_AUTHOR, MAX_BODY, MAX_TITLE, http_json, safe_url, sanitise, utc
+from . import (BudgetExpired, FetchError, Item, MAX_AUTHOR, MAX_BODY, MAX_TITLE,
+               http_json, note_partial, safe_url, sanitise, utc)
 
 log = logging.getLogger("scout.medrxiv")
 
@@ -26,11 +27,15 @@ def fetch(cfg: dict, now, lookback_days: int, limit: int) -> list[Item]:
 
     out: dict[str, Item] = {}
     cursor = 0
+    page = 0
     while True:
+        page += 1
         try:
             data = http_json(f"{endpoint}/{start}/{end}/{cursor}",
                              timeout=30.0, retries=2)
         except BudgetExpired as why:
+            if page == 1:
+                raise                   # nothing was read: a failure, not a truncation
             # Stop with what has been gathered rather than losing the lot.
             # collect() reads budget.tripped and reports the source as
             # truncated, because a partial sweep presented as a complete one
@@ -38,8 +43,27 @@ def fetch(cfg: dict, now, lookback_days: int, limit: int) -> list[Item]:
             log.warning("medrxiv: %s; returning %d of an unknown total",
                         why, len(out))
             break
-        msgs = data.get("messages") or [{}]
-        if (msgs[0].get("status") or "").lower() != "ok":
+        except Exception as e:          # noqa: BLE001
+            if page == 1:
+                raise
+            # A later page failing keeps the earlier pages, and says so.
+            note_partial(f"page {page} failed: {type(e).__name__}: {str(e)[-60:]}")
+            log.warning("medrxiv: page %d failed, keeping %d items: %s",
+                        page, len(out), e)
+            break
+        msgs = (data.get("messages") if isinstance(data, dict) else None) or [{}]
+        status = str((msgs[0] or {}).get("status") or "").strip().lower()
+        if status == "no posts found" and page == 1:
+            # The API's own answer for an empty window. Not an error.
+            break
+        if status != "ok":
+            # This used to break silently: a refusal, or an empty {}, came
+            # back as zero items and the source was listed as ok.
+            if page == 1:
+                raise FetchError(f"medrxiv: status {status or 'missing'!r} on the first page")
+            note_partial(f"page {page} answered status {status or 'missing'!r}")
+            log.warning("medrxiv: page %d answered status %r, keeping %d items",
+                        page, status, len(out))
             break
         batch = data.get("collection") or []
         if not batch:

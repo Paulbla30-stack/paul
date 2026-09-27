@@ -124,6 +124,10 @@ class Budget:
         self.clock = clock
         self.started = clock()
         self.tripped = False
+        # Requests that failed while others from the same source succeeded.
+        # collect() reads this the way it reads `tripped`: a source that
+        # answered three queries out of eighteen is not a clean sweep.
+        self.partial: list[str] = []
 
     def remaining(self) -> float:
         return self.seconds - (self.clock() - self.started)
@@ -147,6 +151,30 @@ def set_budget(budget: "Budget | None") -> None:
 
 def current_budget() -> "Budget | None":
     return _BUDGET
+
+
+def settle(source: str, succeeded: int, errors: list[str]) -> None:
+    """Decide what a fetcher's per-request errors mean for the source.
+
+    Every request failing is a failed source, and raises. Some failing is a
+    partial source: the fetcher keeps what it got and a note goes on the
+    current budget for collect() to report. Before this, a dead endpoint
+    swallowed per keyword came back as an empty list and was filed under
+    sources_ok, indistinguishable from a quiet day.
+    """
+    if not errors:
+        return
+    if succeeded <= 0:
+        raise FetchError(f"{source}: all {len(errors)} requests failed: "
+                         + "; ".join(errors[:4]))
+    note_partial(f"{len(errors)} of {len(errors) + succeeded} requests failed: "
+                 + "; ".join(errors[:2]))
+
+
+def note_partial(reason: str) -> None:
+    b = current_budget()
+    if b is not None:
+        b.partial.append(sanitise(reason, 200))
 
 
 # Codes that mean "you are going too fast", not "this is broken".

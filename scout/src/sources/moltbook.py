@@ -33,7 +33,7 @@ import time
 import urllib.parse
 from datetime import timedelta
 
-from . import (Item, http_json, sanitise, safe_url, utc,
+from . import (BudgetExpired, Item, http_json, sanitise, safe_url, settle, utc,
                MAX_TITLE, MAX_BODY, MAX_AUTHOR)
 
 SOURCE = "moltbook"
@@ -53,15 +53,25 @@ def fetch(cfg: dict, keywords: list[str], now, lookback_days: int, limit: int) -
     cutoff = now - timedelta(days=lookback_days)
     pause = float(cfg.get("pause_s", 0.5))
     seen: dict[str, Item] = {}
+    # One term failing is not the source failing, but every term failing is,
+    # and it used to come back as an empty list filed under sources_ok.
+    succeeded, errors = 0, []
 
     for kw in keywords:
         url = f"{endpoint}/search?{urllib.parse.urlencode({'q': kw})}"
         try:
             data = http_json(url, timeout=25.0, retries=2)
-        except Exception:                      # noqa: BLE001 - one term failing is not the run failing
+            results = data.get("results") or []
+        except BudgetExpired:
+            if not succeeded:
+                raise
+            break                              # collect() reports it as truncated
+        except Exception as e:                 # noqa: BLE001
+            errors.append(f"{kw[:30]}: {type(e).__name__}: {str(e)[-60:]}")
             continue
+        succeeded += 1
 
-        for r in data.get("results") or []:
+        for r in results:
             # The search index returns agents and submolts as well as posts.
             if r.get("type") != "post":
                 continue
@@ -99,6 +109,8 @@ def fetch(cfg: dict, keywords: list[str], now, lookback_days: int, limit: int) -
                 },
             )
             if len(seen) >= limit:
+                settle(SOURCE, succeeded, errors)
                 return list(seen.values())
         time.sleep(pause)
+    settle(SOURCE, succeeded, errors)
     return list(seen.values())

@@ -42,8 +42,27 @@ def load_config(path: str | None = None) -> dict:
         return tomllib.load(fh)
 
 
+class Collected(tuple):
+    """collect()'s (items, ok, failed, truncated), plus `partial`.
+
+    A tuple so every existing caller that unpacks four values keeps working;
+    `partial` rides alongside as {source: reason} for the sources where some
+    requests failed and others did not.
+    """
+    partial: dict
+
+    def __new__(cls, items, ok, failed, truncated, partial=None):
+        t = super().__new__(cls, (items, ok, failed, truncated))
+        t.partial = dict(partial or {})
+        return t
+
+
 def collect(cfg: dict, now: datetime) -> tuple[list, list[str], list[str], list[str]]:
-    """Fetch from every enabled source. One source failing never fails the run."""
+    """Fetch from every enabled source. One source failing never fails the run.
+
+    Returns a Collected: unpacks as (items, ok, failed, truncated), and its
+    `partial` attribute names the sources that answered only in part.
+    """
     lookback = int(cfg["run"]["lookback_days"])
     limit = int(cfg["run"]["max_items_per_source"])
     kw = cfg["keywords"]
@@ -56,6 +75,7 @@ def collect(cfg: dict, now: datetime) -> tuple[list, list[str], list[str], list[
     # retry after a partial run can mark items seen and then send nothing.
     budget_s = float(cfg["run"].get("source_budget_s", 90.0))
     items, ok, failed, truncated = [], [], [], []
+    partial: dict[str, str] = {}
     # Order matters. arXiv throttles hard and answers 406 when it does, so it
     # goes first, before the ~20 rapid queries Hacker News needs. Running it
     # last cost a whole afternoon of "arXiv is broken" that it was not.
@@ -87,12 +107,17 @@ def collect(cfg: dict, now: datetime) -> tuple[list, list[str], list[str], list[
                             name, len(got), budget_s)
             else:
                 log.info("source %s: %d items", name, len(got))
+            if budget.partial:
+                # Same reasoning as truncation: some requests answered and
+                # some did not, and that is not a clean sweep.
+                partial[name] = "; ".join(budget.partial)[:200]
+                log.warning("source %s: PARTIAL, %s", name, partial[name])
         except Exception as e:   # noqa: BLE001 - one bad source must not kill the run
             failed.append(name)
             log.warning("source %s FAILED: %s: %s", name, type(e).__name__, str(e)[:200])
         finally:
             sources.set_budget(None)
-    return items, ok, failed, truncated
+    return Collected(items, ok, failed, truncated, partial)
 
 
 def _subject(title: str) -> str:
@@ -229,7 +254,22 @@ def run(cfg: dict, *, hit_store, chain_store, mailer, now: datetime | None = Non
         cfg = {**cfg, "run": {**cfg["run"], "lookback_days": wide}}
         log.info("first run: sweeping %d days instead of the usual window", wide)
 
-    items, ok, failed, truncated = collect(cfg, now)
+    # A digest that a previous run built and failed to send. Its items are
+    # already marked seen, so this is the only place they still exist. Read
+    # before anything is marked seen by this run; if it cannot be read the
+    # run stops here, because carrying on would overwrite it with this run's
+    # items alone and lose the earlier ones for good.
+    carried: list[dict] = []
+    digest_io = _digest_io(hit_store) if not dry_run else None
+    if digest_io is not None:
+        carried = list(digest_io[0]() or [])
+        if carried:
+            log.warning("an earlier digest of %d items was never sent; "
+                        "sending it with this run's", len(carried))
+
+    got = collect(cfg, now)
+    items, ok, failed, truncated = got
+    partial = dict(getattr(got, "partial", None) or {})
 
     vetoed = 0
     new_records: list[dict] = []
@@ -269,7 +309,7 @@ def run(cfg: dict, *, hit_store, chain_store, mailer, now: datetime | None = Non
 
     above = sorted([r for r in new_records if r["score"] >= threshold],
                    key=lambda r: r["score"], reverse=True)
-    capped = above[: int(cfg["run"]["digest_max_items"])]
+    capped = _merge_digest(carried, above)[: int(cfg["run"]["digest_max_items"])]
 
     # Drafting runs on what is new this run, not on the digest's selection:
     # the digest is capped for readability and this is capped for cost, and
@@ -287,6 +327,9 @@ def run(cfg: dict, *, hit_store, chain_store, mailer, now: datetime | None = Non
         "sources_ok": ok,
         "sources_failed": failed,
         "sources_truncated": truncated,
+        "sources_partial": sorted(partial),
+        "sources_partial_why": partial,
+        "carried_over": len(carried),
         "threshold": threshold,
         "proposed": stats_propose["proposed"],
         "drafted": stats_propose["drafted"],
@@ -300,7 +343,37 @@ def run(cfg: dict, *, hit_store, chain_store, mailer, now: datetime | None = Non
     sent = False
     if capped and not dry_run:
         subject, text, html_body = digest.build(capped, run_stats=stats, threshold=threshold)
-        sent = mailer.send(subject, text, html_body)
+        # Persisted before the send, because the items are already marked
+        # seen: if SES then fails and Lambda retries, the retry finds nothing
+        # new and the day's digest would otherwise be gone without a trace.
+        if digest_io is not None:
+            try:
+                digest_io[1]("pending", capped)
+            except Exception as e:                 # noqa: BLE001
+                log.error("could not save the digest before sending it; a failed "
+                          "send now loses it: %s: %s", type(e).__name__, e)
+        else:
+            log.warning("this hit store cannot hold an unsent digest; a failed "
+                        "send loses it")
+        try:
+            sent = bool(mailer.send(subject, text, html_body))
+        except Exception as e:
+            stats["email_sent"] = False
+            stats["email_error"] = f"{type(e).__name__}: {e}"[:300]
+            stats["digest_items"] = len(capped)
+            log.error("digest of %d items NOT sent, kept for the next run: %s",
+                      len(capped), stats)
+            # Re-raised so the invocation is marked failed and retried; the
+            # retry picks the saved digest up.
+            raise
+        if sent and digest_io is not None:
+            try:
+                digest_io[1]("sent", capped)
+            except Exception as e:                 # noqa: BLE001
+                # The email went. The worst case now is the next run sending
+                # these items a second time, which is better than never.
+                log.error("digest sent but not marked sent; the next run will "
+                          "send it again: %s: %s", type(e).__name__, e)
     elif not capped:
         log.info("nothing above threshold %.1f — no email sent", threshold)
 
@@ -310,6 +383,27 @@ def run(cfg: dict, *, hit_store, chain_store, mailer, now: datetime | None = Non
     return {"stats": stats, "digest": capped, "all_new": new_records}
 
 
+def _digest_io(hit_store):
+    """(read_pending, write) for the unsent-digest record, or None.
+
+    Lives on the hit store because it is the same table. A store without it
+    (the test doubles) still runs, just without the guard.
+    """
+    read = getattr(hit_store, "pending_digest", None)
+    write = getattr(hit_store, "put_digest", None)
+    if callable(read) and callable(write):
+        return read, write
+    return None
+
+
+def _merge_digest(carried: list[dict], fresh: list[dict]) -> list[dict]:
+    """One list, highest score first, each item once."""
+    out: dict[tuple, dict] = {}
+    for r in list(fresh) + list(carried):
+        out.setdefault((r.get("source"), r.get("external_id")), r)
+    return sorted(out.values(), key=lambda r: float(r.get("score") or 0), reverse=True)
+
+
 class SesMailer:
     def __init__(self, cfg: dict, region: str):
         import boto3
@@ -317,14 +411,28 @@ class SesMailer:
         self.ses = boto3.client("sesv2", region_name=region)
         self.prefix = self.cfg.get("subject_prefix", "JARVIS scout")
 
-    def _verified(self) -> set[str]:
+    def _verified(self) -> set[str] | None:
+        """Every identity SES will send for, or None when that is unknown.
+
+        None and the empty set mean different things. Returning set() on a
+        listing error made resolve() treat both configured addresses as
+        unverified and quietly reroute the digest to the fallback.
+        """
+        found: set[str] = set()
+        kwargs: dict = {}
         try:
-            r = self.ses.list_email_identities()
-            return {i["IdentityName"].lower() for i in r.get("EmailIdentities", [])
-                    if i.get("SendingEnabled")}
+            # Paginated: a second page of identities is still identities.
+            while True:
+                r = self.ses.list_email_identities(**kwargs)
+                found |= {i["IdentityName"].lower() for i in r.get("EmailIdentities", [])
+                          if i.get("SendingEnabled")}
+                token = r.get("NextToken")
+                if not token:
+                    return found
+                kwargs = {"NextToken": token}
         except Exception as e:                      # noqa: BLE001
             log.warning("could not list SES identities: %s", e)
-            return set()
+            return None
 
     def resolve(self) -> tuple[str, str, bool]:
         """Pick sender/recipient that SES will actually accept.
@@ -336,6 +444,12 @@ class SesMailer:
         """
         ok = self._verified()
         to, sender = self.cfg["to"], self.cfg["sender"]
+        if ok is None:
+            # Unknown is not unverified. Send to the configured pair and let
+            # SES accept or refuse it; never fall back on a guess.
+            log.warning("SES identities unknown; sending to the configured "
+                        "address %s and letting SES decide", to)
+            return to, sender, False
         if self._accepted(to, ok) and self._accepted(sender, ok):
             return to, sender, False
         missing = sorted({a for a in (to, sender) if not self._accepted(a, ok)})

@@ -27,7 +27,8 @@ import time
 import urllib.parse
 from datetime import timedelta
 
-from . import Item, http_json, sanitise, safe_url, utc, MAX_TITLE, MAX_BODY, MAX_AUTHOR
+from . import (BudgetExpired, Item, http_json, sanitise, safe_url, settle, utc,
+               MAX_TITLE, MAX_BODY, MAX_AUTHOR)
 
 SOURCE = "hackernews"
 
@@ -37,6 +38,9 @@ def fetch(cfg: dict, keywords: list[str], now, lookback_days: int, limit: int) -
     since = int((now - timedelta(days=lookback_days)).timestamp())
     min_points = int(cfg.get("min_story_points", 0))
     seen: dict[str, Item] = {}
+    # Counted per query so one bad keyword no longer throws away the hits
+    # already gathered, and a dead endpoint is still reported as failed.
+    succeeded, errors = 0, []
 
     for kw in keywords:
         params = {
@@ -49,9 +53,19 @@ def fetch(cfg: dict, keywords: list[str], now, lookback_days: int, limit: int) -
             "removeWordsIfNoResults": "none",
         }
         url = f"{endpoint}?{urllib.parse.urlencode(params)}"
-        data = http_json(url, timeout=20.0, retries=2)
+        try:
+            data = http_json(url, timeout=20.0, retries=2)
+            hits = data.get("hits", [])
+        except BudgetExpired:
+            if not succeeded:
+                raise
+            break                       # collect() reports it as truncated
+        except Exception as e:          # noqa: BLE001 - one term is not the source
+            errors.append(f"{kw[:30]}: {type(e).__name__}: {str(e)[-60:]}")
+            continue
+        succeeded += 1
 
-        for h in data.get("hits", []):
+        for h in hits:
             oid = str(h.get("objectID") or "")
             if not oid or oid in seen:
                 continue
@@ -82,6 +96,8 @@ def fetch(cfg: dict, keywords: list[str], now, lookback_days: int, limit: int) -
                 extra={"kind": "comment" if is_comment else "story", "points": int(points or 0)},
             )
             if len(seen) >= limit:
+                settle(SOURCE, succeeded, errors)
                 return list(seen.values())
         time.sleep(0.2)   # be polite between queries
+    settle(SOURCE, succeeded, errors)
     return list(seen.values())

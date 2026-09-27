@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from datetime import datetime, timezone
 from typing import Protocol
 
@@ -76,7 +77,7 @@ class Chain:
         return entry
 
     def verify(self) -> dict:
-        """Walk the chain and recompute every hash.
+        """Walk the chain, recompute every hash, then check it ends at the head.
 
         Returns a result dict rather than raising, so the verify script can
         report exactly where a chain first goes wrong instead of just failing.
@@ -103,6 +104,20 @@ class Chain:
             prev = e["entry_hash"]
             expected_seq += 1
             count += 1
+
+        # The walk alone cannot see the end of the chain going missing:
+        # removing the last N entries leaves every remaining link intact. The
+        # head record moves with every append, so it says where the chain
+        # should end. An empty chain must have the genesis head, (0, zeros).
+        head_seq, head_hash = self.store.head()
+        head_seq = int(head_seq)
+        if head_seq != count or head_hash != prev:
+            detail = (f"head points at seq {head_seq} ({str(head_hash)[:16]}…) but "
+                      f"the entries end at seq {count} ({prev[:16]}…)")
+            first_bad = count if head_seq == count else min(head_seq, count) + 1
+            r = _bad(first_bad, "head mismatch", detail, count)
+            r["head_seq"] = head_seq
+            return r
         return {"ok": True, "entries": count, "head_hash": prev}
 
 
@@ -116,12 +131,28 @@ def _bad(seq, kind, detail, verified_before):
 # --------------------------------------------------------------------------
 
 class LocalChainStore:
-    """JSON-lines file. Used by the local dry run and the tests."""
+    """JSON-lines file. Used by the local dry run and the tests.
+
+    The head lives in its own file beside the entries, as it does in its own
+    item in DynamoDB. Derived from the last line, it would move with any
+    truncation of the file, and verify() could not see the tail go missing.
+    """
 
     def __init__(self, path: str):
         self.path = path
+        self.head_path = path + ".head"
 
     def head(self) -> tuple[int, str]:
+        try:
+            with open(self.head_path, encoding="utf-8") as fh:
+                h = json.load(fh)
+            return int(h["seq"]), str(h["entry_hash"])
+        except FileNotFoundError:
+            # A chain written before the head file existed. Its last line is
+            # the best head there is; the next append writes the file.
+            return self._last_line_head()
+
+    def _last_line_head(self) -> tuple[int, str]:
         last = None
         try:
             with open(self.path, encoding="utf-8") as fh:
@@ -139,6 +170,10 @@ class LocalChainStore:
             raise RuntimeError("chain moved under us; refusing to append")
         with open(self.path, "a", encoding="utf-8") as fh:
             fh.write(canonical(entry) + "\n")
+        tmp = self.head_path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as fh:
+            fh.write(canonical({"seq": seq, "entry_hash": entry["entry_hash"]}))
+        os.replace(tmp, self.head_path)
 
     def entries(self):
         try:
