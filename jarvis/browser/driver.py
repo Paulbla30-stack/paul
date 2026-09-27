@@ -190,9 +190,11 @@ class Driver:
         # the same kind of act and should not be opened by the same switch.
         self.allow_secrets = bool(allow_secrets)
         self.downloads = []
-        # Multi-line fields the agent has typed into since the last navigation.
-        # The page reports composed text it can see; this covers the case
-        # where the agent typed and the page's own report is stale.
+        # Text fields the agent has typed into since it last opened an
+        # address. The page reports composed text it can see; this covers the
+        # case where the agent typed and the page's own report is stale. Back,
+        # forward and reload do not clear it: the text can come back with the
+        # page, so only a fresh open does.
         self._typed_composing = set()
         self._lock = threading.RLock()
         # Everything that touches Playwright runs on this one thread, and the
@@ -434,9 +436,9 @@ class Driver:
                     time.sleep(0.5)
         text = str(raw.get("text") or "")
         raw["truncated"] = len(text) > 0 and len(text) > 40000
-        # The page reports text it can see in a textarea; what the agent typed
-        # into any other box is known only here, and the model should be told
-        # the next press will wait for Paul either way.
+        # The page reports text it can see in any box that arms the gate; what
+        # the agent typed and the page no longer shows is known only here. The
+        # model should be told the next press will wait for Paul either way.
         raw["composing"] = bool(raw.get("composing")) or bool(self._typed_composing)
         raw["status"] = status
         raw["fetched_at"] = time.time()
@@ -543,8 +545,9 @@ class Driver:
             if kind not in self.MOVES:
                 raise ValueError(f"not a move: {kind!r}")
             self._start()
-            if kind != "scroll":
-                self._typed_composing.clear()
+            # No disarming here. Chromium restores a typed box on back and
+            # forward, and clearing on the move let type, back, forward, press
+            # send the text with nobody asked.
             if kind == "scroll":
                 step = int(amount or 600)
                 self._page.mouse.wheel(0, step)

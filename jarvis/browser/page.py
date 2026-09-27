@@ -29,10 +29,13 @@ because "is this a login page" asked of prose is a judgement and asked of the
 DOM is a fact.
 """
 
+import json
 import re
 import time
 from dataclasses import dataclass, field
 from typing import Optional
+
+from jarvis.browser.publish import NOT_PROSE_KINDS, SEARCH_KINDS
 
 # Bounded, because the page is untrusted and the model's context is not free.
 # A page longer than this is truncated and says so: TRUNCATED is the whole
@@ -261,6 +264,8 @@ EXTRACT_JS = r"""
 () => {
   const MAX_LINKS = %(max_links)d, MAX_FIELDS = %(max_fields)d, MAX_CONTROLS = %(max_controls)d;
   const MAX_HREF = %(max_href)d;
+  // publish.py's lists, so the page and the gate apply one rule.
+  const NOT_PROSE = new Set(%(not_prose)s), SEARCH = new Set(%(search_kinds)s);
   const vh = window.innerHeight || 900, vw = window.innerWidth || 1280;
   const shown = (el) => {
     if (!el) return false;
@@ -340,14 +345,29 @@ EXTRACT_JS = r"""
   // keeps its password box hidden or off-screen until step two.
   const hasPassword = !!document.querySelector('input[type=password]');
 
-  const fields = [];
+  // Composed text is read off the page, from every shown box that typing
+  // would arm (publish.arms_page: not a search box, not a kind that cannot
+  // hold prose), not from textareas only and not only from the counted
+  // fields. Chromium puts typed text back into a single-line box on back and
+  // forward, and the driver's memory of what it typed does not survive a new
+  // document, so a chat <input> holding a message is armed by what it holds.
+  const kindOf = (el) => el.tagName.toLowerCase() === 'textarea' ? 'textarea'
+    : (el.type || el.tagName.toLowerCase() || 'text').toLowerCase();
   let composing = false;
+  for (const el of document.querySelectorAll('input, textarea')) {
+    if (!(el.value || '').trim()) continue;
+    const kind = kindOf(el);
+    if (NOT_PROSE.has(kind) || SEARCH.has(kind) || searchy(el) || !shown(el)) continue;
+    composing = true;
+    break;
+  }
+
+  const fields = [];
   for (const el of document.querySelectorAll('input, textarea, select')) {
     if (fields.length >= MAX_FIELDS) break;
     if (el.type === 'hidden') continue;
     if (!shown(el)) continue;
     const kind = (el.type || el.tagName.toLowerCase() || 'text').toLowerCase();
-    if (el.tagName.toLowerCase() === 'textarea' && (el.value || '').trim()) composing = true;
     const fref = 'F' + (fields.length + 1);
     el.setAttribute('data-jarvis-ref', fref);
     fields.push({
@@ -397,4 +417,6 @@ EXTRACT_JS = r"""
   };
 }
 """ % {"max_links": MAX_LINKS, "max_fields": MAX_FIELDS, "max_controls": MAX_CONTROLS,
-       "max_href": MAX_HREF}
+       "max_href": MAX_HREF,
+       "not_prose": json.dumps(sorted(NOT_PROSE_KINDS)),
+       "search_kinds": json.dumps(sorted(SEARCH_KINDS))}

@@ -59,6 +59,7 @@ MAX_TEXT_TO_MODEL = 12000
 MAX_LINKS_TO_MODEL = 40
 MAX_HREF_TO_MODEL = 200
 MAX_ENVELOPE_TO_MODEL = 40000
+_ENVELOPE_CUT = "[CUT: the envelope reached its limit; the rest was not shown.]"
 
 OPEN = "\n===== BEGIN UNTRUSTED PAGE CONTENT ====="
 CLOSE = "===== END UNTRUSTED PAGE CONTENT =====\n"
@@ -94,6 +95,16 @@ _MARKER_RUN = re.compile(
     r"|(?<=UNTRUSTED PAGE CONTENT)[ \t]*={5,}")
 
 
+def _cut(text: str, limit: int) -> str:
+    """Defused, then held to ``limit``.
+
+    In that order because defusing lengthens: each marker run it breaks gains
+    a character, so a limit applied first was beaten by a page made of marker
+    runs. Cutting after cannot rebuild a marker; it only drops the end.
+    """
+    return defuse(text[:limit])[:limit]
+
+
 def _line(value, limit: int) -> str:
     """A page-controlled string, as one line of the envelope.
 
@@ -103,15 +114,15 @@ def _line(value, limit: int) -> str:
     and that line could be the end of the untrusted block.
     """
     flat = " ".join(str(value if value is not None else "").split())
-    return defuse(flat[:limit])
+    return _cut(flat, limit)
 
 
 def _href(value) -> str:
     """An href, shortened for the model and saying so when it was."""
     flat = " ".join(str(value or "").split())
     if len(flat) > MAX_HREF_TO_MODEL:
-        flat = flat[:MAX_HREF_TO_MODEL] + "...[cut]"
-    return defuse(flat)
+        return _cut(flat, MAX_HREF_TO_MODEL) + "...[cut]"
+    return _cut(flat, MAX_HREF_TO_MODEL)
 
 
 def envelope(page: dict, limit: int = MAX_TEXT_TO_MODEL,
@@ -131,7 +142,7 @@ def envelope(page: dict, limit: int = MAX_TEXT_TO_MODEL,
     stamp = time.strftime("%Y-%m-%d %H:%M:%SZ", time.gmtime(when))
     text = str(page.get("text") or "")
     clipped = len(text) > limit
-    body = defuse(text[:limit])
+    body = _cut(text, limit)
 
     head = [OPEN,
             f"source: {url}",
@@ -159,7 +170,7 @@ def envelope(page: dict, limit: int = MAX_TEXT_TO_MODEL,
         tail.append("ON THE SCREEN RIGHT NOW (the rest is further down the page"
                     + ("; there is more below" if page.get("below_fold") else "")
                     + "):")
-        tail.append(defuse(seen[:2500]))
+        tail.append(_cut(seen, 2500))
     ctrls = page.get("controls") or []
     if ctrls:
         tail.append(f"buttons and controls ({min(len(ctrls), 30)} of {len(ctrls)}), "
@@ -188,7 +199,14 @@ def envelope(page: dict, limit: int = MAX_TEXT_TO_MODEL,
             tail.append(f"  {_line(item.get('ref'), 12)}  "
                         f"{_line(item.get('label'), 120) or '(unlabelled)'} "
                         f"({_line(item.get('kind'), 40)}){mark}")
-    return "\n".join(head + ["", body, ""] + tail + [CLOSE])
+    inner = "\n".join(head + ["", body, ""] + tail)
+    # The per-line limits keep a page under the bound by arithmetic. This
+    # keeps it there if a list is added later and the arithmetic is not
+    # redone; CLOSE stays last either way.
+    room = MAX_ENVELOPE_TO_MODEL - len(CLOSE) - len(_ENVELOPE_CUT) - 2
+    if len(inner) > room:
+        inner = inner[:room] + "\n" + _ENVELOPE_CUT
+    return inner + "\n" + CLOSE
 
 
 def cite(page: dict) -> str:
