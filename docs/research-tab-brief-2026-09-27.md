@@ -23,6 +23,25 @@ Jarvis must be able to stop or pause a project himself, and say why, in four sit
 
 Every pause and stop shows on the project in the Research tab. Each is recorded on the ledger with its reason, and the reason is also a lesson for the Review stage. Paul can resume, redirect or close the project from the same place. Jarvis never resumes a project that was paused for clarification or for a breakthrough without Paul's answer.
 
+## A real pull, or a waste of time (Paul, 27 September)
+
+Jarvis must learn to tell a line of work that is genuinely pulling somewhere from one that is wasting time.
+
+- **Judged on outcomes, not on how interesting it feels.** Each thread is scored afterwards on what it actually produced: findings that held up, lessons Paul accepted, questions it closed. That score is set against what the thread cost in time and model calls. The score feeds the value function.
+- **Novelty is not pull.** Taste pushes Jarvis towards new ground. A thread that stays novel but never produces anything that holds up is scored as a waste, and the taste function learns that too.
+- **Paul's verdicts calibrate it.** "That was worth it" and "that was a waste of time" are recorded, with a reason where he gives one. Over time Jarvis's own estimate of pull should agree with Paul's. The rate at which they agree is measured and shown, so everyone can see whether his judgement is actually improving.
+- **What he learns carries forward.** Patterns of waste (a kind of source, a kind of question, an approach) become lessons that the Plan stage reads first. They pass through the same Elevate checks as any other lesson.
+
+## No endless loops (Paul, 27 September)
+
+Jarvis must never go round in circles. These limits are enforced in code, and are not left to the model's judgement:
+
+- **Hard caps.** Each project and each thread has maximum cycles, model calls and wall-clock time. At a cap, the project times out as described above.
+- **Repeat detection.** Before each step, Jarvis compares it with what he has already done: the same question, the same search, the same source, or a plan that differs only in wording. A repeat is refused and counted.
+- **No progress means stop.** If a few cycles pass with no new finding that holds up, the project pauses as "not working". Rephrasing the question does not reset the count.
+- **Revisits need a reason.** Going back to a thread that was paused or closed needs something new: a new finding, a new source, or Paul's say-so. The reason is recorded.
+- **Everything is visible.** Loops that were caught, and repeats that were refused, show on the project and on the ledger, so a pattern of looping becomes a lesson rather than a hidden cost.
+
 ## How the brief is read (agreed on 27 September; Paul replied "Cool thanks")
 
 - **Plan.** Split the question into sub-questions, and say what would count as an answer to each.
