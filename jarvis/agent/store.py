@@ -567,19 +567,34 @@ class MemoryStore:
                 # it is the distilled form of memories already let go. Its
                 # sources are protected too: dormant rows no longer decay, so
                 # without this they would be the first to go and the merge
-                # would cite ids that no longer exist. `sources` is stored as
-                # "1,2,3"; wrapping both sides in commas makes the LIKE match
-                # whole ids only, so 1 does not match 12.
-                cur = self._db.execute(
-                    "DELETE FROM memories WHERE id IN ("
-                    "  SELECT m.id FROM memories m WHERE m.pinned = 0 AND m.derived = 0"
-                    "  AND NOT EXISTS (SELECT 1 FROM memories d"
-                    "    WHERE d.derived = 1 AND d.sources IS NOT NULL"
-                    "    AND ',' || REPLACE(d.sources, ' ', '') || ','"
-                    "        LIKE '%,' || m.id || ',%')"
-                    "  ORDER BY m.weight ASC, m.ts ASC LIMIT ?)", (total - cap,))
+                # would cite ids that no longer exist.
+                #
+                # The cited set is read once per prune and applied in Python.
+                # A per-row subquery against `sources` scanned the whole table
+                # for every candidate, and prune runs on every write at the cap.
+                # A malformed id raises and the prune is skipped, not guessed.
+                cited = set()
+                for (src,) in self._db.execute(
+                        "SELECT sources FROM memories"
+                        " WHERE derived = 1 AND sources IS NOT NULL"):
+                    cited.update(int(x) for x in str(src).split(",") if x.strip())
+                need = total - cap
+                # At most len(cited) candidates can be exempt, so this many
+                # weakest rows always holds `need` prunable ones if they exist.
+                candidates = self._db.execute(
+                    "SELECT id FROM memories WHERE pinned = 0 AND derived = 0"
+                    " ORDER BY weight ASC, ts ASC LIMIT ?",
+                    (need + len(cited),)).fetchall()
+                doomed = [r[0] for r in candidates if r[0] not in cited][:need]
+                dropped = 0
+                # Chunked to stay under older SQLite's 999-variable limit.
+                for i in range(0, len(doomed), 500):
+                    chunk = doomed[i:i + 500]
+                    cur = self._db.execute(
+                        "DELETE FROM memories WHERE id IN (%s)" % ",".join("?" * len(chunk)),
+                        chunk)
+                    dropped += cur.rowcount
                 self._db.commit()
-                dropped = cur.rowcount
         except Exception as exc:
             self.log.warning("Could not prune memories: %s", exc)
             return 0

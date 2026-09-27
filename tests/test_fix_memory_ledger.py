@@ -129,6 +129,57 @@ class TestTheCapCannotDeleteCitedSources(StoreBase):
         # "12" contains "1" but does not cite it; row 1 is still prunable.
         self.assertIsNone(self.row(1))
 
+    def test_the_cap_still_bites_when_the_weakest_rows_are_all_cited(self):
+        rows = [self.store.remember(f"row {i}")["id"] for i in range(30)]
+        weakest = rows[:8]
+        with self.store._lock:
+            self.store._db.execute(
+                "UPDATE memories SET weight = 0.1 WHERE id IN (%s)" % ",".join("?" * 8),
+                weakest)
+            self.store._db.commit()
+        self.store.remember_derived("the eight weakest", weakest)
+        self.store.prune(max_rows=10)
+        for memory_id in weakest:
+            self.assertIsNotNone(self.row(memory_id))
+        self.assertEqual(self.store.stats()["entries"], 10)
+
+    def seed(self, count, tag):
+        with self.store._lock:
+            self.store._db.executemany(
+                "INSERT INTO memories (ts, kind, source, text, digest, pinned, weight, seen)"
+                " VALUES (?, 'fact', 'system', ?, ?, 0, 1.0, 1)",
+                [(float(i), f"{tag} {i}", f"{tag}-{i}") for i in range(count)])
+            self.store._db.commit()
+
+    def test_the_exemption_is_not_evaluated_once_per_candidate(self):
+        # At the default cap prune runs on every write. A correlated subquery
+        # over `sources` costs cap x rows and took ~240 ms per write here; the
+        # cited set read once costs a few tens of thousands of VM steps.
+        # SQLite's progress handler counts those steps, which is deterministic
+        # where a wall-clock bound would not be.
+        # Hold the automatic prune off while the scene is built, so every
+        # cited id exists when the measured prune runs.
+        self.store.max_rows = 10 ** 6
+        self.seed(2000, "old")
+        for j in range(50):
+            self.store.remember_derived(f"merge {j}", [j * 5 + k + 1 for k in range(5)])
+        self.seed(5, "new")
+        steps = [0]
+
+        def tick():
+            steps[0] += 1
+            return 0
+        self.store._db.set_progress_handler(tick, 1000)
+        try:
+            dropped = self.store.prune(max_rows=2000)
+        finally:
+            self.store._db.set_progress_handler(None, 1000)
+        self.assertEqual(dropped, 55)
+        self.assertEqual(self.store.stats()["entries"], 2000)
+        self.assertLess(steps[0], 1000, f"prune took {steps[0]}k VM steps")
+        for j in range(250):
+            self.assertIsNotNone(self.row(j + 1), f"cited source {j + 1} was pruned")
+
 
 class FakeS3:
     def __init__(self, fail=False):
