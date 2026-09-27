@@ -1,0 +1,119 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  JARVIS connections, stage 1: the connect-broker Lambda and its table.
+  Keyless, public, read-only connections (weather, UK bank holidays,
+  Paul's own Zenodo records). Runs off Jarvis's box so that later stages
+  can hold Paul's keys somewhere Jarvis cannot read.
+
+  Personal to JARVIS. Strictly firewalled from Arkin: the validator refuses
+  thearkinsystem.co.uk outright. Nothing here is billed by the hour.
+
+  NOT YET LINKED: no role outside this stack may invoke the function, and
+  no connection is enabled until EnabledConnections is set.
+
+Parameters:
+  EnabledConnections:
+    Type: String
+    Default: ''
+    Description: >
+      Comma-separated catalogue ids Paul has switched on, for example
+      "open_meteo,uk_bank_holidays,zenodo". Empty means every connection is
+      off. Jarvis can switch a connection off; only this can switch one on.
+  LogRetentionDays:
+    Type: Number
+    Default: 30
+    AllowedValues: [7, 14, 30, 60, 90]
+    Description: How long the broker's own logs are kept.
+
+Globals:
+  Function:
+    Runtime: python3.12
+    Architectures: [arm64]
+    MemorySize: 256
+    Timeout: 15                    # the plan's ceiling: one bounded fetch, no retries
+
+Resources:
+
+  # One table: per-connection state (disabled, last result) and the hourly
+  # counters. On-demand billing; counters expire on their own via TTL.
+  ConnectionsTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: jarvis-connections
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - {AttributeName: pk, AttributeType: S}
+        - {AttributeName: sk, AttributeType: S}
+      KeySchema:
+        - {AttributeName: pk, KeyType: HASH}
+        - {AttributeName: sk, KeyType: RANGE}
+      TimeToLiveSpecification:
+        AttributeName: expires
+        Enabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+      Tags:
+        - {Key: project, Value: jarvis-connect}
+        - {Key: owner, Value: jarvis}
+
+  BrokerLogs:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /aws/lambda/jarvis-connect-broker
+      RetentionInDays: !Ref LogRetentionDays
+
+  BrokerFunction:
+    Type: AWS::Serverless::Function
+    DependsOn: BrokerLogs
+    Properties:
+      FunctionName: jarvis-connect-broker
+      CodeUri: src/
+      Handler: app.handler
+      Description: Stage 1 keyless connections. Read-only. Holds no secrets.
+      Role: !GetAtt BrokerRole.Arn
+      Environment:
+        Variables:
+          CONNECT_TABLE: !Ref ConnectionsTable
+          ENABLED_CONNECTIONS: !Ref EnabledConnections
+      Tags:
+        project: jarvis-connect
+        owner: jarvis
+
+  # Least privilege. Its own table and its own log group. No Secrets
+  # Manager, no other table, no model service, no role assumption. Stage 1
+  # holds nothing worth stealing, and this keeps it that way.
+  BrokerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: jarvis-connect-broker-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: {Service: lambda.amazonaws.com}
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: own-table-and-logs
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: [dynamodb:GetItem, dynamodb:PutItem, dynamodb:UpdateItem]
+                Resource: !GetAtt ConnectionsTable.Arn
+              - Effect: Allow
+                Action: [logs:CreateLogStream, logs:PutLogEvents]
+                Resource: !Sub '${BrokerLogs.Arn}:*'
+      Tags:
+        - {Key: project, Value: jarvis-connect}
+
+Outputs:
+  BrokerFunctionArn:
+    Value: !GetAtt BrokerFunction.Arn
+    Description: Not granted to Jarvis's instance role yet; linking is a later step.
+  ConnectionsTableName:
+    Value: !Ref ConnectionsTable
