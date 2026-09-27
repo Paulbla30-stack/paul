@@ -31,6 +31,25 @@ DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8477
 DEFAULT_TOKEN_FILE = "/run/jarvis-browser/token"
 MAX_BODY = 64 * 1024
+# The exit status when the browser has wedged. Any non-zero status would do
+# under Restart=always; this one (EX_TEMPFAIL) says "try again" in the journal.
+WEDGED_EXIT = 75
+
+# The two switches that change what this browser is, read from this process's
+# own environment -- /etc/default/jarvis-browser, through the unit's
+# EnvironmentFile -- and reported on /health. They used to sit in the agent's
+# config, which never reached this process: the agent believed one thing and
+# the browser did another. Now there is one place to flip each, and the agent
+# reads the answer back from /health instead of from its own config.
+ENV_PERSISTENT = "JARVIS_BROWSER_PERSISTENT"
+ENV_ALLOW_SECRETS = "JARVIS_BROWSER_ALLOW_SECRETS"
+_YES = frozenset({"1", "true", "yes", "on"})
+
+
+def env_switch(name: str, environ=None) -> bool:
+    """On only when it plainly says on. Unset, empty or garbled is off."""
+    value = (environ if environ is not None else os.environ).get(name, "")
+    return str(value).strip().lower() in _YES
 
 
 def _load_token(path: str) -> str:
@@ -185,9 +204,26 @@ def main(argv=None) -> int:
         log.error("refusing to listen on %s: loopback only", args.host)
         return 2
 
-    service = BrowserService(driver=Driver(logger=log, timeout_ms=args.timeout_ms),
+    driver = Driver(logger=log, timeout_ms=args.timeout_ms,
+                    persistent=env_switch(ENV_PERSISTENT),
+                    allow_secrets=env_switch(ENV_ALLOW_SECRETS))
+
+    def _exit_for_restart():
+        # A thread stuck inside Playwright cannot be unstuck from here. Exit
+        # and let systemd (Restart=always) start a fresh process; stopping the
+        # unit's cgroup takes Chromium with it. The short delay lets the 503
+        # that reports it reach whoever asked.
+        log.error("the browser is wedged; exiting so systemd starts a fresh one")
+        timer = threading.Timer(1.0, os._exit, args=(WEDGED_EXIT,))
+        timer.daemon = True
+        timer.start()
+
+    driver.on_wedged = _exit_for_restart
+    service = BrowserService(driver=driver,
                              token=_load_token(args.token_file),
                              logger=log, host=args.host, port=args.port)
+    log.info("switches: persistent=%s allow_secrets=%s (from %s and %s)",
+             driver.persistent, driver.allow_secrets, ENV_PERSISTENT, ENV_ALLOW_SECRETS)
     if not service.token:
         log.warning("no token at %s: any local process can drive this browser",
                     args.token_file)

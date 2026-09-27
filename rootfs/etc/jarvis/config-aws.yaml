@@ -413,6 +413,14 @@ browser:
   # true keeps cookies in /var/lib/jarvis-browser/profile, so a site he signs
   # into in the Browser tab stays signed in for the agent. That is the useful
   # half and the dangerous half at once, and it is why the next setting exists.
+  #
+  # THIS LINE NO LONGER SWITCHES ANYTHING (27 September 2026). It never
+  # reached the browser, which runs as its own process and did not read this
+  # file, so the agent believed one thing and the browser did another. The
+  # switch now lives with the browser: JARVIS_BROWSER_PERSISTENT=1 in
+  # /etc/default/jarvis-browser, then restart jarvis-browser. The browser
+  # reports it on /health and the agent believes that. Kept here, off, as the
+  # record; setting it true only logs a warning saying where the switch is.
   persistent: false
 
   # Which sites the agent may ACT on while signed in. Empty is not "none
@@ -435,6 +443,10 @@ browser:
   # kind of act and should not be opened by the same switch. With
   # persistent: true the better path is that Paul signs in once himself in the
   # Browser tab and the agent rides the session, never touching the secret.
+  #
+  # Like persistent above, this line no longer switches anything: the switch
+  # is JARVIS_BROWSER_ALLOW_SECRETS=1 in /etc/default/jarvis-browser, read by
+  # the browser itself and reported on /health.
   allow_secrets: false
 
   # Paul's standing rule, and the one thing no grant lifts: anything that

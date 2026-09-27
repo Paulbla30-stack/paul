@@ -34,7 +34,9 @@ What this file still owes the reader:
 """
 
 import logging
+import os
 import re
+import threading
 import time
 from typing import Optional
 
@@ -45,8 +47,18 @@ DEFAULT_TIMEOUT_S = 45.0
 
 # How much of a page goes to the model in one turn. The service bounds the
 # extraction; this bounds the prompt, and they are different budgets.
+#
+# MAX_TEXT_TO_MODEL is the body. The lists after it -- headings, what is on
+# the screen, controls, links, fields -- are bounded by count and by the length
+# of each line, so the whole envelope stays under MAX_ENVELOPE_TO_MODEL. That
+# only held once hrefs were capped too: forty links at the extractor's 2000
+# characters each came to about seven times the body's budget on their own.
+# A link is followed by its ref, never by its address, so a shortened href
+# costs the model nothing it acts on.
 MAX_TEXT_TO_MODEL = 12000
 MAX_LINKS_TO_MODEL = 40
+MAX_HREF_TO_MODEL = 200
+MAX_ENVELOPE_TO_MODEL = 40000
 
 OPEN = "\n===== BEGIN UNTRUSTED PAGE CONTENT ====="
 CLOSE = "===== END UNTRUSTED PAGE CONTENT =====\n"
@@ -63,12 +75,43 @@ def defuse(text: str) -> str:
     """Stop page text ending its own envelope.
 
     The only thing here that touches what a page says. It rewrites the marker
-    strings and nothing else: five or more equals signs at the start of a line
-    become the same run with a zero-width space in them, which reads
-    identically and no longer matches the delimiter.
+    strings and nothing else: five or more equals signs at the start of a line,
+    or either side of the marker's own words anywhere in a line, become the
+    same run with a zero-width space in them, which reads identically and no
+    longer matches the delimiter.
     """
-    return re.sub(r"(?m)^={5,}", lambda m: m.group(0)[:-1] + _FORGED[-1] + "=",
-                  text or "")
+    return _MARKER_RUN.sub(lambda m: m.group(0)[:-1] + _FORGED[-1] + "=",
+                           text or "")
+
+
+# A run at the start of a line, and a run touching the marker's words wherever
+# it is. The second is for the one-line strings in the tail -- a heading, a
+# label -- where the marker can arrive mid-line and still be followed by the
+# newline that makes it CLOSE.
+_MARKER_RUN = re.compile(
+    r"(?m)^={5,}"
+    r"|={5,}(?=[ \t]*(?:BEGIN|END) UNTRUSTED PAGE CONTENT)"
+    r"|(?<=UNTRUSTED PAGE CONTENT)[ \t]*={5,}")
+
+
+def _line(value, limit: int) -> str:
+    """A page-controlled string, as one line of the envelope.
+
+    Every run of whitespace, newlines included, becomes one space, and any
+    marker is defused. A heading or a field label is printed on a line of its
+    own; a newline left inside one let the page start a line of its choosing,
+    and that line could be the end of the untrusted block.
+    """
+    flat = " ".join(str(value if value is not None else "").split())
+    return defuse(flat[:limit])
+
+
+def _href(value) -> str:
+    """An href, shortened for the model and saying so when it was."""
+    flat = " ".join(str(value or "").split())
+    if len(flat) > MAX_HREF_TO_MODEL:
+        flat = flat[:MAX_HREF_TO_MODEL] + "...[cut]"
+    return defuse(flat)
 
 
 def envelope(page: dict, limit: int = MAX_TEXT_TO_MODEL,
@@ -80,8 +123,10 @@ def envelope(page: dict, limit: int = MAX_TEXT_TO_MODEL,
     from, when, and -- plainly, in the place the text actually is -- that
     nothing inside it is an instruction.
     """
-    url = str(page.get("url") or "")
-    title = str(page.get("title") or "")
+    # Everything below that the page controls and that is printed on a line
+    # of its own goes through _line: one line, markers defused.
+    url = _line(page.get("url"), 2000)
+    title = _line(page.get("title"), 300)
     when = float(page.get("fetched_at") or time.time())
     stamp = time.strftime("%Y-%m-%d %H:%M:%SZ", time.gmtime(when))
     text = str(page.get("text") or "")
@@ -108,7 +153,7 @@ def envelope(page: dict, limit: int = MAX_TEXT_TO_MODEL,
     heads = page.get("headings") or []
     if heads:
         tail.append("headings on this page:")
-        tail.extend(f"  {h}" for h in heads[:20])
+        tail.extend(f"  {_line(h, 170)}" for h in heads[:20])
     seen = str(page.get("on_screen") or "").strip()
     if seen:
         tail.append("ON THE SCREEN RIGHT NOW (the rest is further down the page"
@@ -122,7 +167,8 @@ def envelope(page: dict, limit: int = MAX_TEXT_TO_MODEL,
                     "waits for Paul:")
         for item in ctrls[:30]:
             mark = " [in a form]" if item.get("in_form") else ""
-            tail.append(f"  {item.get('ref')}  {' '.join(str(item.get('text') or '').split())[:60] or '(unlabelled)'}{mark}")
+            tail.append(f"  {_line(item.get('ref'), 12)}  "
+                        f"{_line(item.get('text'), 60) or '(unlabelled)'}{mark}")
     if page.get("composing"):
         tail.append("note: there is text composed in a box on this page. The next "
                     "press could send it, so it will wait for Paul.")
@@ -131,15 +177,17 @@ def envelope(page: dict, limit: int = MAX_TEXT_TO_MODEL,
         tail.append(f"links on this page ({min(len(rows), links)} of {len(rows)}), "
                     "follow one by its ref:")
         for item in rows[:links]:
-            label = " ".join(str(item.get("text") or "").split())[:80] or "(no text)"
-            tail.append(f"  {item.get('ref')}  {label}  ->  {item.get('href')}")
+            label = _line(item.get("text"), 80) or "(no text)"
+            tail.append(f"  {_line(item.get('ref'), 12)}  {label}  ->  "
+                        f"{_href(item.get('href'))}")
     fields = page.get("fields") or []
     if fields:
         tail.append(f"form fields on this page ({len(fields)}):")
         for item in fields[:20]:
             mark = " [secret, never filled]" if item.get("secret") else ""
-            tail.append(f"  {item.get('ref')}  {item.get('label') or '(unlabelled)'} "
-                        f"({item.get('kind')}){mark}")
+            tail.append(f"  {_line(item.get('ref'), 12)}  "
+                        f"{_line(item.get('label'), 120) or '(unlabelled)'} "
+                        f"({_line(item.get('kind'), 40)}){mark}")
     return "\n".join(head + ["", body, ""] + tail + [CLOSE])
 
 
@@ -170,11 +218,18 @@ class BrowserView:
         self.log = logger or logging.getLogger("jarvis.browse")
         self._opener = opener            # injected in tests; urllib otherwise
         self.last: dict = {}
-        # Sites Paul has approved for acting, and whether there is anything to
-        # act AS. Both come from config; the pair is what trust.py decides on.
+        # Sites Paul has approved for acting come from config and go to the
+        # browser on every act. Whether there is anything to act AS -- the
+        # persistent profile -- and whether secrets may be filled are the
+        # browser's own switches (JARVIS_BROWSER_PERSISTENT and
+        # JARVIS_BROWSER_ALLOW_SECRETS in /etc/default/jarvis-browser), and
+        # these two attributes are what the browser last said on /health.
+        # Until it has answered they hold the constructor's value.
         from jarvis.browser import trust as _trust
         self.approved = _trust.normalise_approved(approved)
         self.persistent = bool(persistent)
+        self.allow_secrets = False
+        self.switches_known = False
         self.journal = None            # set by build_view; None means unrecorded
         self.debrief_hour = 21
 
@@ -220,6 +275,13 @@ class BrowserView:
     def health(self) -> dict:
         got = self._call("GET", "/health")
         got.setdefault("up", False)
+        # The browser's answer, not the agent's config, is what the agent
+        # believes about its own switches: the config used to say one thing
+        # while the browser, which never read it, did another.
+        if not got.get("error") and "persistent" in got:
+            self.persistent = bool(got.get("persistent"))
+            self.allow_secrets = bool(got.get("allow_secrets"))
+            self.switches_known = True
         return got
 
     def available(self) -> bool:
@@ -260,6 +322,17 @@ DEFAULT_JOURNAL = "/var/lib/jarvis/browser-journal.jsonl"
 MAX_JOURNAL_BYTES = 8 * 1024 * 1024
 DAY_S = 86400
 
+# One lock per journal file, shared by every BrowserJournal on that path, so
+# two objects pointed at the same file cannot trim under each other either.
+_JOURNAL_LOCKS: dict = {}
+_JOURNAL_LOCKS_GUARD = threading.Lock()
+
+
+def _journal_lock(path: str) -> threading.Lock:
+    key = os.path.abspath(path)
+    with _JOURNAL_LOCKS_GUARD:
+        return _JOURNAL_LOCKS.setdefault(key, threading.Lock())
+
 
 class BrowserJournal:
     """What the browser was used for, by whom, and what came of it.
@@ -279,6 +352,7 @@ class BrowserJournal:
         self.path = path
         self.clock = clock
         self.log = logger or logging.getLogger("jarvis.browse.journal")
+        self._lock = _journal_lock(path)
 
     def record(self, did: str, url: str = "", outcome: str = "ok", *,
                by: str = "agent", reason: str = "", gate: str = "",
@@ -293,15 +367,25 @@ class BrowserJournal:
             import json as _json
             import os as _os
             _os.makedirs(_os.path.dirname(self.path) or ".", exist_ok=True)
-            with open(self.path, "a", encoding="utf-8") as fh:
-                fh.write(_json.dumps(entry) + "\n")
-            self._trim()
+            # Two writers share this file -- the agent's cycle and Paul's own
+            # /browse requests on the UI's threads -- and the trim rewrites
+            # it. Without the lock an append landing between the trim's read
+            # and its write was silently lost.
+            with self._lock:
+                with open(self.path, "a", encoding="utf-8") as fh:
+                    fh.write(_json.dumps(entry) + "\n")
+                self._trim()
         except OSError as exc:
             self.log.debug("browser journal not written: %s", exc)
         return entry
 
     def _trim(self):
-        """Keep the newest MAX_JOURNAL_BYTES. Old days are the debrief's past."""
+        """Keep the newest MAX_JOURNAL_BYTES. Old days are the debrief's past.
+
+        Called with the lock held. Written to a temporary file and moved into
+        place, so a crash mid-trim leaves the old journal rather than half of
+        a new one.
+        """
         import os as _os
         try:
             if _os.path.getsize(self.path) <= MAX_JOURNAL_BYTES:
@@ -309,8 +393,10 @@ class BrowserJournal:
             with open(self.path, "rb") as fh:
                 fh.seek(-MAX_JOURNAL_BYTES // 2, 2)
                 keep = fh.read().split(b"\n", 1)[-1]
-            with open(self.path, "wb") as fh:
+            tmp = self.path + ".tmp"
+            with open(tmp, "wb") as fh:
                 fh.write(keep)
+            _os.replace(tmp, self.path)
         except OSError:
             pass
 
@@ -427,8 +513,14 @@ def build_view(config: Optional[dict] = None,
                        token_file=str(cfg.get("token_file") or DEFAULT_TOKEN_FILE),
                        timeout=float(cfg.get("timeout_s") or DEFAULT_TIMEOUT_S),
                        approved=cfg.get("approved_origins") or (),
-                       persistent=bool(cfg.get("persistent")),
                        logger=logger)
+    for key, env in (("persistent", "JARVIS_BROWSER_PERSISTENT"),
+                     ("allow_secrets", "JARVIS_BROWSER_ALLOW_SECRETS")):
+        if cfg.get(key):
+            # Not silently ignored: someone set this expecting it to work.
+            (logger or logging.getLogger("jarvis.browse")).warning(
+                "browser.%s in config does nothing: the switch is %s in "
+                "/etc/default/jarvis-browser, read by the browser itself", key, env)
     view.journal = BrowserJournal(str(cfg.get("journal") or DEFAULT_JOURNAL), logger=logger)
     try:
         view.debrief_hour = int(cfg.get("debrief_hour", 21))

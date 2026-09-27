@@ -458,17 +458,27 @@ session report.
 
 ### Two switches still off, both yours
 
-- **`browser.persistent`** — keeps logins between sessions. Off. Turning it on
+- **Persistent logins** — keeps logins between sessions. Off. Turning it on
   is what makes "do everything" include your accounts, and it is also what
   makes an injected instruction on any page able to act as you on any site you
   are signed into. That risk is real and cannot be fixed with text handling;
   the per-origin rule above is the answer to it, and it only starts working
   once this is on.
-- **`browser.allow_secrets`** — lets it type into password and card fields.
-  Off. The better path is that you sign in yourself in the Browser tab once and
-  it rides the session, never touching the secret.
+- **Secrets** — lets it type into password and card fields. Off. The better
+  path is that you sign in yourself in the Browser tab once and it rides the
+  session, never touching the secret.
 
-Say the word on either and it is a config line.
+**Where the switches live (corrected 27 September).** This section used to
+say `browser.persistent` and `browser.allow_secrets` in the agent's config.
+Those lines never reached the browser, which is its own process and does not
+read that file, so flipping one would have changed what the agent believed and
+not what the browser did. The switches are now the browser's own:
+`JARVIS_BROWSER_PERSISTENT=1` and `JARVIS_BROWSER_ALLOW_SECRETS=1` in
+`/etc/default/jarvis-browser`, then restart `jarvis-browser`. The browser
+reports both on its `/health`, and the agent takes them from there. The two
+config lines are still present, still off, and now only warn if set.
+
+Say the word on either and it is one line in that file.
 
 ### One thing I was wrong about, which Jarvis caught
 

@@ -17,6 +17,16 @@ Environment=PYTHONUNBUFFERED=1
 Environment=HOME=/var/lib/jarvis-browser
 Environment=XDG_CONFIG_HOME=/var/lib/jarvis-browser
 Environment=PLAYWRIGHT_BROWSERS_PATH=/opt/jarvis-browsers
+# The browser's two switches, and the only place either is flipped. Both off
+# here; a line in /etc/default/jarvis-browser (for example
+# JARVIS_BROWSER_PERSISTENT=1) overrides it, because EnvironmentFile= wins
+# over Environment=. The service reads them at start and reports them on
+# /health, and the agent believes /health rather than its own config.
+#   JARVIS_BROWSER_PERSISTENT     keep cookies and logins between sessions
+#   JARVIS_BROWSER_ALLOW_SECRETS  let it type into password and card fields
+# Only 1, true, yes or on switch one on. Restart the unit after changing it.
+Environment=JARVIS_BROWSER_PERSISTENT=0
+Environment=JARVIS_BROWSER_ALLOW_SECRETS=0
 EnvironmentFile=-/etc/default/jarvis-browser
 RuntimeDirectory=jarvis-browser
 RuntimeDirectoryMode=0750
@@ -35,6 +45,9 @@ ExecStartPre=/bin/sh -c 'umask 077; head -c 32 /dev/urandom | od -An -tx1 | tr -
 # version problem. /etc/default/jarvis-browser can override it.
 Environment=JARVIS_BROWSER_PYTHON=/usr/bin/python3.11
 ExecStart=/bin/sh -c 'exec "$JARVIS_BROWSER_PYTHON" -m jarvis.browser.service --host 127.0.0.1 --port 8477'
+# Always, including a clean-looking exit: when a page wedges the browser past
+# its bound the service exits on purpose (status 75) so that this brings up a
+# fresh one, and stopping the old cgroup takes Chromium down with it.
 Restart=always
 RestartSec=5
 KillSignal=SIGTERM

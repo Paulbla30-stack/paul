@@ -32,6 +32,7 @@ import os
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as _FutureTimeout
 from typing import Optional
 
 from jarvis.browser import guard, publish, trust
@@ -56,6 +57,22 @@ DEFAULT_VIEWPORT = {"width": 1280, "height": 900}
 # sends an image to a model, and doing so would be a separate decision about
 # vision that nobody has taken.
 SHOT_MAX_BYTES = 4 * 1024 * 1024
+# How long one piece of browser work may hold the pump before the browser is
+# declared wedged. Each Playwright step is bounded by the navigation timeout,
+# but evaluate() is not, and a page spinning its main thread can hold it for
+# ever -- and with it every later request, /health and shutdown. An action is
+# at most a press, a wait for the load and a read, so three navigation
+# timeouts (and never less than a minute) is slow rather than stuck.
+MIN_PUMP_TIMEOUT_S = 60.0
+PUMP_TIMEOUTS_PER_CALL = 3
+# The most /health will wait for its liveness round trip, and only when the
+# pump is idle. Past it, health answers with what it already knows.
+HEALTH_PROBE_S = 1.0
+
+# What Playwright says when the thing it was talking to has gone: Chromium
+# OOM-killed under MemoryMax, or crashed.
+_GONE = ("has been closed", "target closed", "browser closed",
+         "connection closed", "browser has disconnected")
 
 # Chromium flags.
 #
@@ -134,18 +151,33 @@ class NeedsApproval(PermissionError):
 class Driver:
     """One browser, one page, driven by the service above it.
 
-    Every public method is serialised on a lock. There is one page and the
-    agent is one caller, so contention is not the worry; two navigations
-    interleaving and the extractor reading half of each is.
+    Every public method but health() is serialised on a lock. There is one
+    page and the agent is one caller, so contention is not the worry; two
+    navigations interleaving and the extractor reading half of each is.
     """
 
     def __init__(self, logger: Optional[logging.Logger] = None,
                  timeout_ms: int = DEFAULT_TIMEOUT_MS, headless: bool = True,
                  persistent: bool = False, profile_dir: str = DEFAULT_PROFILE_DIR,
                  download_dir: str = DEFAULT_DOWNLOAD_DIR,
-                 allow_secrets: bool = False):
+                 allow_secrets: bool = False,
+                 pump_timeout_s: Optional[float] = None):
         self.log = logger or logging.getLogger("jarvis.browser")
         self.timeout_ms = int(timeout_ms)
+        self.pump_timeout_s = float(pump_timeout_s) if pump_timeout_s else max(
+            MIN_PUMP_TIMEOUT_S, PUMP_TIMEOUTS_PER_CALL * self.timeout_ms / 1000.0)
+        # Called once when the pump is declared wedged. The service sets it to
+        # exit the process, so systemd (Restart=always) brings up a fresh one
+        # and takes Chromium down with the old cgroup. Nothing in-process can
+        # unstick a thread blocked inside Playwright.
+        self.on_wedged = None
+        self._wedged = False
+        # Set by Playwright's close/disconnected events, which fire on the
+        # pump thread while it is doing something. Read by health() and by
+        # _start(), which starts a new browser rather than reuse a dead one.
+        self._dead = False
+        self.last_death = ""
+        self._busy_since: Optional[float] = None
         self.headless = headless
         # Whether cookies survive. False is still the default and still the
         # safer shape; true is Paul's choice, taken with the trade in front of
@@ -189,17 +221,72 @@ class Driver:
 
     # ---- lifecycle ------------------------------------------------------
 
+    def _alive(self) -> bool:
+        """Whether the page we hold still has a browser behind it.
+
+        is_closed() and is_connected() only change when Playwright next hears
+        from the browser, and between calls it hears nothing: after Chromium
+        was killed on a test box both still said alive. So one round trip to
+        the browser process (not the page, which may be busy) comes first. On
+        a dead browser it fails at once, and the disconnected event fires.
+        """
+        if self._dead:
+            return False
+        try:
+            self._context.cookies()
+            if self._page.is_closed():
+                return False
+            if self._browser is not None and not self._browser.is_connected():
+                return False
+        except Exception:             # noqa: BLE001 - asking a dead thing can throw
+            return False
+        return not self._dead
+
+    def _on_gone(self, *_):
+        self._dead = True
+
+    def _probe(self):
+        """On the pump, for health(): None when nothing is started."""
+        if self._page is None:
+            return None
+        return self._alive()
+
     def _start(self):
-        """Bring Chromium up, once, on first use."""
+        """Bring Chromium up on first use, and again if it has died.
+
+        A Chromium OOM-killed under MemoryMax leaves self._page set to a page
+        with nothing behind it. Returning early on "a page exists" meant it
+        was never started again and every request failed until someone
+        restarted the service by hand.
+        """
         if self._page is not None:
-            return
+            if self._alive():
+                return
+            self.log.warning("the browser had died; starting it again")
+            self._close()
+            self._last = None
+            self._typed_composing.clear()
         try:
             from playwright.sync_api import sync_playwright
         except ImportError as exc:
             raise BrowserUnavailable(
                 "playwright is not installed for this interpreter") from exc
-        self._pw = sync_playwright().start()
-        os.makedirs(self.download_dir, mode=0o750, exist_ok=True)
+        # The directories first, before there is a Playwright to leak: made
+        # after start(), a failure here left a node driver running per call,
+        # and a PermissionError came back as a 403 "refused by the browser"
+        # when the browser was simply unable to start.
+        try:
+            os.makedirs(self.download_dir, mode=0o750, exist_ok=True)
+            if self.persistent:
+                os.makedirs(self.profile_dir, mode=0o700, exist_ok=True)
+        except OSError as exc:
+            raise BrowserUnavailable(
+                f"the browser's directories could not be made: {exc}") from exc
+        try:
+            self._pw = sync_playwright().start()
+        except Exception as exc:      # noqa: BLE001 - the message is the value
+            self._pw = None
+            raise BrowserUnavailable(f"playwright would not start: {exc}") from exc
         shared = dict(viewport=dict(DEFAULT_VIEWPORT),
                       accept_downloads=True,
                       java_script_enabled=True)
@@ -210,7 +297,6 @@ class Driver:
                 # the half of Paul's decision that makes trust.py's per-origin
                 # rule start applying, because from here on there is an
                 # identity in the browser to borrow.
-                os.makedirs(self.profile_dir, mode=0o700, exist_ok=True)
                 self._context = self._pw.chromium.launch_persistent_context(
                     self.profile_dir, headless=self.headless, channel=CHANNEL,
                     chromium_sandbox=SANDBOX, args=list(CHROMIUM_ARGS),
@@ -224,15 +310,22 @@ class Driver:
                     chromium_sandbox=SANDBOX, args=list(CHROMIUM_ARGS),
                     downloads_path=self.download_dir)
                 self._context = self._browser.new_context(**shared)
+            self._context.set_default_timeout(self.timeout_ms)
+            self._context.route("**/*", self._screen)
+            self._context.on("download", self._keep_download)
+            self._context.on("close", self._on_gone)
+            if self._browser is not None:
+                self._browser.on("disconnected", self._on_gone)
+            pages = self._context.pages
+            page = pages[0] if pages else self._context.new_page()
+            page.on("close", self._on_gone)
         except Exception as exc:      # noqa: BLE001 - the message is the value
-            self._pw.stop()
-            self._pw = None
+            # Everything that was started is stopped, Playwright included.
+            self._close()
             raise BrowserUnavailable(f"chromium would not start: {exc}") from exc
-        self._context.set_default_timeout(self.timeout_ms)
-        self._context.route("**/*", self._screen)
-        self._context.on("download", self._keep_download)
-        pages = self._context.pages
-        self._page = pages[0] if pages else self._context.new_page()
+        self._page = page
+        self._dead = False
+        self.last_death = ""
         self.started_at = time.time()
         self.log.info("browser up: chromium, %s profile, sandbox on, %dms timeout",
                       "persistent" if self.persistent else "clean", self.timeout_ms)
@@ -310,6 +403,7 @@ class Driver:
                     pass
                 self._pw = None
             self._page = None
+            self._dead = False
             self.started_at = None
 
     # ---- reading --------------------------------------------------------
@@ -340,17 +434,41 @@ class Driver:
                     time.sleep(0.5)
         text = str(raw.get("text") or "")
         raw["truncated"] = len(text) > 0 and len(text) > 40000
+        # The page reports text it can see in a textarea; what the agent typed
+        # into any other box is known only here, and the model should be told
+        # the next press will wait for Paul either way.
+        raw["composing"] = bool(raw.get("composing")) or bool(self._typed_composing)
         raw["status"] = status
         raw["fetched_at"] = time.time()
         page = Page.from_dict(raw)
         self._last = page
         return page
 
+    def _check_landed(self, landed: str):
+        """The guard on an address the browser is already at.
+
+        Refusing the address is not enough on its own: the refused page stays
+        loaded, and the next read would hand its content over anyway. So a
+        refusal here also clears the page and forgets the last read before
+        the refusal goes back to the caller.
+        """
+        try:
+            guard.check(landed)
+        except guard.Refused:
+            self._last = None
+            self._typed_composing.clear()
+            try:
+                self._page.goto("about:blank", timeout=self.timeout_ms)
+            except Exception as exc:  # noqa: BLE001 - the refusal still stands
+                self.log.warning("could not clear a refused page: %s", exc)
+            raise
+
     def _read(self) -> Page:
         with self._lock:
             self._start()
             if not self._page.url or self._page.url == "about:blank":
                 return Page(url="", title="", text="", error="nothing open yet")
+            self._check_landed(self._page.url)
             return self._extract()
 
     # ---- moving ---------------------------------------------------------
@@ -377,6 +495,12 @@ class Driver:
                 # rather than throwing away a usable read.
                 self.log.warning("navigation to %s: %s", url, exc)
                 try:
+                    # Where it got to before failing may be somewhere it may
+                    # not be, or Chrome's own error page. Either way the check
+                    # clears it, and the read below is not made.
+                    landed = self._page.url
+                    if landed and landed not in (url, "about:blank"):
+                        self._check_landed(landed)
                     page = self._extract(status=None)
                     return Page(**{**page.__dict__,
                                    "error": f"navigation did not complete: {exc}"})
@@ -388,7 +512,7 @@ class Driver:
             # case where it matters.
             landed = self._page.url
             if landed and landed != url:
-                guard.check(landed)
+                self._check_landed(landed)
             return self._extract(status=status)
 
     def _follow(self, ref: str) -> Page:
@@ -427,7 +551,7 @@ class Driver:
             elif kind == "reload":
                 here = self._page.url
                 if here and here != "about:blank":
-                    guard.check(here)
+                    self._check_landed(here)
                     self._page.goto(here, wait_until="domcontentloaded",
                                     timeout=self.timeout_ms)
             else:
@@ -435,7 +559,7 @@ class Driver:
                     wait_until="domcontentloaded", timeout=self.timeout_ms)
             landed = self._page.url
             if landed and landed != "about:blank":
-                guard.check(landed)
+                self._check_landed(landed)
             return self._extract()
 
     def _act(self, kind: str, ref: str = "", text: str = "",
@@ -482,7 +606,7 @@ class Driver:
                 if field.is_secret and not self.allow_secrets:
                     raise PermissionError(
                         "that field is a secret and filling those is not "
-                        "switched on (browser.allow_secrets)")
+                        "switched on (JARVIS_BROWSER_ALLOW_SECRETS)")
             if kind == "click" and control is None and link is None:
                 raise ValueError(f"no control or link {ref!r} on the page that was read")
             if kind == "press" and field is None and control is None:
@@ -510,7 +634,7 @@ class Driver:
             elif self._last.has_password and not self.allow_secrets and kind == "submit":
                 raise PermissionError(
                     "the page holds a password field; this browser never "
-                    "submits a form on a page that does (browser.allow_secrets)")
+                    "submits a form on a page that does (JARVIS_BROWSER_ALLOW_SECRETS)")
 
             self._start()
             # Located by the ref the extractor stamped on the element, not by
@@ -522,9 +646,11 @@ class Driver:
             if kind == "click":
                 by_ref(ref).click(timeout=self.timeout_ms)
             elif kind == "type":
-                by_ref(ref).fill(text or "", timeout=self.timeout_ms)
-                if field.kind == "textarea":
+                # Armed before the fill, so a fill that half-happens and then
+                # throws still leaves the page armed.
+                if publish.arms_page(field.kind, search=field.search):
                     self._typed_composing.add(ref)
+                by_ref(ref).fill(text or "", timeout=self.timeout_ms)
             elif kind == "select":
                 by_ref(ref).select_option(text or "", timeout=self.timeout_ms)
             elif kind == "press":
@@ -548,16 +674,8 @@ class Driver:
                 pass
             landed = self._page.url
             if landed:
-                guard.check(landed)
+                self._check_landed(landed)
             return self._extract()
-
-    @staticmethod
-    def _index_of(ref: str) -> int:
-        """L3 -> 2, F1 -> 0. The refs are one-based because people read them."""
-        digits = "".join(c for c in str(ref or "") if c.isdigit())
-        if not digits:
-            raise ValueError(f"not a ref: {ref!r}")
-        return max(0, int(digits) - 1)
 
     # ---- for Paul's eyes only -------------------------------------------
 
@@ -577,8 +695,59 @@ class Driver:
         which is what keeps the refusals meaningful: a PermissionError raised
         inside _act must still be a PermissionError at the service boundary,
         not a wrapped future error that turns into a 500.
+
+        Bounded. A page that spins its main thread can hold evaluate() for
+        ever, and with one worker that held every later request with it. Past
+        pump_timeout_s the browser is declared wedged: this call and every
+        later one answer "unavailable" at once, and on_wedged -- in the
+        service, exiting so systemd starts a fresh process -- is called.
         """
-        return self._pump.submit(fn, *args).result()
+        if self._wedged:
+            raise BrowserUnavailable(
+                "the browser stopped answering and is being restarted")
+        future = self._pump.submit(self._run, fn, *args)
+        try:
+            return future.result(timeout=self.pump_timeout_s)
+        except _FutureTimeout:
+            future.cancel()
+            first = not self._wedged
+            self._wedged = True
+            if first:
+                self.log.error("browser wedged: one call held it for more than %.0fs",
+                               self.pump_timeout_s)
+                hook = self.on_wedged
+                if hook is not None:
+                    try:
+                        hook()
+                    except Exception as exc:  # noqa: BLE001 - still unavailable
+                        self.log.error("on_wedged failed: %s", exc)
+            raise BrowserUnavailable(
+                f"the browser did not answer within {self.pump_timeout_s:.0f}s "
+                "and is being restarted") from None
+
+    def _run(self, fn, *args):
+        """On the pump thread: one call, and what to do if Chromium has gone."""
+        self._busy_since = time.time()
+        try:
+            return fn(*args)
+        except (guard.Refused, PermissionError, ValueError, BrowserUnavailable):
+            raise
+        except Exception as exc:          # noqa: BLE001 - re-raised either way
+            gone = self._dead or any(g in str(exc).lower() for g in _GONE)
+            if self._page is not None and gone:
+                # Torn down here so the next call starts a new one, and said
+                # as unavailable (503) rather than as a crash (500).
+                self.last_death = f"{type(exc).__name__}: {exc}"[:300]
+                self.log.warning("the browser has gone: %s", exc)
+                self._close()
+                self._last = None
+                self._typed_composing.clear()
+                raise BrowserUnavailable(
+                    f"the browser had stopped ({exc}); it starts again on the "
+                    "next request") from exc
+            raise
+        finally:
+            self._busy_since = None
 
     def open(self, url: str) -> Page:
         """Navigate to a URL. Checked before the browser is even started."""
@@ -609,27 +778,57 @@ class Driver:
         return self._on_pump(self._screenshot)
 
     def health(self) -> dict:
-        with self._lock:
-            up = self._page is not None
-            out = {"up": up, "engine": "chromium", "blocked": self.blocked,
-                   "profile": "persistent" if self.persistent else "clean per session",
-                   "persistent": self.persistent,
-                   # What is configured. Whether the kernel agrees is a
-                   # different question and is answered by reading
-                   # /proc/<pid>/ns/user for a live renderer -- see the
-                   # standing refusals. Named "sandbox_requested" so nobody
-                   # reads this field as proof of anything.
-                   "sandbox_requested": SANDBOX and "--no-sandbox" not in CHROMIUM_ARGS,
-                   "channel": CHANNEL,
-                   "allow_secrets": self.allow_secrets,
-                   "downloads": list(self.downloads[-10:]),
-                   "download_dir": self.download_dir,
-                   "since": self.started_at,
-                   "url": self._last.url if self._last else ""}
-            if not up:
+        """What state the browser is in, answered without waiting for it.
+
+        Takes neither the lock nor the pump: a page that has wedged the
+        browser holds both, and a health check that queues behind it cannot
+        report that it is wedged. So this reads plain attributes, which may
+        be a moment stale and are never blocked. Chromium dying while idle is
+        seen by Playwright only when it next hears from it, so when the pump
+        is idle one round trip to the browser process is made, bounded at
+        HEALTH_PROBE_S. When the pump is busy that is skipped and busy_s says
+        for how long.
+        """
+        page, busy = self._page, self._busy_since
+        if page is not None and busy is None and not self._dead and not self._wedged:
+            probe = self._pump.submit(self._probe)
+            try:
+                if probe.result(timeout=HEALTH_PROBE_S) is False:
+                    self._dead = True
+            except _FutureTimeout:
+                probe.cancel()
+            except Exception:          # noqa: BLE001 - a probe is not a verdict
+                pass
+        page, last, busy = self._page, self._last, self._busy_since
+        up = page is not None and not self._dead and not self._wedged
+        out = {"up": up, "engine": "chromium", "blocked": self.blocked,
+               "profile": "persistent" if self.persistent else "clean per session",
+               "persistent": self.persistent,
+               # What is configured. Whether the kernel agrees is a
+               # different question and is answered by reading
+               # /proc/<pid>/ns/user for a live renderer -- see the
+               # standing refusals. Named "sandbox_requested" so nobody
+               # reads this field as proof of anything.
+               "sandbox_requested": SANDBOX and "--no-sandbox" not in CHROMIUM_ARGS,
+               "channel": CHANNEL,
+               "allow_secrets": self.allow_secrets,
+               "downloads": list(self.downloads[-10:]),
+               "download_dir": self.download_dir,
+               "since": self.started_at,
+               "busy_s": round(time.time() - busy, 1) if busy else 0,
+               "url": last.url if last else ""}
+        if not up:
+            if self._wedged:
+                out["reason"] = "the browser stopped answering and is being restarted"
+            elif page is not None:
+                out["reason"] = "the browser has died; it starts again on the next request"
+            elif self.last_death:
+                out["reason"] = ("the browser died and starts again on the next "
+                                 f"request ({self.last_death})")
+            else:
                 try:
                     import playwright                      # noqa: F401
                     out["reason"] = "not started yet"
                 except ImportError:
                     out["reason"] = "playwright is not installed"
-            return out
+        return out

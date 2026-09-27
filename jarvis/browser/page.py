@@ -66,6 +66,17 @@ def _clean(text: str, limit: int) -> str:
     return text.strip()[:limit]
 
 
+def _one_line(text: str, limit: int) -> str:
+    """Every run of whitespace, newlines included, becomes one space.
+
+    For the short strings a page controls and the envelope prints one per
+    line -- headings, labels, link and button text. A newline kept in one of
+    those lets the page start a line of its own in the model's prompt, which
+    is how a heading forged the end of the untrusted block.
+    """
+    return " ".join(str(text or "").split())[:limit]
+
+
 @dataclass(frozen=True)
 class Link:
     """One thing the agent can navigate to without firing an event."""
@@ -92,6 +103,10 @@ class Field:
     kind: str                       # the input's type attribute
     autocomplete: str = ""
     required: bool = False
+    # Recognisably a search box (type=search, role=searchbox, or a name, id,
+    # aria-label or placeholder saying search, query or q). The one text field
+    # typing into which does not arm the posting gate; see publish.arms_page.
+    search: bool = False
 
     @property
     def is_secret(self) -> bool:
@@ -105,7 +120,8 @@ class Field:
     def as_dict(self) -> dict:
         return {"ref": self.ref, "label": self.label, "kind": self.kind,
                 "autocomplete": self.autocomplete, "required": self.required,
-                "secret": self.is_secret, "personal": self.is_personal}
+                "secret": self.is_secret, "personal": self.is_personal,
+                "search": self.search}
 
 
 @dataclass(frozen=True)
@@ -143,17 +159,23 @@ class Page:
     # "it is on the page somewhere" is not the same as "it is on the screen".
     on_screen: str = ""
     below_fold: bool = False
-    # A visible multi-line field currently holds text. One press away from
-    # publishing it, whoever put it there.
+    # A visible multi-line field currently holds text, or the agent has typed
+    # into a text field that is not a search box since the last navigation.
+    # One press away from publishing it, whoever put it there.
     composing: bool = False
     fetched_at: float = field(default_factory=time.time)
     truncated: bool = False
     status: Optional[int] = None
     error: str = ""
+    # A password input anywhere in the document, shown or not, counted or not.
+    # The field list only holds shown fields up to MAX_FIELDS, and a two-step
+    # login keeps its password box hidden or off-screen until step two, so the
+    # list alone let the hard stop miss exactly the login pages it is for.
+    password_in_dom: bool = False
 
     @property
     def has_password(self) -> bool:
-        return any(f.is_secret for f in self.fields)
+        return self.password_in_dom or any(f.is_secret for f in self.fields)
 
     def link(self, ref: str) -> Optional[Link]:
         for item in self.links:
@@ -196,34 +218,38 @@ class Page:
     def from_dict(cls, raw: dict) -> "Page":
         raw = raw or {}
         links = tuple(
-            Link(ref=str(l.get("ref") or ""), text=str(l.get("text") or ""),
-                 href=str(l.get("href") or ""))
+            Link(ref=str(l.get("ref") or ""), text=_one_line(l.get("text"), 200),
+                 href=_one_line(l.get("href"), MAX_HREF))
             for l in (raw.get("links") or [])[:MAX_LINKS])
         fields = tuple(
-            Field(ref=str(f.get("ref") or ""), label=str(f.get("label") or ""),
-                  kind=str(f.get("kind") or "text"),
-                  autocomplete=str(f.get("autocomplete") or ""),
-                  required=bool(f.get("required")))
+            Field(ref=str(f.get("ref") or ""), label=_one_line(f.get("label"), 120),
+                  kind=_one_line(f.get("kind"), 40) or "text",
+                  autocomplete=_one_line(f.get("autocomplete"), 80),
+                  required=bool(f.get("required")),
+                  search=bool(f.get("search")))
             for f in (raw.get("fields") or [])[:MAX_FIELDS])
         controls = tuple(
-            Control(ref=str(c.get("ref") or ""), text=str(c.get("text") or "")[:120],
-                    kind=str(c.get("kind") or "button"),
+            Control(ref=str(c.get("ref") or ""), text=_one_line(c.get("text"), 120),
+                    kind=_one_line(c.get("kind"), 40) or "button",
                     in_form=bool(c.get("in_form")))
             for c in (raw.get("controls") or [])[:MAX_CONTROLS])
         return cls(
             controls=controls,
-            headings=tuple(_clean(str(h), 160) for h in (raw.get("headings") or [])[:40]),
+            headings=tuple(_one_line(h, 170) for h in (raw.get("headings") or [])[:40]),
             on_screen=_clean(str(raw.get("on_screen") or ""), 6000),
             below_fold=bool(raw.get("below_fold")),
             composing=bool(raw.get("composing")),
             url=str(raw.get("url") or ""),
-            title=_clean(str(raw.get("title") or ""), 300),
+            title=_one_line(raw.get("title"), 300),
             text=_clean(str(raw.get("text") or ""), MAX_TEXT),
             links=links, fields=fields,
             fetched_at=float(raw.get("fetched_at") or time.time()),
             truncated=bool(raw.get("truncated")),
             status=raw.get("status"),
             error=str(raw.get("error") or ""),
+            # "has_password" is what the extractor sends and what as_dict
+            # writes, so a page that crosses the wire keeps the fact.
+            password_in_dom=bool(raw.get("has_password") or raw.get("password_in_dom")),
         )
 
 
@@ -295,17 +321,30 @@ EXTRACT_JS = r"""
                    in_form: !!el.closest('form')});
   }
 
+  // Recognisably a search box. Typing into one does not arm the posting gate;
+  // typing into any other text field does. "research" must not count, so the
+  // word has to start the value or follow a non-letter.
+  const searchy = (el) => {
+    if ((el.getAttribute('type') || '').toLowerCase() === 'search') return true;
+    if ((el.getAttribute('role') || '').toLowerCase() === 'searchbox') return true;
+    for (const a of [el.getAttribute('name'), el.id, el.getAttribute('aria-label'),
+                     el.getAttribute('placeholder')]) {
+      const v = (a || '').trim().toLowerCase();
+      if (/(^|[^a-z])(search|query)/.test(v) || /(^|[^a-z])q([^a-z]|$)/.test(v)) return true;
+    }
+    return false;
+  };
+
+  // Asked of the whole document, not of the field list below. That list
+  // holds only shown fields and stops at MAX_FIELDS, and a two-step login
+  // keeps its password box hidden or off-screen until step two.
+  const hasPassword = !!document.querySelector('input[type=password]');
+
   const fields = [];
   let composing = false;
   for (const el of document.querySelectorAll('input, textarea, select')) {
     if (fields.length >= MAX_FIELDS) break;
-    if (el.type === 'hidden') {
-      // Not shown, but it IS the thing that carries state into a submit, so
-      // a hidden secret still has to count towards has_password.
-      if (el.type === 'password') fields.push({ref: 'F' + (fields.length + 1),
-        label: label(el), kind: 'password', autocomplete: '', required: false});
-      continue;
-    }
+    if (el.type === 'hidden') continue;
     if (!shown(el)) continue;
     const kind = (el.type || el.tagName.toLowerCase() || 'text').toLowerCase();
     if (el.tagName.toLowerCase() === 'textarea' && (el.value || '').trim()) composing = true;
@@ -317,6 +356,7 @@ EXTRACT_JS = r"""
       kind: el.tagName.toLowerCase() === 'textarea' ? 'textarea' : kind,
       autocomplete: (el.getAttribute('autocomplete') || '').toLowerCase(),
       required: !!el.required,
+      search: el.tagName.toLowerCase() !== 'select' && searchy(el),
     });
   }
 
@@ -353,6 +393,7 @@ EXTRACT_JS = r"""
     on_screen: onScreen.join('\n'),
     below_fold: docH > (window.scrollY || 0) + vh + 40,
     composing: composing,
+    has_password: hasPassword,
   };
 }
 """ % {"max_links": MAX_LINKS, "max_fields": MAX_FIELDS, "max_controls": MAX_CONTROLS,

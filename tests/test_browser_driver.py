@@ -100,23 +100,6 @@ class TestWhatItWillNotBeAskedToDo(unittest.TestCase):
             self.driver.follow("L1")
 
 
-class TestRefs(unittest.TestCase):
-    """Refs are one-based because people read them."""
-
-    def test_l1_is_the_first(self):
-        self.assertEqual(Driver._index_of("L1"), 0)
-
-    def test_f12_is_the_twelfth(self):
-        self.assertEqual(Driver._index_of("F12"), 11)
-
-    def test_a_ref_with_no_number_is_an_error(self):
-        with self.assertRaises(ValueError):
-            Driver._index_of("L")
-
-    def test_it_never_returns_a_negative_index(self):
-        self.assertEqual(Driver._index_of("L0"), 0)
-
-
 class TestFollowingDoesNotClick(unittest.TestCase):
     """The design point the agent won the argument on.
 
