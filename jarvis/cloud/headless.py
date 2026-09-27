@@ -108,6 +108,44 @@ OPEN_PATHS = ("/", "/health", "/status")
 UI_OPEN_PATHS = ("/health",)
 # Addresses that can only be the box itself, and so the tunnel.
 LOOPBACK = ("127.0.0.1", "::1", "::ffff:127.0.0.1")
+# Seconds a TLS client gets to finish its handshake on the UI port.
+TLS_HANDSHAKE_TIMEOUT = 10.0
+# How long /status waits for the agent before serving the last published
+# snapshot instead. Under the 2s that `jarvis --status` itself waits.
+STATUS_LOCK_TIMEOUT = 1.0
+# Client addresses the login throttle remembers at most. Each one is a list
+# of timestamps; without a cap, a stream of fresh addresses grows it forever.
+AUTH_FAILURE_MAX_CLIENTS = 4096
+
+
+class _BadRequest(Exception):
+    """A request the handler cannot even read, answered 400."""
+
+
+class _Server(ThreadingHTTPServer):
+    """ThreadingHTTPServer that finishes a TLS handshake in the request thread.
+
+    Wrapping the listening socket with the default do_handshake_on_connect
+    makes accept() do the handshake on the one thread that serves the port,
+    with no timeout: a single idle TCP connection then stalls every client.
+    Here the socket is wrapped without the handshake, and each connection's
+    own thread does it under a timeout.
+    """
+
+    tls_handshake_timeout: Optional[float] = None
+
+    def finish_request(self, request, client_address):
+        if self.tls_handshake_timeout is not None and isinstance(request, ssl.SSLSocket):
+            previous = request.gettimeout()
+            try:
+                request.settimeout(self.tls_handshake_timeout)
+                request.do_handshake()
+                request.settimeout(previous)
+            except (ssl.SSLError, OSError):
+                # Plain HTTP, a scanner, or a client that never spoke. The
+                # thread's shutdown_request closes the socket.
+                return
+        super().finish_request(request, client_address)
 
 
 def write_token_file(token: str, path: str) -> Optional[str]:
@@ -182,7 +220,10 @@ class HeadlessRunner:
         ui = dict(ui or {})
         self.ui_enabled = bool(ui.get("enabled"))
         self.ui_host = ui.get("host") or "0.0.0.0"
-        self.ui_port = int(ui.get("port") or 8443)
+        # 0 means "any free port", as it does for status_port; `or 8443` read
+        # it as unset, so every test listener quietly shared the real port.
+        port = ui.get("port")
+        self.ui_port = 8443 if port is None or port == "" else int(port)
         self.ui_tls = bool(ui.get("tls", True))
         self.tls_dir = ui.get("tls_dir") or DEFAULT_TLS_DIR
         self.upload_dir = ui.get("upload_dir") or DEFAULT_UPLOAD_DIR
@@ -192,6 +233,9 @@ class HeadlessRunner:
         # Brute-force guard for the token: per client address, failures in
         # the last window; from the Nth failure on, 429 until the window passes.
         self._auth_failures: dict = {}
+        # Request threads read and write it at once.
+        self._auth_lock = threading.Lock()
+        self.auth_failure_max_clients = AUTH_FAILURE_MAX_CLIENTS
         self.auth_failure_limit = int(ui.get("auth_failure_limit") or 10)
         self.auth_failure_window = float(ui.get("auth_failure_window") or 300)
         self.started_at = time.time()
@@ -236,6 +280,10 @@ class HeadlessRunner:
         self._server: Optional[ThreadingHTTPServer] = None
         self._server_thread: Optional[threading.Thread] = None
         self.last_cycle: dict = {}
+        # The last snapshot taken, and when: what /status serves, marked
+        # stale, while a model call holds the lock.
+        self._published: Optional[dict] = None
+        self._published_at: Optional[float] = None
 
     # ---- status --------------------------------------------------------
 
@@ -263,12 +311,40 @@ class HeadlessRunner:
         }
         return status
 
+    def _publish(self, snapshot: dict) -> dict:
+        self._published = snapshot
+        self._published_at = time.time()
+        return snapshot
+
+    def status_view(self, timeout: float = STATUS_LOCK_TIMEOUT) -> dict:
+        """A fresh snapshot if the agent is free soon, else the last one.
+
+        The lock is held for a whole cycle and for every /think and /chat,
+        which is the length of a model call. /status waiting that long made
+        the box look dead to anything that asks it how it is.
+        """
+        if self._lock.acquire(timeout=timeout):
+            try:
+                return self._publish(self.snapshot())
+            finally:
+                self._lock.release()
+        published = self._published
+        if published is not None:
+            return dict(published, stale=True, snapshot_at=self._published_at)
+        # Nothing published yet. Plain attributes only: anything that walks
+        # the agent's state belongs under the lock.
+        return {"name": self.agent.name, "stale": True, "snapshot_at": None,
+                "busy": True, "cycle_count": self.agent.cycle_count,
+                "runner": {"mode": "headless",
+                           "uptime_seconds": round(time.time() - self.started_at, 1),
+                           "stopping": self._stop.is_set()}}
+
     def _write_status_file(self):
         if not self.status_file:
             return
         try:
             with self._lock:
-                snapshot = self.snapshot()
+                snapshot = self._publish(self.snapshot())
             directory = os.path.dirname(self.status_file)
             if directory:
                 os.makedirs(directory, exist_ok=True)
@@ -288,6 +364,57 @@ class HeadlessRunner:
         class Handler(BaseHTTPRequestHandler):
             def log_message(self, fmt, *args):  # quiet
                 runner.log.debug("http %s", fmt % args)
+
+            def send_response(self, code, message=None):
+                # Remembered so the catch-all below knows whether a status
+                # line has already gone out and a 500 would corrupt it.
+                self._responded = True
+                super().send_response(code, message)
+
+            def _content_length(self) -> int:
+                """The declared body length; _BadRequest if it is not one.
+
+                int() on the raw header raised ValueError out of the handler,
+                and a negative value would have been read as "until EOF".
+                """
+                raw = (self.headers.get("Content-Length") or "").strip()
+                if not raw:
+                    return 0
+                # ASCII only: isdigit() alone passes "²", which int() rejects.
+                if not (raw.isascii() and raw.isdigit()):
+                    raise _BadRequest("Content-Length is not a number")
+                return int(raw)
+
+            def _guarded(self, route):
+                """Run one request; answer rather than drop it if it fails.
+
+                An exception used to reach socketserver, which printed a
+                traceback to stderr and closed the socket with nothing sent.
+                The client now gets a status and a JSON error. The error text
+                is generic: exception messages can carry paths or values
+                that a caller holding the page has no business seeing.
+                """
+                self._responded = False
+                try:
+                    route()
+                except _BadRequest as why:
+                    # The body length is unknown, so the connection cannot
+                    # be reused for another request.
+                    self.close_connection = True
+                    if not self._responded:
+                        self._send(400, {"error": str(why)})
+                except (BrokenPipeError, ConnectionResetError):
+                    self.close_connection = True
+                except Exception as exc:              # noqa: BLE001
+                    self.close_connection = True
+                    runner.log.warning("%s %s failed: %s", self.command,
+                                       self.path.partition("?")[0],
+                                       type(exc).__name__, exc_info=True)
+                    if not self._responded:
+                        try:
+                            self._send(500, {"error": "internal error"})
+                        except OSError:
+                            pass
 
             def _send(self, code: int, payload, headers: Optional[list] = None):
                 body = json.dumps(payload, default=str).encode()
@@ -402,6 +529,12 @@ class HeadlessRunner:
                 self.wfile.write(body)
 
             def do_GET(self):
+                self._guarded(self._get)
+
+            def do_POST(self):
+                self._guarded(self._post)
+
+            def _get(self):
                 raw_path, _, query = self.path.partition("?")
                 path = raw_path.rstrip("/") or "/"
                 if path == "/ui":
@@ -506,21 +639,29 @@ class HeadlessRunner:
                         search = urllib.parse.unquote_plus(part[2:])[:200].strip()
                     elif part.startswith("day="):
                         day = urllib.parse.unquote_plus(part[4:])[:10].strip() or None
+                # Liveness and status stay outside the agent lock, which is
+                # held for the length of every model call: a probe that waits
+                # on it reports a busy agent as a dead one.
+                if path in ("/", "/health"):
+                    if loopback_only:
+                        return self._send(200, {"ok": True, "agent": runner.agent.name,
+                                                "cycles": runner.agent.cycle_count})
+                    return self._send(200, {"ok": True})
+                if path == "/status":
+                    return self._send(200, runner.status_view())
                 with runner._lock:
-                    if path in ("/", "/health"):
-                        if loopback_only:
-                            self._send(200, {"ok": True, "agent": runner.agent.name,
-                                             "cycles": runner.agent.cycle_count})
-                        else:
-                            self._send(200, {"ok": True})
-                    elif path == "/status":
-                        self._send(200, runner.snapshot())
-                    elif path == "/memory":
+                    if path == "/memory":
                         self._send(200, runner.agent.memory.get_summary())
                     elif path == "/proposals":
+                        # Each carries its id, and a decision is sent back by
+                        # it: a position in this slice is not a position in
+                        # the agent's list, and the list is bounded, so even
+                        # a position in the full list moves as it fills.
+                        shown = list(runner.agent.proposals)[-limit:]
                         self._send(200, {
                             "rung": runner.agent.rung,
-                            "proposals": list(runner.agent.proposals)[-limit:]})
+                            "proposals": [dict(p, id=runner.agent.proposal_id(p))
+                                          for p in shown]})
                     elif path == "/memory/store":
                         store = runner.agent.store
                         entries = (store.search(search, limit) if search
@@ -581,10 +722,10 @@ class HeadlessRunner:
                         self._send(404, {"error": "not found"})
 
             def _body(self) -> str:
-                length = int(self.headers.get("Content-Length") or 0)
+                length = self._content_length()
                 return self.rfile.read(length).decode("utf-8", errors="replace") if length else ""
 
-            def do_POST(self):
+            def _post(self):
                 raw_path, _, query = self.path.partition("?")
                 path = raw_path.rstrip("/") or "/"
                 # Login and logout come before the auth check: one is how you
@@ -592,7 +733,7 @@ class HeadlessRunner:
                 if path == "/login":
                     if runner.auth_locked(self._client()):
                         return self._send(429, {"error": "too many failed logins; try again later"})
-                    if int(self.headers.get("Content-Length") or 0) > 4096:
+                    if self._content_length() > 4096:
                         return self._send(413, {"error": "body too large"})
                     supplied = self._body().strip()
                     if not supplied or not secrets.compare_digest(supplied, runner.token):
@@ -611,7 +752,7 @@ class HeadlessRunner:
                     return self._deny()
                 if path == "/upload":
                     return self._handle_upload()
-                if int(self.headers.get("Content-Length") or 0) > 1_000_000:
+                if self._content_length() > 1_000_000:
                     return self._send(413, {"error": "body too large"})
                 body = self._body().strip()
                 if path.startswith("/browse/"):
@@ -629,6 +770,8 @@ class HeadlessRunner:
                         payload = json.loads(body or "{}")
                     except ValueError:
                         return self._send(400, {"error": "body is not JSON"})
+                    if not isinstance(payload, dict):
+                        return self._send(400, {"error": "JSON object required"})
                     what = path[len("/browse/"):]
                     if what == "open":
                         url = str(payload.get("url") or "").strip()
@@ -669,15 +812,31 @@ class HeadlessRunner:
                     # the first five were unwelcome. Accepting does not run it;
                     # it says the agent was right to want it, which is the part
                     # worth learning from.
+                    # By id, which the listing carries. "index" is still read
+                    # for an older page, and means a position in the agent's
+                    # whole list, which is what decide_proposal always took.
                     try:
                         payload = json.loads(body or "{}")
-                        index = int(payload.get("index"))
-                        accepted = bool(payload.get("accepted"))
-                    except (ValueError, TypeError):
-                        return self._send(400, {"error": "index and accepted required"})
+                    except ValueError:
+                        return self._send(400, {"error": "body must be JSON"})
+                    if not isinstance(payload, dict):
+                        return self._send(400, {"error": "JSON object required"})
+                    ident = payload.get("id")
+                    index = None
+                    if ident is not None:
+                        if not isinstance(ident, str) or not ident.strip():
+                            return self._send(400, {"error": "id must be a non-empty string"})
+                        ident = ident.strip()
+                    else:
+                        try:
+                            index = int(payload.get("index"))
+                        except (ValueError, TypeError):
+                            return self._send(400, {"error": "id (or index) and accepted required"})
+                    accepted = bool(payload.get("accepted"))
                     with runner._lock:
                         decided = runner.agent.decide_proposal(
-                            index, accepted, str(payload.get("reason") or ""))
+                            index, accepted, str(payload.get("reason") or ""),
+                            proposal_id=ident)
                     runner.wake()
                     if decided is None:
                         return self._send(404, {"error": "no such undecided proposal"})
@@ -1100,7 +1259,7 @@ class HeadlessRunner:
                     self._send(404, {"error": "not found"})
 
             def _body_raw(self, limit: int) -> Optional[bytes]:
-                length = int(self.headers.get("Content-Length") or 0)
+                length = self._content_length()
                 if length > limit:
                     return None
                 return self.rfile.read(length) if length else b""
@@ -1109,7 +1268,7 @@ class HeadlessRunner:
                 name = runner.safe_filename(self.headers.get("X-Filename") or "")
                 if not name:
                     return self._send(400, {"error": "X-Filename header required"})
-                length = int(self.headers.get("Content-Length") or 0)
+                length = self._content_length()
                 if length <= 0:
                     return self._send(400, {"error": "empty upload"})
                 if length > runner.max_upload_bytes:
@@ -1187,17 +1346,51 @@ class HeadlessRunner:
         return _session.clear_header(secure=self.ui_tls,
                                      samesite=self.session_samesite)
 
+    def _live_failures(self, client: str, now: float) -> list:
+        """Failures for ``client`` still inside the window; caller holds the lock.
+
+        A client with none left is removed rather than kept as an empty list:
+        every request used to leave its address behind for good.
+        """
+        stamps = [t for t in self._auth_failures.get(client, ())
+                  if now - t < self.auth_failure_window]
+        if stamps:
+            self._auth_failures[client] = stamps
+        else:
+            self._auth_failures.pop(client, None)
+        return stamps
+
     def auth_locked(self, client: str) -> bool:
-        now = time.time()
-        stamps = [t for t in self._auth_failures.get(client, []) if now - t < self.auth_failure_window]
-        self._auth_failures[client] = stamps
-        return len(stamps) >= self.auth_failure_limit
+        with self._auth_lock:
+            return len(self._live_failures(client, time.time())) >= self.auth_failure_limit
 
     def auth_failed(self, client: str):
-        self._auth_failures.setdefault(client, []).append(time.time())
-        if len(self._auth_failures[client]) == self.auth_failure_limit:
+        now = time.time()
+        with self._auth_lock:
+            stamps = self._live_failures(client, now)
+            if client not in self._auth_failures and \
+                    len(self._auth_failures) >= self.auth_failure_max_clients:
+                self._make_room(now)
+            stamps.append(now)
+            self._auth_failures[client] = stamps
+            count = len(stamps)
+        if count == self.auth_failure_limit:
             self.log.warning("Too many bad tokens from %s; locked out for %.0fs",
                              client, self.auth_failure_window)
+
+    def _make_room(self, now: float):
+        """Bound the table: drop expired clients, then the longest-quiet ones.
+
+        Evicting the least recent failures first keeps an address that is
+        guessing right now, which is the one the lockout is for.
+        """
+        for client in list(self._auth_failures):
+            self._live_failures(client, now)
+        excess = len(self._auth_failures) - self.auth_failure_max_clients + 1
+        if excess > 0:
+            quiet = sorted(self._auth_failures, key=lambda c: self._auth_failures[c][-1])
+            for client in quiet[:excess]:
+                del self._auth_failures[client]
 
     # ---- UI listener ----------------------------------------------------------
 
@@ -1232,8 +1425,8 @@ class HeadlessRunner:
         if not self.ui_enabled:
             return None
         try:
-            server = ThreadingHTTPServer((self.ui_host, self.ui_port),
-                                         self._make_handler(UI_OPEN_PATHS))
+            server = _Server((self.ui_host, self.ui_port),
+                             self._make_handler(UI_OPEN_PATHS))
         except OSError as e:
             self.log.warning("UI listener unavailable on %s:%s: %s", self.ui_host, self.ui_port, e)
             return None
@@ -1247,7 +1440,12 @@ class HeadlessRunner:
             ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
             ctx.minimum_version = ssl.TLSVersion.TLSv1_2
             ctx.load_cert_chain(files[0], files[1])
-            server.socket = ctx.wrap_socket(server.socket, server_side=True)
+            # No handshake in accept(): that runs on the one serving thread,
+            # so a client that connects and says nothing would hold the port
+            # for everyone. _Server does it in the connection's own thread.
+            server.socket = ctx.wrap_socket(server.socket, server_side=True,
+                                            do_handshake_on_connect=False)
+            server.tls_handshake_timeout = TLS_HANDSHAKE_TIMEOUT
             scheme = "https"
         server.daemon_threads = True
         self._ui_server = server

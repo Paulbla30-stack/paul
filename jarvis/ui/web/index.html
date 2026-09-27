@@ -513,13 +513,14 @@
   try { turns = JSON.parse(localStorage.getItem("jarvis.chat") || "[]"); } catch (e) { turns = []; }
 
   // ---- auth ----
-  function headers(extra) { return Object.assign({ "Authorization": "Bearer " + token }, extra || {}); }
+  // A cookie session has no token to send; an empty "Bearer " is noise.
+  function headers(extra) { return Object.assign(token ? { "Authorization": "Bearer " + token } : {}, extra || {}); }
   async function api(path, opts) {
     const init = Object.assign({}, opts || {});
     init.headers = headers(init.headers || {});   // never let caller headers drop the token
     init.credentials = "same-origin";             // and the session cookie rides along
     const r = await fetch(path, init);
-    if (r.status === 401) { showLogin("Token rejected"); throw new Error("unauthorised"); }
+    if (r.status === 401) { sessionActive = false; showLogin("Token rejected"); throw new Error("unauthorised"); }
     const text = await r.text();
     let data; try { data = JSON.parse(text); } catch (e) { data = { raw: text }; }
     if (!r.ok) throw new Error((data && data.error) || ("HTTP " + r.status));
@@ -655,26 +656,28 @@
           + '<button class="btn" data-ok="1">Accept</button>'
           + '<button class="ghost">Decline</button></div>';
         const [ok, no] = li.querySelectorAll("button");
-        ok.onclick = () => decideProposal(i, true);
-        no.onclick = () => decideProposal(i, false);
+        // By id: i is a position in this slice, not in the agent's list.
+        ok.onclick = () => decideProposal(p.id, true, i);
+        no.onclick = () => decideProposal(p.id, false, i);
       }
       list.appendChild(li);
     });
   }
 
-  window.decideProposal = async function (index, accepted) {
-    const box = $("pr-" + index);
+  window.decideProposal = async function (id, accepted, row) {
+    const box = $("pr-" + row);
     const reason = box ? box.value.trim() : "";
     try {
       await api("/proposals/decide", { method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ index, accepted, reason }) });
+        body: JSON.stringify({ id, accepted, reason }) });
       refresh();
     } catch (e) { alert("Could not record that: " + e.message); }
   };
 
   async function refresh() {
-    if (!token) { showLogin(""); return; }
+    // A cookie session is a login too; boot() sets sessionActive for it.
+    if (!token && !sessionActive) { showLogin(""); return; }
     try {
       const [status, goals, hist, brain, props] = await Promise.all([api("/status"), api("/goals"), api("/history?limit=30"), api("/brain"), api("/proposals")]);
       $("agentName").textContent = status.name || "Jarvis";
@@ -1214,7 +1217,8 @@
   function uploadFile(file) {
     return new Promise((resolve, reject) => {
       const xhr = new XMLHttpRequest(); xhr.open("POST", "/upload");
-      xhr.setRequestHeader("Authorization", "Bearer " + token); xhr.setRequestHeader("X-Filename", file.name);
+      if (token) xhr.setRequestHeader("Authorization", "Bearer " + token);
+      xhr.setRequestHeader("X-Filename", file.name);
       xhr.setRequestHeader("Content-Type", "application/octet-stream");
       const bar = document.querySelector(".bar"); bar.style.display = "block";
       xhr.upload.onprogress = e => { if (e.lengthComputable) $("barFill").style.width = Math.round(100 * e.loaded / e.total) + "%"; };

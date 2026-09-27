@@ -603,8 +603,10 @@ class AgentCore:
         except Exception:
             return
         for row in reversed(rows):
-            self.proposals.append({"ts": row.get("ts"), "cycle": row.get("cycle"),
-                                   "text": row.get("text"), "restored": True})
+            entry = {"ts": row.get("ts"), "cycle": row.get("cycle"),
+                     "text": row.get("text"), "restored": True}
+            entry["id"] = self.proposal_id(entry)
+            self.proposals.append(entry)
 
     def _record_proposal(self, decision, task) -> dict:
         """A change the agent wanted to make and was not allowed to make.
@@ -615,6 +617,7 @@ class AgentCore:
         """
         command = (task.metadata or {}).get("command") or ""
         entry = {
+            "id": self._new_proposal_id(),
             "ts": time.time(),
             "cycle": self.cycle_count,
             "description": task.description[:300],
@@ -643,6 +646,7 @@ class AgentCore:
         meta = task.metadata or {}
         what = " ".join(str(meta.get(k) or "") for k in ("kind", "ref", "text")).strip()
         entry = {
+            "id": self._new_proposal_id(),
             "ts": time.time(),
             "cycle": self.cycle_count,
             "description": f"Browser: {task.description}"[:300],
@@ -745,7 +749,8 @@ class AgentCore:
             current = existing.get("description") or existing.get("text") or ""
             if " ".join(str(current).lower().split()) == norm:
                 return None
-        entry = {"ts": time.time(), "cycle": self.cycle_count,
+        entry = {"id": self._new_proposal_id(),
+                 "ts": time.time(), "cycle": self.cycle_count,
                  "description": text, "command": "", "goal": "",
                  "reasoning": str(decision.reasoning or "")[:500],
                  "rung": self.rung, "stated": True}
@@ -1625,8 +1630,28 @@ class AgentCore:
                                       "action": "withdraw_goal", "description": text[:300]})
         return True
 
-    def decide_proposal(self, index: int, accepted: bool,
-                        reason: str = "") -> Optional[dict]:
+    @staticmethod
+    def _new_proposal_id() -> str:
+        return "p-" + os.urandom(8).hex()
+
+    @staticmethod
+    def proposal_id(entry: dict) -> str:
+        """The proposal's id: its own, or one derived from its time and text.
+
+        Entries filed before ids existed, and any appended by hand, have
+        none. Deriving it from what the entry says rather than where it sits
+        means it does not move when the bounded list drops an old one.
+        """
+        own = entry.get("id")
+        if own:
+            return str(own)
+        text = entry.get("text") or entry.get("description") or ""
+        digest = hashlib.sha256(f"{entry.get('ts')!r}\x00{text}".encode("utf-8"))
+        return "p-" + digest.hexdigest()[:16]
+
+    def decide_proposal(self, index: Optional[int], accepted: bool,
+                        reason: str = "",
+                        proposal_id: Optional[str] = None) -> Optional[dict]:
         """The operator's verdict on a change the agent wanted to make.
 
         Until this existed, proposals went one way. The agent filed them, they
@@ -1643,20 +1668,35 @@ class AgentCore:
         An accepted proposal does NOT run. Acceptance says the agent was right
         to want it, which is what it needs to learn from; carrying it out is a
         separate act, and one that a click in a web UI should not trigger.
+
+        ``proposal_id``, when given, names the proposal and ``index`` is
+        ignored. A position is only safe from a caller holding the same list:
+        the UI shows a slice of it, and the list is bounded, so positions
+        shift between reading it and answering.
         """
         self.note_operator("proposal decided")
         items = list(self.proposals)
-        if not items or not (0 <= int(index) < len(items)):
-            return None
-        proposal = dict(items[int(index)])
+        if proposal_id is not None:
+            wanted = str(proposal_id)
+            position = next((i for i, p in enumerate(items)
+                             if self.proposal_id(p) == wanted), None)
+            if position is None:
+                return None
+        else:
+            if index is None or not items or not (0 <= int(index) < len(items)):
+                return None
+            position = int(index)
+        proposal = dict(items[position])
         if proposal.get("decision"):
             return None                          # already answered; not a toggle
         verdict = "accepted" if accepted else "declined"
         note = (reason or "").strip()[:300]
+        # Kept on the entry, so a derived id stays the one the operator saw.
+        proposal["id"] = self.proposal_id(proposal)
         proposal["decision"] = verdict
         proposal["decision_reason"] = note or None
         proposal["decided_at"] = time.time()
-        self.proposals[int(index)] = proposal
+        self.proposals[position] = proposal
 
         text = proposal.get("text") or proposal.get("description") or ""
         summary = f"Operator {verdict} the proposal: {str(text)[:220]}"
