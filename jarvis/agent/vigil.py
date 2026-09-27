@@ -361,11 +361,18 @@ class Vigil:
 
         # Asleep.
         if self._pending_wake:
-            kind, detail = self._take_pending()
+            kind = self._pending_wake.partition("|")[0]
             # A wake still has to respect the floor, or a chatty observation
             # stream would hold the copy warm exactly as before. The operator
             # is the exception: a person never waits on the meter.
+            #
+            # A wake the floor refuses stays pending rather than being taken.
+            # observe() only asks again when two digests differ, so a change
+            # that arrives early in a sleep and then persists -- disk from 50%
+            # to 95% thirty seconds in -- would otherwise wait for the
+            # heartbeat, an hour later, instead of the first tick after the floor.
             if kind == WAKE_OPERATOR or now - self.last_sleep_at >= self.min_sleep_s:
+                kind, detail = self._take_pending()
                 return self._wake(now, kind, detail)
         # Measured from when it went to sleep, not from the last wake. A
         # stretch spent awake and working is not a stretch that needs a

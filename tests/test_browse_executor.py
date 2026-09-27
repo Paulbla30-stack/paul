@@ -52,6 +52,11 @@ class FakeView:
 
 def executor(view=None):
     ex = TaskExecutor(dict(NO_HW), AgentMemory(), LOG)
+    # As production runs it (config-aws.yaml): proposer, with browse_act
+    # granted. The executor now checks the mandate for browse_act itself, so
+    # an unconfigured executor refuses it before the handler is reached.
+    ex.rung = "proposer"
+    ex.grants = frozenset({"browse_act"})
     ex.browser = view
     return ex
 

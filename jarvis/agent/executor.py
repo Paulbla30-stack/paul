@@ -342,6 +342,13 @@ class TaskExecutor:
                 "error": f"No handler for task type: {task.task_type}",
             }
 
+        refusal = self._mandate_refusal(task)
+        if refusal:
+            self.log.warning("Task outside mandate (%s): %s",
+                             getattr(task.task_type, "value", task.task_type), refusal)
+            task.status = TaskStatus.FAILED
+            return {"success": False, "error": f"outside mandate: {refusal}"}
+
         try:
             result = handler(task)
             task.status = TaskStatus.COMPLETED
@@ -933,6 +940,31 @@ class TaskExecutor:
         verdict = authority.review(task, authority.normalise_rung(self.rung),
                                   getattr(self, "grants", ()))
         return None if verdict.allowed else verdict.reason
+
+    def _mandate_refusal(self, task: Task):
+        """The backstop, applied to every tool that changes the machine.
+
+        _authority_refusal used to be reached only from the shell handler, so
+        maintenance and browse_act had no second check, and the rule
+        planner's maintenance tasks reach act() without passing the decision
+        path's review at all. Any tool the register marks CHANGE is now
+        checked here, before its handler runs, with operator grants honoured
+        exactly as review() honours them.
+
+        shell_command keeps its own check inside its handler, where the
+        command is classified. A task type missing from the register is
+        checked too: not knowing what a tool does is not knowing it only reads.
+        """
+        if task.task_type == TaskType.SHELL_COMMAND:
+            return None
+        try:
+            from jarvis.agent import tools
+            tool = tools.get(getattr(task.task_type, "value", ""))
+            if tool is not None and tool.effect == tools.READ:
+                return None
+        except Exception:
+            pass
+        return self._authority_refusal(task)
 
     def _handle_shell_command(self, task: Task) -> dict:
         """Run a planner-chosen shell command under the shell policy."""
