@@ -280,7 +280,7 @@ class HeadlessRunner:
         # loop, and it must be paced like idling rather than like work. The
         # rule planner answers a standing goal with a goal_step every time it
         # is asked, and a goal_step's whole effect is to write
-        # {"progressed": true}. Before the vigil the brain interrupted that
+        # {"progressed": true}. Before the watch the brain interrupted that
         # every few minutes with a real idle, which reset the pacing; once the
         # brain sleeps, nothing does, and the loop spins at one cycle a second
         # writing 7,000 ledger entries an hour about its own heartbeat.

@@ -471,7 +471,7 @@ class TestRepeatPacing(unittest.TestCase):
 
     The rule planner answers a standing goal with a goal_step every time it is
     asked, and a goal_step's whole effect is to write {"progressed": true}.
-    Before the vigil, the brain interrupted that every few minutes with a real
+    Before the watch, the brain interrupted that every few minutes with a real
     idle, which reset the pacing. Once the brain sleeps nothing does, and the
     live box was measured spinning at one cycle a second, writing 7,120 ledger
     entries an hour about its own heartbeat.

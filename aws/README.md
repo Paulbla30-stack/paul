@@ -320,9 +320,9 @@ encrypted gp3). It carries everything the
 previous image did -- the permission spine, filesystem grounding, durable memory
 with consolidation, ledger-derived self-knowledge, the operator channel, estate
 reporting, the standing system goals, the responsive UI and `cloudflared` -- plus
-the vigil and the work of 20 September:
+the watch and the work of 20 September:
 
-- **the vigil** (`jarvis/agent/vigil.py`): the agent sleeps, and is woken by the
+- **the watch** (`jarvis/agent/watch.py`): the agent sleeps, and is woken by the
   operator, by a material change in its observations, or on a heartbeat;
 - **filesystem usage in the planner's context**, which it had never been able to
   see despite holding a standing goal about it;

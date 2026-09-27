@@ -1,4 +1,4 @@
-"""Tests for the vigil: when the agent thinks, and when it goes quiet.
+"""Tests for the watch: when the agent thinks, and when it goes quiet.
 
 The bug these exist to prevent is specific and it already happened. The loop
 backed off when idle, capped at 300s, and 300s is roughly how long Bedrock
@@ -16,7 +16,7 @@ backwards.
 import logging
 import unittest
 
-from jarvis.agent.vigil import (AWAKE, ASLEEP, NullVigil, Vigil, build, digest,
+from jarvis.agent.watch import (AWAKE, ASLEEP, NullWatch, Watch, build, digest,
                                 salient_change, WAKE_HEARTBEAT, WAKE_OPERATOR,
                                 WAKE_SALIENCE)
 
@@ -51,7 +51,7 @@ def make(clock=None, **overrides):
     }
     cfg.update(overrides)
     clock = clock or FakeClock()
-    return Vigil(cfg, logger=LOG, clock=clock), clock
+    return Watch(cfg, logger=LOG, clock=clock), clock
 
 
 class TestFallingAsleep(unittest.TestCase):
@@ -115,7 +115,7 @@ class TestWaking(unittest.TestCase):
             v.note_call()
         clock.advance(181)
         v.tick()
-        assert v.state == ASLEEP, "fixture failed to put the vigil to sleep"
+        assert v.state == ASLEEP, "fixture failed to put the watch to sleep"
 
     def test_operator_wakes_it_immediately(self):
         """A person waiting costs more than the model being warm."""
@@ -252,7 +252,7 @@ class TestTheGate(unittest.TestCase):
                 allowed += 1
         self.assertEqual(allowed, 3)
 
-    def test_disabled_vigil_never_blocks(self):
+    def test_disabled_watch_never_blocks(self):
         v, clock = make(enabled=False)
         for _ in range(50):
             clock.advance(600)
@@ -287,7 +287,7 @@ class TestWarmTime(unittest.TestCase):
         gate disabled, to show the cost of the behaviour we replaced.
         """
         v, clock = make(enabled=False)
-        v = Vigil({"enabled": True, "warm_window_s": 300.0, "burst_calls": 10_000,
+        v = Watch({"enabled": True, "warm_window_s": 300.0, "burst_calls": 10_000,
                    "idle_after_s": 10_000, "burst_window_s": 0}, logger=LOG, clock=clock)
         start = clock.t
         for _ in range(12):
@@ -402,16 +402,16 @@ class TestConfiguration(unittest.TestCase):
         v, _ = make(warm_window_s=300.0, min_sleep_s=5.0)
         self.assertEqual(v.min_sleep_s, 300.0)
 
-    def test_build_returns_null_vigil_when_disabled(self):
-        self.assertIsInstance(build({"enabled": False}), NullVigil)
-        self.assertIsInstance(build(None), NullVigil)
-        self.assertIsInstance(build({}), NullVigil)
+    def test_build_returns_null_watch_when_disabled(self):
+        self.assertIsInstance(build({"enabled": False}), NullWatch)
+        self.assertIsInstance(build(None), NullWatch)
+        self.assertIsInstance(build({}), NullWatch)
 
-    def test_build_returns_a_vigil_when_enabled(self):
-        self.assertIsInstance(build({"enabled": True}), Vigil)
+    def test_build_returns_a_watch_when_enabled(self):
+        self.assertIsInstance(build({"enabled": True}), Watch)
 
-    def test_null_vigil_is_always_awake_and_never_blocks(self):
-        n = NullVigil()
+    def test_null_watch_is_always_awake_and_never_blocks(self):
+        n = NullWatch()
         self.assertTrue(n.may_call())
         self.assertEqual(n.state, AWAKE)
         self.assertIsNone(n.tick())
@@ -481,7 +481,7 @@ class FakeLedger:
 
 
 class TestWiredIntoTheAgent(unittest.TestCase):
-    """The parts that only matter once the vigil is attached to real objects."""
+    """The parts that only matter once the watch is attached to real objects."""
 
     def build(self, **sleep):
         from jarvis.agent.core import AgentCore
@@ -495,29 +495,29 @@ class TestWiredIntoTheAgent(unittest.TestCase):
         agent.planner._boot_tasks_generated = True
         return agent, ledger
 
-    def test_the_agent_gets_a_real_vigil_when_configured(self):
+    def test_the_agent_gets_a_real_watch_when_configured(self):
         agent, _ = self.build()
-        self.assertTrue(agent.vigil.enabled)
-        self.assertEqual(agent.vigil.state, AWAKE)
+        self.assertTrue(agent.watch.enabled)
+        self.assertEqual(agent.watch.state, AWAKE)
 
-    def test_the_agent_gets_a_null_vigil_when_not_configured(self):
+    def test_the_agent_gets_a_null_watch_when_not_configured(self):
         from jarvis.agent.core import AgentCore
         agent = AgentCore({"name": "t", "profile": "cloud"},
                           {"display": None, "input": None, "memory": None, "storage": None}, LOG)
-        self.assertIsInstance(agent.vigil, NullVigil)
-        self.assertTrue(agent.vigil.may_call())
+        self.assertIsInstance(agent.watch, NullWatch)
+        self.assertTrue(agent.watch.may_call())
 
     def test_sleep_and_wake_reach_the_ledger(self):
         agent, ledger = self.build()
         clock = FakeClock()
-        agent.vigil = Vigil({"enabled": True, "burst_calls": 1, "idle_after_s": 60,
+        agent.watch = Watch({"enabled": True, "burst_calls": 1, "idle_after_s": 60,
                              "warm_window_s": 300, "heartbeat_s": 3600},
                             logger=LOG, clock=clock)
-        agent.vigil.may_call()
-        agent.vigil.note_call()
+        agent.watch.may_call()
+        agent.watch.note_call()
         clock.advance(61)
-        agent.vigil.tick()
-        agent._record_vigil()
+        agent.watch.tick()
+        agent._record_watch()
         recorded = ledger.kinds("vigil")
         self.assertEqual(len(recorded), 1)
         self.assertEqual(recorded[0]["state"], ASLEEP)
@@ -531,47 +531,47 @@ class TestWiredIntoTheAgent(unittest.TestCase):
     def test_note_operator_wakes_a_sleeping_agent(self):
         agent, ledger = self.build()
         clock = FakeClock()
-        agent.vigil = Vigil({"enabled": True, "burst_calls": 1, "idle_after_s": 60,
+        agent.watch = Watch({"enabled": True, "burst_calls": 1, "idle_after_s": 60,
                              "warm_window_s": 300, "heartbeat_s": 3600},
                             logger=LOG, clock=clock)
-        agent.vigil.may_call()
-        agent.vigil.note_call()
+        agent.watch.may_call()
+        agent.watch.note_call()
         clock.advance(61)
-        agent.vigil.tick()
-        self.assertEqual(agent.vigil.state, ASLEEP)
+        agent.watch.tick()
+        self.assertEqual(agent.watch.state, ASLEEP)
         agent.note_operator("chat")
-        self.assertEqual(agent.vigil.state, AWAKE)
-        self.assertIn("operator", agent.vigil.wake_reason)
+        self.assertEqual(agent.watch.state, AWAKE)
+        self.assertIn("operator", agent.watch.wake_reason)
         self.assertTrue(any(b["state"] == AWAKE for b in ledger.kinds("vigil")))
 
     def test_adding_a_goal_wakes_it(self):
         agent, _ = self.build()
         clock = FakeClock()
-        agent.vigil = Vigil({"enabled": True, "burst_calls": 1, "idle_after_s": 60,
+        agent.watch = Watch({"enabled": True, "burst_calls": 1, "idle_after_s": 60,
                              "warm_window_s": 300}, logger=LOG, clock=clock)
-        agent.vigil.may_call()
-        agent.vigil.note_call()
+        agent.watch.may_call()
+        agent.watch.note_call()
         clock.advance(61)
-        agent.vigil.tick()
-        self.assertEqual(agent.vigil.state, ASLEEP)
+        agent.watch.tick()
+        self.assertEqual(agent.watch.state, ASLEEP)
         agent.add_goal("look at the disk", 3)
-        self.assertEqual(agent.vigil.state, AWAKE)
+        self.assertEqual(agent.watch.state, AWAKE)
 
     def test_status_reports_warm_time(self):
         agent, _ = self.build()
         status = agent.get_status()
-        self.assertIn("vigil", status)
-        self.assertIn("warm_seconds", status["vigil"])
+        self.assertIn("watch", status)
+        self.assertIn("warm_seconds", status["watch"])
 
     def test_a_cycle_runs_and_records_state(self):
         agent, _ = self.build()
         result = agent.run_cycle()
-        self.assertIn("vigil", result)
-        self.assertIn(result["vigil"], (AWAKE, ASLEEP))
+        self.assertIn("watch", result)
+        self.assertIn(result["watch"], (AWAKE, ASLEEP))
 
 
 class TestTheBrainGate(unittest.TestCase):
-    """should_plan must refuse while asleep, and only for the vigil's reason."""
+    """should_plan must refuse while asleep, and only for the watch's reason."""
 
     def make_brain(self, **cfg):
         from jarvis.brain.bedrock import BedrockBrain
@@ -597,12 +597,12 @@ class TestTheBrainGate(unittest.TestCase):
         brain = self.make_brain()
         self.assertTrue(brain.should_plan(1))
 
-    def test_an_attached_sleeping_vigil_closes_the_gate(self):
+    def test_an_attached_sleeping_watch_closes_the_gate(self):
         clock = FakeClock()
         brain = self.make_brain()
-        v = Vigil({"enabled": True, "burst_calls": 1, "idle_after_s": 60,
+        v = Watch({"enabled": True, "burst_calls": 1, "idle_after_s": 60,
                    "warm_window_s": 300, "heartbeat_s": 3600}, logger=LOG, clock=clock)
-        brain.attach_vigil(v)
+        brain.attach_watch(v)
         self.assertTrue(brain.should_plan(1))
         v.note_call()
         clock.advance(61)
@@ -614,20 +614,20 @@ class TestTheBrainGate(unittest.TestCase):
         """Every kind of call warms the copy, so all of them go through one place."""
         clock = FakeClock()
         brain = self.make_brain()
-        v = Vigil({"enabled": True, "warm_window_s": 300, "burst_calls": 10},
+        v = Watch({"enabled": True, "warm_window_s": 300, "burst_calls": 10},
                   logger=LOG, clock=clock)
-        brain.attach_vigil(v)
+        brain.attach_watch(v)
         self.assertTrue(brain._take_budget())
         clock.advance(1000)
         self.assertAlmostEqual(v.warm_seconds(), 300.0, places=1)
 
     def test_the_gate_is_asked_last(self):
-        """A call blocked by the hourly budget was never the vigil's to suppress."""
+        """A call blocked by the hourly budget was never the watch's to suppress."""
         clock = FakeClock()
         brain = self.make_brain(max_calls_per_hour=1)
-        v = Vigil({"enabled": True, "burst_calls": 10, "warm_window_s": 300},
+        v = Watch({"enabled": True, "burst_calls": 10, "warm_window_s": 300},
                   logger=LOG, clock=clock)
-        brain.attach_vigil(v)
+        brain.attach_watch(v)
         brain._take_budget()                    # hourly budget now spent
         self.assertFalse(brain.should_plan(1))
         self.assertEqual(v.stats["calls_suppressed"], 0)
@@ -636,9 +636,9 @@ class TestTheBrainGate(unittest.TestCase):
         from jarvis.agent.core import AgentCore
         clock = FakeClock()
         brain = self.make_brain()
-        v = Vigil({"enabled": True, "burst_calls": 2, "warm_window_s": 300},
+        v = Watch({"enabled": True, "burst_calls": 2, "warm_window_s": 300},
                   logger=LOG, clock=clock)
-        brain.attach_vigil(v)
+        brain.attach_watch(v)
         agent = AgentCore({"name": "t", "profile": "cloud"},
                           {"display": None, "input": None, "memory": None, "storage": None},
                           LOG, brain=brain)
@@ -647,7 +647,7 @@ class TestTheBrainGate(unittest.TestCase):
         self.assertIn("rest", context)
         self.assertIn("put to sleep", context["rest"]["you_sleep"])
 
-    def test_no_rest_block_without_a_vigil(self):
+    def test_no_rest_block_without_a_watch(self):
         from jarvis.agent.core import AgentCore
         brain = self.make_brain()
         agent = AgentCore({"name": "t", "profile": "cloud"},
@@ -703,8 +703,8 @@ class TestTheWarmFractionIsNotReadTooEarly(unittest.TestCase):
         clock.advance(120)
         self.assertEqual(v.status()["uptime_s"], 120)
 
-    def test_null_vigil_reports_no_fraction(self):
-        self.assertIsNone(NullVigil().status()["warm_fraction"])
+    def test_null_watch_reports_no_fraction(self):
+        self.assertIsNone(NullWatch().status()["warm_fraction"])
 
 
 class TestBandingIsProportionalForBigNumbers(unittest.TestCase):

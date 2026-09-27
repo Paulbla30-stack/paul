@@ -94,21 +94,21 @@ if isinstance(calls, int) and isinstance(cap, int) and cap:
 # An imported model bills per minute a copy is warm, not per call, so warm
 # time is the number that predicts the invoice. A high call count clustered
 # into one burst is cheap; a low one spread evenly is what cost 200 USD a day.
-vigil = d.get("vigil") or brain.get("vigil") or {}
-if vigil.get("enabled"):
-    warm_s = vigil.get("warm_seconds") or 0
-    frac = vigil.get("warm_fraction")
-    state = vigil.get("state", "?")
-    detail = "%s (%s)" % (state, vigil.get("wake_reason") or "no reason recorded")
+watch = d.get("watch") or brain.get("watch") or {}
+if watch.get("enabled"):
+    warm_s = watch.get("warm_seconds") or 0
+    frac = watch.get("warm_fraction")
+    state = watch.get("state", "?")
+    detail = "%s (%s)" % (state, watch.get("wake_reason") or "no reason recorded")
     if state == "asleep":
-        until = vigil.get("asleep_until_next_heartbeat_s")
+        until = watch.get("asleep_until_next_heartbeat_s")
         if isinstance(until, int):
             detail += ", next heartbeat in %dm" % (until // 60)
     note("Planner rest", detail)
     note("Model warm time", "%dm total%s" % (
         warm_s // 60,
         (" (%.1f%% of uptime)" % (100.0 * frac)) if isinstance(frac, float) else ""))
-    vstats = vigil.get("stats") or {}
+    vstats = watch.get("stats") or {}
     note("Sleep cycles", "%s sleeps, %s wakes (%s operator, %s salience, %s heartbeat)" % (
         vstats.get("sleeps"), vstats.get("wakes"), vstats.get("wakes_operator"),
         vstats.get("wakes_salience"), vstats.get("wakes_heartbeat")))
@@ -117,7 +117,7 @@ if vigil.get("enabled"):
               "taking effect" % (100.0 * frac))
     elif frac is None:
         # Too soon to read: every restart opens with a burst of boot planning.
-        wait = vigil.get("warm_fraction_after_s")
+        wait = watch.get("warm_fraction_after_s")
         note("Model warm share", "not yet meaningful%s" % (
             ", readable in %dm" % (wait // 60) if isinstance(wait, int) else ""))
 else:

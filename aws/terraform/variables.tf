@@ -104,7 +104,7 @@ variable "llm_provider" {
   # `provider=bedrock model=qwen.qwen3-235b-a22b-2507-v1:0` and the instance
   # role's bedrock policy is in the state file. There is no Anthropic key
   # anywhere and Paul's decision, 23 September 2026, is that there will not be
-  # one -- the models come through the instance role, where the vigil gates
+  # one -- the models come through the instance role, where the watch gates
   # them and the ledger records them.
   #
   # The old default did more than mislabel. It made the llm_key data source

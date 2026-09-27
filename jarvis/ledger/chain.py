@@ -51,6 +51,9 @@ GENESIS_PREV = "0" * 64
 #   consolidation  the agent reorganising its own memory
 KINDS = ("genesis", "thought", "decision", "gate", "action", "outcome", "alert",
          "notification", "consolidation", "vigil", "verdict", "question")
+# "vigil" is a sleep/wake transition of the watch (agent/watch.py), which
+# was called the vigil when the kind was added. It does not mean the agent,
+# whose name became Vigil on 27 September 2026. Kinds never change.
 MAX_BODY_BYTES = 65536
 
 

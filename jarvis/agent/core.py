@@ -137,15 +137,15 @@ class AgentCore:
         # When the agent thinks, and when it lets itself go quiet. An imported
         # model bills per minute that a copy is warm, not per call, so the cost
         # of thinking is the length of the silences between thoughts. The loop
-        # keeps running on the rule planner while the model rests; see vigil.py.
-        from jarvis.agent.vigil import build as _build_vigil
-        self.vigil = _build_vigil(config.get("sleep") or {}, self.log)
-        # Only attach a real one. Handing the brain a NullVigil here would
-        # silently undo a vigil attached to it from outside, and "sleeping
+        # keeps running on the rule planner while the model rests; see watch.py.
+        from jarvis.agent.watch import build as _build_watch
+        self.watch = _build_watch(config.get("sleep") or {}, self.log)
+        # Only attach a real one. Handing the brain a NullWatch here would
+        # silently undo a watch attached to it from outside, and "sleeping
         # quietly switched itself off" is the one failure this must not have.
-        if self.brain is not None and getattr(self.vigil, "enabled", False):
+        if self.brain is not None and getattr(self.watch, "enabled", False):
             try:
-                self.brain.attach_vigil(self.vigil)
+                self.brain.attach_watch(self.watch)
             except AttributeError:      # a stub brain in a test
                 pass
         # Behavioural self-knowledge: aggregates over the ledger, which the
@@ -1119,8 +1119,8 @@ class AgentCore:
         # The cheap planner is still looking while the model rests; this is
         # what lets a sleeping agent stay responsive to the machine without
         # paying to keep a 32B model warm to notice a disk filling up.
-        self.vigil.observe(observations)
-        self._record_vigil()
+        self.watch.observe(observations)
+        self._record_watch()
 
         # 2. Plan
         task = self.planner.get_next_task()
@@ -1128,21 +1128,21 @@ class AgentCore:
             task = self.plan(observations)
         if task is None:
             cycle_result["action"] = "idle"
-            self.vigil.note_idle()
-            cycle_result["vigil"] = self.vigil.state
-            self._record_vigil()
+            self.watch.note_idle()
+            cycle_result["watch"] = self.watch.state
+            self._record_watch()
             return cycle_result
 
         # 3. Act
-        self.vigil.note_work()
+        self.watch.note_work()
         result = self.act(task)
         cycle_result["action"] = task.description
         cycle_result["result"] = result
 
         # 4. Reflect
         self.reflect(task, result)
-        cycle_result["vigil"] = self.vigil.state
-        self._record_vigil()
+        cycle_result["watch"] = self.watch.state
+        self._record_watch()
 
         return cycle_result
 
@@ -1154,12 +1154,12 @@ class AgentCore:
         makes its operator wait to save a few pence has the trade backwards.
         """
         try:
-            self.vigil.note_activity(what)
-            self._record_vigil()
+            self.watch.note_activity(what)
+            self._record_watch()
         except Exception as e:
-            self.log.debug("vigil wake failed for %s: %s", what, e)
+            self.log.debug("watch wake failed for %s: %s", what, e)
 
-    def _record_vigil(self):
+    def _record_watch(self):
         """Put any sleep/wake crossing on the ledger.
 
         The record should show why the agent was not thinking as clearly as it
@@ -1167,15 +1167,19 @@ class AgentCore:
         able from a crash, and a reader deserves better than having to guess.
         """
         while True:
-            transition = self.vigil.take_transition()
+            transition = self.watch.take_transition()
             if transition is None:
                 return
             try:
                 body = dict(transition)
                 body["cycle"] = self.cycle_count
+                # The ledger kind is still "vigil": the format's kinds are fixed, and
+                # the mechanism was called the vigil when it was added. On the
+                # ledger, "vigil" means a sleep/wake transition of the watch, never
+                # the agent, whose name became Vigil on 27 September 2026.
                 self.ledger.record("vigil", body)
             except Exception as e:      # resting is never worth losing a cycle over
-                self.log.warning("could not record vigil transition: %s", e)
+                self.log.warning("could not record watch transition: %s", e)
                 return
 
     def add_goal(self, description: str, priority: int = 5):
@@ -1773,7 +1777,7 @@ class AgentCore:
             "notify": self.notifier.status(),
             # Warm minutes, not call count: the meter on an imported model
             # runs on the former, so that is what belongs in front of a reader.
-            "vigil": self.vigil.status(),
+            "watch": self.watch.status(),
             # Whether a behaviour-lab window is open, and nothing about what
             # is in it. /status has no token on it, and the fact that the lab
             # is running is what a reader of a status page needs: an answer

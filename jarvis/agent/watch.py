@@ -1,4 +1,4 @@
-"""The vigil: when the agent thinks, and when it lets itself go quiet.
+"""The watch: when the agent thinks, and when it lets itself go quiet.
 
 Every planner this agent has ever used charged by the call, so the loop was
 built to spread calls out: an idle streak lengthened the wait, and the wait
@@ -186,7 +186,7 @@ def salient_change(previous: Optional[dict], current: Optional[dict]) -> str:
     return ""
 
 
-class Vigil:
+class Watch:
     """Decides whether the model may be called this cycle.
 
     Construct once and drive it from the loop: report what happened
@@ -521,7 +521,7 @@ class Vigil:
                       "calls_used": self._burst_used, "cold_in_s": round(cold_in)}
         self._transitions.append(transition)
         if self.log:
-            self.log.info("vigil: asleep (%s) after %ds awake and %d call(s); "
+            self.log.info("watch: asleep (%s) after %ds awake and %d call(s); "
                           "model copy goes cold in %ds",
                           why, transition["awake_s"], self._burst_used, round(cold_in))
         return transition
@@ -544,11 +544,11 @@ class Vigil:
         transition = {"state": AWAKE, "reason": self.wake_reason, "slept_s": round(slept)}
         self._transitions.append(transition)
         if self.log:
-            self.log.info("vigil: awake (%s) after %ds asleep", self.wake_reason, round(slept))
+            self.log.info("watch: awake (%s) after %ds asleep", self.wake_reason, round(slept))
         return transition
 
 
-class NullVigil:
+class NullWatch:
     """Always awake. Used when sleeping is switched off or unconfigured."""
 
     enabled = False
@@ -570,8 +570,8 @@ class NullVigil:
 
 
 def build(config: Optional[dict], logger=None, clock=time.time):
-    """Return a Vigil, or a NullVigil when sleeping is disabled."""
+    """Return a Watch, or a NullWatch when sleeping is disabled."""
     cfg = dict(config or {})
     if not cfg or not cfg.get("enabled", False):
-        return NullVigil()
-    return Vigil(cfg, logger=logger, clock=clock)
+        return NullWatch()
+    return Watch(cfg, logger=logger, clock=clock)

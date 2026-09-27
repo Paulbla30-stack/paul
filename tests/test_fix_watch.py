@@ -1,4 +1,4 @@
-"""Regression test for the vigil losing a salience wake to the sleep floor.
+"""Regression test for the watch losing a salience wake to the sleep floor.
 
 tick() used to take the pending wake before checking min_sleep_s. When the
 floor refused it, the wake was gone, and observe() only asks again when two
@@ -9,9 +9,9 @@ then stayed put was not acted on until the hourly heartbeat.
 import logging
 import unittest
 
-from jarvis.agent.vigil import ASLEEP, AWAKE, Vigil
+from jarvis.agent.watch import ASLEEP, AWAKE, Watch
 
-LOG = logging.getLogger("test.fix_vigil")
+LOG = logging.getLogger("test.fix_watch")
 LOG.addHandler(logging.NullHandler())
 
 
@@ -26,9 +26,9 @@ class FakeClock:
         self.t += float(seconds)
 
 
-def asleep_vigil():
+def asleep_watch():
     clock = FakeClock()
-    v = Vigil({"enabled": True, "warm_window_s": 300.0, "idle_after_s": 180.0,
+    v = Watch({"enabled": True, "warm_window_s": 300.0, "idle_after_s": 180.0,
                "heartbeat_s": 3600.0, "burst_calls": 6, "burst_window_s": 180.0,
                "quiet_hours": []}, logger=LOG, clock=clock)
     v.observe({"disk": {"used_percent": 50}})
@@ -37,14 +37,14 @@ def asleep_vigil():
         v.note_call()
     clock.advance(181)
     v.tick()
-    assert v.state == ASLEEP, "fixture failed to put the vigil to sleep"
+    assert v.state == ASLEEP, "fixture failed to put the watch to sleep"
     return v, clock
 
 
 class TestAPersistentChangeWakesAfterTheFloor(unittest.TestCase):
 
     def test_the_wake_waits_for_the_floor_and_then_happens(self):
-        v, clock = asleep_vigil()
+        v, clock = asleep_watch()
         clock.advance(30)
         self.assertTrue(v.observe({"disk": {"used_percent": 95}}))
         v.tick()
@@ -60,7 +60,7 @@ class TestAPersistentChangeWakesAfterTheFloor(unittest.TestCase):
         self.assertEqual(v._pending_wake, "")
 
     def test_it_does_not_wait_for_the_heartbeat(self):
-        v, clock = asleep_vigil()
+        v, clock = asleep_watch()
         clock.advance(30)
         v.observe({"disk": {"used_percent": 95}})
         for _ in range(20):                 # ticks every 30s until past the floor
@@ -71,7 +71,7 @@ class TestAPersistentChangeWakesAfterTheFloor(unittest.TestCase):
         self.assertNotIn("heartbeat", v.wake_reason)
 
     def test_the_operator_still_wakes_it_at_once(self):
-        v, clock = asleep_vigil()
+        v, clock = asleep_watch()
         clock.advance(1)
         v.observe({"disk": {"used_percent": 95}})
         v.note_activity("ui message")

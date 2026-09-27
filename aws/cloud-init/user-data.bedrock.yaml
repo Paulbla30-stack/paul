@@ -35,7 +35,7 @@ jarvis:
     # every few minutes paid for every minute of the day:
     #
     #   imported 32B, warm around the clock   ~7,174 USD/month
-    #   imported 32B, with the vigil asleep     ~707 USD/month
+    #   imported 32B, with the watch asleep     ~707 USD/month
     #   catalog 32B, per token, same cadence      ~1.60 USD/month
     #   catalog 235B, per token, same cadence     ~2.35 USD/month
     #
