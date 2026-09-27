@@ -27,7 +27,10 @@ RuntimeDirectoryMode=0700
 # `systemctl edit vigil` with an empty ExecStartPre= to start without it,
 # which is a decision somebody makes rather than a thing that quietly happens.
 ExecStartPre=/usr/local/bin/vigil-refusals
-ExecStart=/usr/local/bin/vigil --headless --extra-config /etc/vigil/cloud.yaml
+# cloud.yaml is rebuilt by the bootstrap at every boot from launch data;
+# local.yaml holds the operator's own settings and is never rebuilt, so it
+# is loaded last. A missing overlay is skipped.
+ExecStart=/usr/local/bin/vigil --headless --extra-config /etc/vigil/cloud.yaml --extra-config /etc/vigil/local.yaml
 Restart=always
 RestartSec=5
 KillSignal=SIGTERM

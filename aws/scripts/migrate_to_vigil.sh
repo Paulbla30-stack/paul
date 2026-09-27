@@ -104,10 +104,20 @@ apply() {
   systemctl mask $OLD_UNITS >/dev/null 2>&1
   systemctl daemon-reload
   systemctl enable vigil-bootstrap.service vigil.service vigil-browser.service vigil-health.timer >/dev/null 2>&1
+  say "operator settings (local.yaml), from the hand-edited cloud.yaml, before the bootstrap rebuilds it"
+  cp -a /etc/vigil/cloud.yaml "/etc/vigil/cloud.yaml.pre-vigil.$STAMP"
+  PYTHONPATH=/usr/lib/vigil python3.11 -m vigil.cloud.local_settings derive \
+      /etc/vigil/cloud.yaml /etc/vigil/local.yaml || { echo "could not write local.yaml"; rollback_now; exit 1; }
   say "bootstrap (writes /etc/vigil/cloud.yaml)"
+  systemctl reset-failed 'vigil*' >/dev/null 2>&1
   systemctl start vigil-bootstrap.service || { echo "bootstrap failed"; rollback_now; exit 1; }
-  grep -q "writer: jarvis" /etc/vigil/cloud.yaml || { echo "cloud.yaml lacks the ledger writer"; rollback_now; exit 1; }
-  if grep -qE "^\s+name: jarvis\s*$" /etc/vigil/cloud.yaml; then echo "cloud.yaml still names the agent jarvis"; rollback_now; exit 1; fi
+  say "effective settings, from the loader the agent uses"
+  eff=$(PYTHONPATH=/usr/lib/vigil python3.11 -m vigil.cloud.local_settings effective \
+      /etc/vigil/config.yaml /etc/vigil/cloud.yaml /etc/vigil/local.yaml) || { echo "could not read settings"; rollback_now; exit 1; }
+  echo "   $eff"
+  want_model=$(PYTHONPATH=/usr/lib/vigil python3.11 -c 'import json,sys,yaml; print((yaml.safe_load(open(sys.argv[1])).get("llm") or {}).get("model",""))' "/etc/vigil/cloud.yaml.pre-vigil.$STAMP")
+  echo "$eff" | python3.11 -c 'import json,sys; e=json.loads(sys.stdin.read()); m=sys.argv[1]; ok = e["name"]=="Vigil" and e["ledger_writer"]=="jarvis" and (not m or e["model"]==m); sys.exit(0 if ok else 1)' "$want_model" \
+      || { echo "settings are not what they must be: name Vigil, writer jarvis, model $want_model"; rollback_now; exit 1; }
   say "boot gate against the new code"
   if ! /usr/local/bin/vigil-refusals > "/tmp/vigil-gate.$STAMP" 2>&1; then
     tail -15 "/tmp/vigil-gate.$STAMP"; echo "GATE FAILED"; rollback_now; exit 1
@@ -121,10 +131,10 @@ apply() {
   ok=1
   for u in vigil vigil-browser cloudflared; do s=$(systemctl is-active $u); echo "   $u: $s"; [ "$s" = active ] || ok=0; done
   T=$(cat /run/vigil/token 2>/dev/null)
-  name=$(curl -s -m 10 -H "Authorization: Bearer $T" http://127.0.0.1:8471/status | python3.11 -c 'import sys,json; d=json.load(sys.stdin); print(d.get("name"))' 2>/dev/null)
+  got=$(curl -s -m 10 -H "Authorization: Bearer $T" http://127.0.0.1:8471/status | python3.11 -c 'import sys,json; d=json.load(sys.stdin); print(d.get("name"), bool((d.get("brain") or {}).get("available")))' 2>/dev/null)
   unset T
-  echo "   status name: $name"
-  [ "$name" = "Vigil" ] || ok=0
+  echo "   status: name and brain available = $got"
+  [ "$got" = "Vigil True" ] || ok=0
   if [ $ok != 1 ]; then journalctl -u vigil --since -60s --no-pager | tail -20; rollback_now; exit 1; fi
   say "done: Vigil is up. Old units masked; old code, unit files and config kept with .pre-vigil.$STAMP"
 }
@@ -132,6 +142,7 @@ apply() {
 rollback_now() {
   say "ROLLING BACK"
   systemctl stop vigil.service vigil-browser.service vigil-health.timer 2>/dev/null
+  systemctl reset-failed 'vigil*' >/dev/null 2>&1
   systemctl disable vigil-bootstrap.service vigil.service vigil-browser.service vigil-health.timer >/dev/null 2>&1
   systemctl unmask $OLD_UNITS >/dev/null 2>&1
   for u in $OLD_UNITS; do
@@ -142,6 +153,10 @@ rollback_now() {
   [ -n "$b" ] && cp -a "$b" /etc/systemd/system/cloudflared.service
   c=$(ls -1t /etc/vigil/config.yaml.pre-vigil.* 2>/dev/null | head -1)
   [ -n "$c" ] && cp -a "$c" /etc/vigil/config.yaml
+  # The bootstrap rebuilt cloud.yaml from launch data; put back the one the
+  # agent was really running on (the lesson of 27 September).
+  c=$(ls -1t /etc/vigil/cloud.yaml.pre-vigil.* 2>/dev/null | head -1)
+  [ -n "$c" ] && cp -a "$c" /etc/vigil/cloud.yaml
   getent passwd vigil-browser >/dev/null && usermod -l jarvis-browser -d /var/lib/jarvis-browser vigil-browser \
     && groupmod -n jarvis-browser vigil-browser
   for m in $MOVES; do
