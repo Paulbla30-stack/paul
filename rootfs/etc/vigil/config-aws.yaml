@@ -374,8 +374,8 @@ documents:
 # Research projects (the Research tab): Plan, Learn, Elevate, Review. With
 # this block present the tab works: Paul can open projects and answer, and
 # Vigil's proposals appear. `enabled` switches on the autonomous cycle,
-# which spends model calls; it is off until Paul decides. Learn has nothing
-# to read until an evidence source (the browser, the scout) is linked.
+# which spends model calls; it is off until Paul decides. Learn reads through
+# the toolbox below, and only as an action plan Paul has approved allows.
 # See docs/research-tab-brief-2026-09-27.md.
 research:
   enabled: false
