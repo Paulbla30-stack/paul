@@ -1,0 +1,53 @@
+# The Heartbeat Framework
+
+> Deployment risk is capability multiplied by culture. Regulation assesses the first term. This estate instruments the second. Twenty-two open-access records on team psychology for the 24-hour organisation, extended to the mixed human–machine shift. Author: Paul Blatherwick, RMN. Licence: CC BY 4.0 (papers), MIT (code).
+
+## Structure
+- Mission: https://heartbeat-framework.org/mission/
+- Argument: https://heartbeat-framework.org/argument/
+- The Moat: https://heartbeat-framework.org/moat/
+- Consultancy & advisory: https://heartbeat-framework.org/advisory/
+- Instruments (eight, in deployment order): https://heartbeat-framework.org/instruments/
+- Papers (twenty-two records): https://heartbeat-framework.org/papers/
+- Implementation: https://heartbeat-framework.org/implementation/
+- Developments: https://heartbeat-framework.org/developments/
+- Sovereignty: https://heartbeat-framework.org/sovereignty/
+
+## Instruments
+- Stage 1 Gate — The Readiness Gate: https://heartbeat-framework.org/instruments/gate/ (record: https://doi.org/10.5281/zenodo.21445040)
+- Stage 2 Screen — The AI Interaction Risk Screen and Change-Over-Time Log: https://heartbeat-framework.org/instruments/screen/ (record: https://doi.org/10.5281/zenodo.21357450)
+- Stage 3 Specify — The Character Specification and Character Vitals: https://heartbeat-framework.org/instruments/specify/ (record: https://doi.org/10.5281/zenodo.21249771)
+- Stage 4 Oversee — Onboarding worksheet, shift card and oversight templates: https://heartbeat-framework.org/instruments/oversee/ (record: https://doi.org/10.5281/zenodo.21279944)
+- Stage 5 Trial — The Floor Test capture sheets: https://heartbeat-framework.org/instruments/trial/ (record: https://doi.org/10.5281/zenodo.21445071)
+- Stage 6 Audit — The Damping Audit: https://heartbeat-framework.org/instruments/audit/ (record: https://doi.org/10.5281/zenodo.21455540)
+- Stage 7 Measure — The AI Interaction Outcome Profile (AIOP): https://heartbeat-framework.org/instruments/measure/ (record: https://doi.org/10.5281/zenodo.21515932)
+- Stage 8 Record — The Glass Ledger: https://heartbeat-framework.org/instruments/record/ (record: https://doi.org/10.5281/zenodo.21515861)
+
+## Records
+- 01. The 24-Hour Team (2026-07-07): https://heartbeat-framework.org/papers/the-24-hour-team/ — https://doi.org/10.5281/zenodo.21243118
+- 02. The Mixed Shift (2026-07-07): https://heartbeat-framework.org/papers/the-mixed-shift/ — https://doi.org/10.5281/zenodo.21245130
+- 03. The Long Handover (2026-07-07): https://heartbeat-framework.org/papers/the-long-handover/ — https://doi.org/10.5281/zenodo.21245205
+- 04. The Character Pathway (2026-07-07): https://heartbeat-framework.org/papers/the-character-pathway/ — https://doi.org/10.5281/zenodo.21249771
+- 05. Same Monsters, New Casings (2026-07-08): https://heartbeat-framework.org/papers/same-monsters-new-casings/ — https://doi.org/10.5281/zenodo.21260388
+- 06. The Endless Shift (2026-07-08): https://heartbeat-framework.org/papers/the-endless-shift/ — https://doi.org/10.5281/zenodo.21264935
+- 07. The Overseer's Bible (2026-07-09): https://heartbeat-framework.org/papers/the-overseers-bible/ — https://doi.org/10.5281/zenodo.21279944
+- 08. The Second Signature (2026-07-09): https://heartbeat-framework.org/papers/the-second-signature/ — https://doi.org/10.5281/zenodo.21282804
+- 09. The Second Pair Of Hands (2026-07-13): https://heartbeat-framework.org/papers/the-second-pair-of-hands/ — https://doi.org/10.5281/zenodo.21340572
+- 10. The AI Interaction Risk Screen (2026-07-14): https://heartbeat-framework.org/papers/the-ai-interaction-risk-screen/ — https://doi.org/10.5281/zenodo.21357450
+- 11. The Cultural Safety Case: Why a licence to deploy is a licence to amplify (2026-07-19): https://heartbeat-framework.org/papers/the-cultural-safety-case/ — https://doi.org/10.5281/zenodo.21443120
+- 12. Before the Machine (2026-07-19): https://heartbeat-framework.org/papers/before-the-machine/ — https://doi.org/10.5281/zenodo.21445040
+- 13. The Floor Test (2026-07-19): https://heartbeat-framework.org/papers/the-floor-test/ — https://doi.org/10.5281/zenodo.21445071
+- 14. The Damping Audit (2026-07-20): https://heartbeat-framework.org/papers/the-damping-audit/ — https://doi.org/10.5281/zenodo.21455540
+- 15. The Glass Ledger (2026-07-23): https://heartbeat-framework.org/papers/the-glass-ledger/ — https://doi.org/10.5281/zenodo.21515861
+- 16. After the Machine (2026-07-23): https://heartbeat-framework.org/papers/after-the-machine/ — https://doi.org/10.5281/zenodo.21515932
+- 17. The Heartbeat Framework: Reading Map (2026-09-27): https://heartbeat-framework.org/papers/reading-map/ — https://doi.org/10.5281/zenodo.22994740
+- 18. The Instrument Deck (2026-08-21): https://heartbeat-framework.org/papers/the-instrument-deck/ — https://doi.org/10.5281/zenodo.22045477
+- 19. The Tenant's Record: Who the system serves when the system is not yours (2026-08-29): https://heartbeat-framework.org/papers/the-tenants-record/ — https://doi.org/10.5281/zenodo.22164015
+- 20. What the Signature Certifies: Four asks for the revision of DCB0129 and DCB0160 (2026-09-15): https://heartbeat-framework.org/papers/what-the-signature-certifies/ — https://doi.org/10.5281/zenodo.22771015
+- 21. Learning Outside the Model (2026-09-27): https://heartbeat-framework.org/papers/learning-outside-the-model/ — https://doi.org/10.5281/zenodo.22994585
+- 22. When the Weights Can Move (2026-09-27): https://heartbeat-framework.org/papers/when-the-weights-can-move/ — https://doi.org/10.5281/zenodo.22994587
+
+## Implementation
+- Learning Outside the Model (preprint, rev. 7, https://doi.org/10.5281/zenodo.22994585) and its companion note When the Weights Can Move (https://doi.org/10.5281/zenodo.22994587): https://heartbeat-framework.org/implementation/
+
+Contact: paulblatherwick@heartbeat-framework.org
