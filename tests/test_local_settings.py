@@ -39,6 +39,11 @@ class TestLocalSettings(unittest.TestCase):
                                "llm": {"provider": "bedrock", "model": "qwen.qwen3-235b-a22b-2507-v1:0"},
                                "ledger": {"writer": "jarvis"}})
 
+    def test_the_memory_backup_bucket_is_carried_too(self):
+        old = dict(HAND_EDITED, cloud={"memory_backup": {"bucket": "jarvis-memory-1-jarvis", "every_s": 3600}})
+        self.assertEqual(local_settings.derive(old)["cloud"], {"memory_backup": {"bucket": "jarvis-memory-1-jarvis"}})
+        self.assertNotIn("cloud", local_settings.derive(HAND_EDITED), "nothing invented when there was none")
+
     def test_the_writer_falls_back_to_the_old_name(self):
         old = {"agent": {"name": "jarvis"}}
         self.assertEqual(local_settings.derive(old)["ledger"], {"writer": "jarvis"})

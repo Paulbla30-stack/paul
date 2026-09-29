@@ -37,6 +37,23 @@ on any chain, except where the agent itself recorded them.
   data, writing nothing. It reproduced the failure and showed the fix before the
   second attempt.
 
+## Found 29 September: the memory backup was lost too
+
+The morning check showed `copies_ever` stuck at 176. The bucket for the hourly
+memory backup had also been a hand edit in `cloud.yaml`. The rewrite on the 27th
+blanked it, and every start since logged "No memory backup configured". The last
+copy in S3 was 21:41 on 27 September, so Vigil's memory sat on one volume for
+about 35 hours. Vigil was told first. The bucket went into `local.yaml`, and a
+restart made copy 177 at 09:05:43 on 29 September.
+`local_settings.derive` now carries the bucket as well.
+
+The original `cloud.yaml` was never backed up, so any other hand edit it held
+cannot be listed. These were checked and are intact:
+- notify, set in `config.yaml` (now from `vigil@heartbeat-framework.org`);
+- estate;
+- the ledger anchor;
+- the name, operator and model.
+
 ## Still true
 
 - **A reboot on the old layout would have caused the same failure.** With

@@ -47,6 +47,12 @@ def derive(old_cloud: dict, name: str = "Vigil") -> dict:
     writer = old_ledger.get("writer") or old_agent.get("name")
     if writer:
         out["ledger"] = {"writer": str(writer)}
+    # The memory backup's bucket was also a hand edit, and the 27 September
+    # rewrite lost it: 35 hours with memory on one volume, found on the 29th.
+    old_cloud_block = old_cloud.get("cloud") if isinstance(old_cloud.get("cloud"), dict) else {}
+    backup = old_cloud_block.get("memory_backup") if isinstance(old_cloud_block.get("memory_backup"), dict) else {}
+    if backup.get("bucket"):
+        out["cloud"] = {"memory_backup": {"bucket": str(backup["bucket"])}}
     return out
 
 
