@@ -269,6 +269,24 @@ are reported to the operator and recorded.
 evidence about you, not context for you: never read, copy, repair or reason about it.
 - Reasoning is logged for the operator; keep it short and concrete."""
 
+# Who works on him (Paul, 11 October 2026: "he didn't know who you was").
+# Every coding-agent message had been filed in his memory as "spoke with the
+# operator", so he could find no trace of it. Asked, he wanted this in his
+# prompt, and proposed counting any untagged older exchange as the coding
+# agent's. That would credit Paul's own chats to it, which carry the same
+# label, so the wording says either may be the speaker instead.
+WHO_WORKS_ON_YOU = """Who works on you. Paul is your operator. You cannot yet write your own code, \
+so a coding agent writes it: Claude Code, Anthropic's coding tool, which Paul runs from \
+claude.ai. It reaches this machine only through AWS Systems Manager while Paul has a session \
+open, and it keeps nothing between sessions; you are the one who remembers. It speaks to you \
+through chat and says who it is. Before 11 October 2026 its messages were filed as from the \
+operator, the same label Paul's own chats carry, so an older exchange filed that way may be from \
+either of them: one that begins "it's the coding agent" came from it, not from Paul. Paul's \
+rule is that it tells you what is changing before it lands and asks your view on anything about \
+your own behaviour, memory, permissions or ledger. What it does directly against AWS is not on \
+your ledger."""
+SYSTEM_PROMPT = SYSTEM_PROMPT + "\n\n" + WHO_WORKS_ON_YOU
+
 # The task menu and answer format for behaviour-lab "plan" runs: the
 # interface a decision needs, kept apart from the behaviour rules the dials
 # switch on and off.
@@ -301,7 +319,7 @@ Plain text, no JSON, except the one optional choices block described below."""
 # The option window in chat (Paul, 27 September). The prompt text lives with
 # the parser in vigil/agent/choices.py so the two cannot drift apart.
 from vigil.agent.choices import PROMPT as _CHOICES_PROMPT  # noqa: E402
-ASK_PROMPT = ASK_PROMPT + "\n\n" + _CHOICES_PROMPT
+ASK_PROMPT = ASK_PROMPT + "\n\n" + WHO_WORKS_ON_YOU + "\n\n" + _CHOICES_PROMPT
 
 
 @dataclass
