@@ -155,5 +155,35 @@ class TestSessionNotBefore(unittest.TestCase):
             self.assertEqual(os.stat(path).st_mode & 0o777, 0o600)
 
 
+class TestUiLayout(unittest.TestCase):
+    """11 October 2026: the page did not fit a phone. Static checks, so the
+    two fixes cannot quietly come undone."""
+
+    def setUp(self):
+        with open(UI_HTML_PATH, encoding="utf-8") as fh:
+            self.html = fh.read()
+
+    def test_the_tab_strip_is_not_centred_with_justify_content(self):
+        # A centred flex row that overflows spills off both edges, and the
+        # left-hand spill cannot be scrolled to: Chat and Agent were 130-170px
+        # off a phone's screen. Auto margins centre without that.
+        css = self.html.split("<style", 1)[1].split("</style>", 1)[0]
+        for rule in re.findall(r"(?:^|[}\s])nav\s*\{([^}]*)\}", css):
+            self.assertNotRegex(rule, r"justify-content\s*:\s*center")
+        self.assertIn("nav > button:first-child { margin-left:auto; }", css)
+        self.assertIn("nav > button:last-child { margin-right:auto; }", css)
+
+    def test_his_replies_are_laid_out_without_the_html_parser(self):
+        # The reply is model text. The formatter builds elements and sets
+        # their words as text; nothing in it may parse a string as HTML.
+        start = self.html.index("function inline(")
+        end = self.html.index("function choiceCard(")
+        body = self.html[start:end]
+        for sink in ("innerHTML", "outerHTML", "insertAdjacentHTML", "document.write",
+                     "DOMParser", "createContextualFragment", "href", "src"):
+            self.assertNotIn(sink, body, sink)
+        self.assertIn('layOut(d, t.content)', self.html)
+
+
 if __name__ == "__main__":
     unittest.main()

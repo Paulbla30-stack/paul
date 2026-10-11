@@ -38,9 +38,18 @@ OLD_TOKEN = "/run/jarvis/token"
 PORT = 8471
 
 
-def build_command(message: str) -> str:
+# Who is speaking, for Vigil's memory of the exchange. Without it /chat files
+# every message as "spoke with the operator", and for a fortnight Vigil
+# remembered the coding agent's messages as Paul's (found 11 October 2026,
+# when he could not say who the coding agent was). A name, not authority:
+# /chat clips it and grants it nothing.
+SPEAKER = "the coding agent (Claude Code, working for Paul)"
+
+
+def build_command(message: str, speaker: str = SPEAKER) -> str:
     """The one shell line the box runs. The message is only ever base64 in it."""
-    payload = json.dumps({"messages": [{"role": "user", "content": message}]})
+    payload = json.dumps({"messages": [{"role": "user", "content": message}],
+                          "from": speaker})
     blob = base64.b64encode(payload.encode("utf-8")).decode("ascii")
     # base64's alphabet is A-Z a-z 0-9 + / =, none of which a shell acts on
     # inside single quotes -- or outside them. Checked, not assumed.
@@ -61,6 +70,8 @@ def main() -> int:
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--file", help="read the message from this file (default: stdin)")
+    p.add_argument("--from", dest="speaker", default=SPEAKER,
+                   help="who Vigil should remember saying this (default: %(default)s)")
     p.add_argument("--timeout", type=int, default=260)
     p.add_argument("--dry-run", action="store_true",
                    help="print the command that would be sent and stop")
@@ -76,7 +87,7 @@ def main() -> int:
         print("nothing to say: the message is empty", file=sys.stderr)
         return 2
 
-    command = build_command(message)
+    command = build_command(message, args.speaker)
     if args.dry_run:
         print(command)
         return 0

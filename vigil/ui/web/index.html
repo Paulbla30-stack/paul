@@ -115,7 +115,48 @@
   /* Long hashes and paths should scroll, not stretch the page sideways. */
   pre { -webkit-overflow-scrolling:touch; overscroll-behavior:contain; }
   #messages { min-height:min(40vh, 40dvh); }
-  .msg { max-width:min(88%, 62ch); }
+  .msg { max-width:min(88%, 62ch); overflow-wrap:anywhere; }
+  /* The hint is longer than a phone is wide; one line, cut, rather than
+     half of a second line showing under a one-row box. */
+  #chatInput::placeholder { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+
+  /* His replies are written in markdown: tables, headings, lists. Shown as
+     raw text, a five-column table is a wall of pipes on a phone. They are
+     laid out (built as elements, never parsed as HTML), and a table turns
+     into one card per row below 900px, each value under its column name:
+     five columns in a tablet's portrait width squeezed every one of them. */
+  .msg.md { white-space:normal; max-width:min(94%, 72ch); }
+  .msg.md p { margin:0 0 8px; } .msg.md p:last-child { margin-bottom:0; }
+  .msg.md .h { font-weight:700; margin:12px 0 6px; } .msg.md .h:first-child { margin-top:0; }
+  .msg.md ul, .msg.md ol { margin:0 0 8px; padding-left:20px; }
+  .msg.md ul { list-style:disc; } .msg.md ol { list-style:decimal; }
+  .msg.md li { padding:2px 0; border-top:0; }
+  .msg.md hr { border:0; border-top:1px solid var(--line); margin:12px 0; }
+  .msg.md blockquote { margin:0 0 8px; padding:6px 10px; border-left:3px solid var(--accent);
+                       background:var(--bg); border-radius:0 8px 8px 0; }
+  .msg.md code { font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:.9em;
+                 background:var(--bg); padding:1px 4px; border-radius:4px; }
+  .msg.md pre { white-space:pre; overflow-x:auto; }
+  .msg.md pre code { background:none; padding:0; }
+  .msg.md .tbl { overflow-x:auto; margin:0 0 8px; -webkit-overflow-scrolling:touch; }
+  .msg.md table { border-collapse:collapse; width:100%; font-size:14px; }
+  .msg.md th, .msg.md td { border:1px solid var(--line); padding:6px 8px; text-align:left; vertical-align:top;
+                           overflow-wrap:break-word; word-break:normal; }
+  /* break-word, not anywhere: "anywhere" lets a column shrink to one
+     letter, and "P1" came out as P over 1. A table gets the full width. */
+  .msg.md.wide { max-width:100%; }
+  .msg.md th { background:var(--bg); }
+  /* A long path or setting name may wrap inside a cell; a short one like P1 may not. */
+  .msg.md td code.long { overflow-wrap:anywhere; }
+  @media (max-width: 899px) {
+    .msg.md { max-width:100%; }
+    .msg.md table, .msg.md tbody, .msg.md tr, .msg.md td { display:block; width:100%; }
+    .msg.md thead { display:none; }
+    .msg.md tr { border:1px solid var(--line); border-radius:8px; padding:6px 8px; margin:0 0 8px; background:var(--bg); }
+    .msg.md td { border:0; padding:3px 0; }
+    .msg.md td[data-label]::before { content:attr(data-label); display:block; font-size:12px;
+                                     color:var(--muted); text-transform:uppercase; letter-spacing:.04em; }
+  }
 
   /* Tablet and desktop: use the width instead of a 900px column in the middle
      of a 1280px screen. Chat stays one column, because a conversation reading
@@ -144,9 +185,22 @@
   }
 
   /* Tabs sit over the content column rather than stretching across a
-     1280px screen with 200px between them. */
-  nav { justify-content:center; }
-  nav .inner, nav { }
+     1280px screen with 200px between them. Centred with auto margins, not
+     justify-content:center: a centred flex row that overflows spills off
+     BOTH edges, and nothing can scroll to the left-hand spill. On every
+     phone that put Chat and Agent 130-170px off the left of the screen,
+     unreachable (11 October 2026). Auto margins centre when there is room
+     and collapse to nothing when there is not, so the first tab stays put. */
+  nav > button:first-child { margin-left:auto; }
+  nav > button:last-child { margin-right:auto; }
+  /* More tabs than fit: fade the edge they are hiding behind, so it reads
+     as a strip to swipe rather than a complete set. */
+  nav.more-right { -webkit-mask-image:linear-gradient(to right, #000 calc(100% - 28px), transparent);
+                   mask-image:linear-gradient(to right, #000 calc(100% - 28px), transparent); }
+  nav.more-left { -webkit-mask-image:linear-gradient(to left, #000 calc(100% - 28px), transparent);
+                  mask-image:linear-gradient(to left, #000 calc(100% - 28px), transparent); }
+  nav.more-left.more-right { -webkit-mask-image:linear-gradient(to right, transparent, #000 28px, #000 calc(100% - 28px), transparent);
+                             mask-image:linear-gradient(to right, transparent, #000 28px, #000 calc(100% - 28px), transparent); }
   @media (min-width: 900px) {
     nav { padding-left:max(env(safe-area-inset-left), calc((100vw - 1180px) / 2));
           padding-right:max(env(safe-area-inset-right), calc((100vw - 1180px) / 2)); }
@@ -610,17 +664,97 @@
     if (b.dataset.tab === "ledger") loadLedger();
     if (b.dataset.tab === "lab") loadLab();
     if (b.dataset.tab === "research") loadResearch();
+    showTab(b);
   }));
+  // On a phone the tabs are a strip wider than the screen. Keep the chosen
+  // one in view, and fade whichever edge has more tabs behind it.
+  const navBar = document.querySelector("nav");
+  function navEdges() {
+    navBar.classList.toggle("more-left", navBar.scrollLeft > 2);
+    navBar.classList.toggle("more-right", navBar.scrollLeft + navBar.clientWidth < navBar.scrollWidth - 2);
+  }
+  function showTab(b) {
+    if (navBar.scrollWidth <= navBar.clientWidth) return;
+    const at = b.getBoundingClientRect().left - navBar.getBoundingClientRect().left + navBar.scrollLeft;
+    navBar.scrollTo({ left: at - (navBar.clientWidth - b.offsetWidth) / 2, behavior: "smooth" });
+  }
+  navBar.addEventListener("scroll", navEdges, { passive: true });
+  window.addEventListener("resize", navEdges);
+  navEdges();
 
   // ---- chat ----
   function renderChat() {
     const box = $("messages"); box.innerHTML = "";
     if (!turns.length) { const d = document.createElement("div"); d.className = "msg sys"; d.textContent = "Ask the agent about the machine, its goals, or an uploaded file."; box.appendChild(d); }
     turns.forEach((t, i) => {
-      const d = document.createElement("div"); d.className = "msg " + (t.role === "user" ? "user" : t.role === "assistant" ? "agent" : "sys"); d.textContent = t.content; box.appendChild(d);
+      const d = document.createElement("div"); d.className = "msg " + (t.role === "user" ? "user" : t.role === "assistant" ? "agent" : "sys");
+      if (t.role === "assistant") { d.classList.add("md"); layOut(d, t.content); } else d.textContent = t.content;
+      box.appendChild(d);
       if (t.choices && !t.chosen && i === turns.length - 1) box.appendChild(choiceCard(t));
     });
     window.scrollTo(0, document.body.scrollHeight);
+  }
+  // His replies are markdown. Laid out here so a table reads on a phone, but
+  // the reply is model text, so it is never handed to the HTML parser: every
+  // piece is an element made here with its words set as textContent. Bold and
+  // `code` inline; headings, lists, quotes, rules, fenced code and pipe tables
+  // as blocks. Anything else stays the text it was. Links stay text too.
+  function inline(el, text) {
+    for (const part of String(text).split(/(\*\*[^*]+\*\*|`[^`]+`)/)) {
+      if (!part) continue;
+      let node;
+      if (part.length > 4 && part.startsWith("**") && part.endsWith("**")) { node = document.createElement("strong"); node.textContent = part.slice(2, -2); }
+      else if (part.length > 2 && part.startsWith("`") && part.endsWith("`")) { node = document.createElement("code"); node.textContent = part.slice(1, -1); if (part.length > 18) node.className = "long"; }
+      else node = document.createTextNode(part);
+      el.appendChild(node);
+    }
+    return el;
+  }
+  function cells(line) {
+    let s = line.trim(); if (s.startsWith("|")) s = s.slice(1); if (s.endsWith("|")) s = s.slice(0, -1);
+    return s.split("|").map(c => c.trim());
+  }
+  function layOut(box, text) {
+    const lines = String(text || "").replace(/\r\n?/g, "\n").split("\n");
+    const make = (tag, cls) => { const e = document.createElement(tag); if (cls) e.className = cls; box.appendChild(e); return e; };
+    let para = null, list = null;
+    const close = () => { para = null; list = null; };
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i], bare = line.trim();
+      if (!bare) { close(); continue; }
+      if (bare.startsWith("```")) {
+        close(); const code = []; i++;
+        while (i < lines.length && !lines[i].trim().startsWith("```")) code.push(lines[i++]);
+        make("pre").appendChild(document.createElement("code")).textContent = code.join("\n");
+        continue;
+      }
+      if (bare.startsWith("|") && i + 1 < lines.length && /^\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$/.test(lines[i + 1].trim())) {
+        close();
+        const head = cells(line); i += 2;
+        const wrap = make("div", "tbl"), table = document.createElement("table"); wrap.appendChild(table);
+        box.classList.add("wide");
+        const tr = table.createTHead().insertRow();
+        for (const h of head) inline(tr.appendChild(document.createElement("th")), h);
+        const body = table.createTBody();
+        while (i < lines.length && lines[i].trim().startsWith("|")) {
+          const row = body.insertRow(), vals = cells(lines[i++]);
+          vals.forEach((v, k) => { const td = row.insertCell(); if (head[k]) td.setAttribute("data-label", head[k].replace(/[*`]/g, "")); inline(td, v); });
+        }
+        i--; continue;
+      }
+      let m;
+      if ((m = bare.match(/^#{1,6}\s+(.*)$/))) { close(); inline(make("div", "h"), m[1].replace(/^\*\*(.*)\*\*$/, "$1")); continue; }
+      if (/^(-{3,}|\*{3,}|_{3,})$/.test(bare)) { close(); make("hr"); continue; }
+      if ((m = bare.match(/^>\s?(.*)$/))) { close(); inline(make("blockquote"), m[1]); continue; }
+      if ((m = line.match(/^\s*(?:[-*•]|(\d+)[.)])\s+(.*)$/))) {
+        const want = m[1] ? "OL" : "UL";
+        if (!list || list.tagName !== want) { para = null; list = make(want.toLowerCase()); if (m[1] && m[1] !== "1") list.start = parseInt(m[1], 10); }
+        inline(list.appendChild(document.createElement("li")), m[2]); continue;
+      }
+      list = null;
+      if (para) para.appendChild(document.createElement("br")); else para = make("p");
+      inline(para, line.replace(/\s+$/, ""));
+    }
   }
   // The option window (Paul, 27 September). Vigil offers two to four
   // options; Paul taps one, ticks several, or writes his own. What he picks

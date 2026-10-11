@@ -53,6 +53,8 @@ class ChatStaysText(unittest.TestCase):
             with open(sink) as fh:
                 sent = json.load(fh)
             self.assertEqual(sent["messages"][0]["content"], message)
+            self.assertEqual(sent["from"], chat.SPEAKER,
+                             "unnamed, /chat files the coding agent's words as Paul's")
 
     def test_only_base64_reaches_the_command_line(self):
         command = chat.build_command("`id` $(id)")
