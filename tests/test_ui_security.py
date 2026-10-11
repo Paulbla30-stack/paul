@@ -184,6 +184,18 @@ class TestUiLayout(unittest.TestCase):
             self.assertNotIn(sink, body, sink)
         self.assertIn('layOut(d, t.content)', self.html)
 
+    def test_the_script_has_no_lookbehind(self):
+        # A lookbehind is a syntax error in Safari before 16.4, and one syntax
+        # error in the page's only script stops the whole UI on that phone.
+        script = self.html.split("<script", 1)[1]
+        self.assertIsNone(re.search(r"\(\?<[=!]", script))
+
+    def test_the_tabs_stay_with_the_header(self):
+        # With a long chat the page opens at the bottom; the tabs must not be
+        # left at the top of the document.
+        self.assertRegex(self.html, r'<div class="topbar">\s*<header')
+        self.assertIn(".topbar { position:sticky; top:0;", self.html)
+
 
 if __name__ == "__main__":
     unittest.main()

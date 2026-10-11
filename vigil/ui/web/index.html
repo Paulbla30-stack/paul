@@ -2,7 +2,8 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+<meta name="format-detection" content="telephone=no, date=no, address=no, email=no">
 <title>Vigil</title>
 <style>
   :root { color-scheme: dark; --bg:#0f1115; --panel:#171a21; --line:#262b36; --text:#e6e8ee; --muted:#8b93a7;
@@ -118,7 +119,17 @@
   .msg { max-width:min(88%, 62ch); overflow-wrap:anywhere; }
   /* The hint is longer than a phone is wide; one line, cut, rather than
      half of a second line showing under a one-row box. */
-  #chatInput::placeholder { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  #chatInput::placeholder { white-space:nowrap; overflow:hidden; }
+  /* The tabs scroll with the header, not away under it: with a long chat the
+     page opens at the bottom, and reaching Agent meant scrolling all the way up. */
+  .topbar { position:sticky; top:0; z-index:3; }
+  .topbar header { position:static; }
+  /* Textareas do not inherit the page font; the composer was monospace. */
+  input, textarea, select, button { font-family:inherit; }
+  textarea { line-height:1.4; }
+  /* "Log out" broke over two lines next to the brain badge on every phone. */
+  header button { white-space:nowrap; }
+  #brainBadge { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 
   /* His replies are written in markdown: tables, headings, lists. Shown as
      raw text, a five-column table is a wall of pipes on a phone. They are
@@ -136,8 +147,11 @@
                        background:var(--bg); border-radius:0 8px 8px 0; }
   .msg.md code { font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:.9em;
                  background:var(--bg); padding:1px 4px; border-radius:4px; }
-  .msg.md pre { white-space:pre; overflow-x:auto; }
-  .msg.md pre code { background:none; padding:0; }
+  /* A code block scrolls sideways only: a vertical swipe that starts on one
+     must still move the page, and it must not be smaller than 12px. */
+  .msg.md pre { white-space:pre; overflow-x:auto; font-size:13px; margin:0 0 8px; max-height:none;
+                overscroll-behavior-x:contain; overscroll-behavior-y:auto; }
+  .msg.md pre code { background:none; padding:0; font-size:inherit; }
   .msg.md .tbl { overflow-x:auto; margin:0 0 8px; -webkit-overflow-scrolling:touch; }
   .msg.md table { border-collapse:collapse; width:100%; font-size:14px; }
   .msg.md th, .msg.md td { border:1px solid var(--line); padding:6px 8px; text-align:left; vertical-align:top;
@@ -146,16 +160,21 @@
      letter, and "P1" came out as P over 1. A table gets the full width. */
   .msg.md.wide { max-width:100%; }
   .msg.md th { background:var(--bg); }
-  /* A long path or setting name may wrap inside a cell; a short one like P1 may not. */
-  .msg.md td code.long { overflow-wrap:anywhere; }
+  /* A long path, address or setting name may wrap inside a cell; a short
+     one like P1 may not, or its column shrinks to a letter. */
+  .msg.md td .long { overflow-wrap:anywhere; }
   @media (max-width: 899px) {
     .msg.md { max-width:100%; }
     .msg.md table, .msg.md tbody, .msg.md tr, .msg.md td { display:block; width:100%; }
     .msg.md thead { display:none; }
-    .msg.md tr { border:1px solid var(--line); border-radius:8px; padding:6px 8px; margin:0 0 8px; background:var(--bg); }
+    /* A divided list inside the message rather than cards, so a reply cannot
+       dress itself up as the page's own panels. Name left, value right. */
+    .msg.md tr { border-top:1px solid var(--line); padding:6px 0; }
+    .msg.md tr:first-child { border-top:0; }
     .msg.md td { border:0; padding:3px 0; }
-    .msg.md td[data-label]::before { content:attr(data-label); display:block; font-size:12px;
-                                     color:var(--muted); text-transform:uppercase; letter-spacing:.04em; }
+    .msg.md td[data-label] { display:grid; grid-template-columns:minmax(5.5rem, 35%) minmax(0, 1fr); gap:10px; }
+    .msg.md td[data-label]::before { content:attr(data-label); font-size:12px; color:var(--muted);
+                                     text-transform:uppercase; letter-spacing:.04em; overflow-wrap:anywhere; }
   }
 
   /* Tablet and desktop: use the width instead of a 900px column in the middle
@@ -212,7 +231,7 @@
 
   /* A phone held sideways has very little height; stop the chrome eating it. */
   @media (max-height: 460px) and (orientation: landscape) {
-    header { position:static; }
+    .topbar { position:static; }
     nav button { min-height:40px; }
     #messages { min-height:24dvh; }
   }
@@ -225,6 +244,7 @@
 </style>
 </head>
 <body class="chat-open">
+<div class="topbar">
 <header>
   <span id="statusDot" class="dot"></span>
   <h1 id="agentName">Vigil</h1>
@@ -241,6 +261,7 @@
   <button data-tab="lab">Lab</button>
   <button data-tab="research">Research</button>
 </nav>
+</div>
 
 <main>
   <section id="chat" class="active">
@@ -393,7 +414,7 @@
           <option value="md">Markdown</option>
           <option value="txt">Text</option>
         </select>
-        <button id="docWrite" class="primary">Write it</button>
+        <button id="docWrite" class="btn">Write it</button>
       </div>
       <textarea id="docBody" rows="6" placeholder="The document, as markdown: # headings, - bullets, blank lines between paragraphs." style="width:100%;margin-top:6px"></textarea>
       <p id="docMsg" class="small" style="margin:6px 0 0"></p>
@@ -409,12 +430,12 @@
       The agent drives the same one, so what you see here is what it sees.
       <b>Nothing is logged in</b> &mdash; the profile is thrown away each
       session, so it can look things up and can never be you.</p>
-      <div style="display:flex;gap:6px;margin-bottom:8px">
+      <div class="row wrap" style="margin-bottom:8px">
         <input id="brUrl" type="text" placeholder="address, or something to search for"
                style="flex:1" autocapitalize="off" autocorrect="off" spellcheck="false">
-        <button data-click="brGo">Go</button>
-        <button data-click="brShot" title="Picture of the page">View</button>
-        <button data-click="brReset" title="Throw the profile away">Reset</button>
+        <button class="ghost" data-click="brGo">Go</button>
+        <button class="ghost" data-click="brShot" title="Picture of the page">View</button>
+        <button class="ghost" data-click="brReset" title="Throw the profile away">Reset</button>
       </div>
       <p id="brStatus" class="small muted"></p>
     </div>
@@ -665,6 +686,7 @@
     if (b.dataset.tab === "lab") loadLab();
     if (b.dataset.tab === "research") loadResearch();
     showTab(b);
+    fitComposer(onChat);
   }));
   // On a phone the tabs are a strip wider than the screen. Keep the chosen
   // one in view, and fade whichever edge has more tabs behind it.
@@ -682,10 +704,35 @@
   window.addEventListener("resize", navEdges);
   navEdges();
 
+  // The composer grows as you type and sits over the bottom of the chat, so
+  // the space kept for it follows its real height (a fixed 96px let a
+  // three-line draft cover the last reply). If you were at the bottom, you
+  // stay there: when the box grows, and when the keyboard opens.
+  const composerBar = $("composer"), mainEl = document.querySelector("main");
+  const atBottom = () => window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 4;
+  let stuck = true;
+  function fitComposer(pin) {
+    if (!document.body.classList.contains("chat-open")) { mainEl.style.paddingBottom = ""; return; }
+    mainEl.style.paddingBottom = (composerBar.offsetHeight + 16) + "px";
+    if (pin) window.scrollTo(0, document.documentElement.scrollHeight);
+  }
+  window.addEventListener("scroll", () => { stuck = atBottom(); }, { passive: true });
+  window.addEventListener("resize", () => fitComposer(stuck));
+  if (window.visualViewport) window.visualViewport.addEventListener("resize", () => fitComposer(stuck));
+  $("chatInput").addEventListener("focus", () => { const pin = stuck; setTimeout(() => fitComposer(pin), 300); });
+  // A phone is narrower than the full hint; the commands are listed in the
+  // empty chat instead.
+  const fullHint = $("chatInput").getAttribute("placeholder");
+  const narrow = window.matchMedia("(max-width: 480px)");
+  function fitHint() { $("chatInput").placeholder = narrow.matches ? "Message…" : fullHint; }
+  if (narrow.addEventListener) narrow.addEventListener("change", fitHint); else if (narrow.addListener) narrow.addListener(fitHint);
+  fitHint();
+  fitComposer(false);
+
   // ---- chat ----
   function renderChat() {
     const box = $("messages"); box.innerHTML = "";
-    if (!turns.length) { const d = document.createElement("div"); d.className = "msg sys"; d.textContent = "Ask the agent about the machine, its goals, or an uploaded file."; box.appendChild(d); }
+    if (!turns.length) { const d = document.createElement("div"); d.className = "msg sys"; d.textContent = "Ask the agent about the machine, its goals, or an uploaded file. Commands: /goal, /remind, /book, /think, /clear."; box.appendChild(d); }
     turns.forEach((t, i) => {
       const d = document.createElement("div"); d.className = "msg " + (t.role === "user" ? "user" : t.role === "assistant" ? "agent" : "sys");
       if (t.role === "assistant") { d.classList.add("md"); layOut(d, t.content); } else d.textContent = t.content;
@@ -705,55 +752,105 @@
       let node;
       if (part.length > 4 && part.startsWith("**") && part.endsWith("**")) { node = document.createElement("strong"); node.textContent = part.slice(2, -2); }
       else if (part.length > 2 && part.startsWith("`") && part.endsWith("`")) { node = document.createElement("code"); node.textContent = part.slice(1, -1); if (part.length > 18) node.className = "long"; }
-      else node = document.createTextNode(part);
+      else {
+        // A bare address or path of 25+ characters may break anywhere; a
+        // short word may not (see .long).
+        for (const bit of part.split(/(\S{25,})/)) {
+          if (!bit) continue;
+          if (bit.length >= 25 && !/\s/.test(bit)) { const w = document.createElement("span"); w.className = "long"; w.textContent = bit; el.appendChild(w); }
+          else el.appendChild(document.createTextNode(bit));
+        }
+        continue;
+      }
       el.appendChild(node);
     }
     return el;
   }
+  // Split a table row on unescaped pipes; "\|" is a pipe inside a cell.
+  // Done by hand: a lookbehind regex is a syntax error on iOS before 16.4,
+  // and one syntax error stops the whole page.
   function cells(line) {
-    let s = line.trim(); if (s.startsWith("|")) s = s.slice(1); if (s.endsWith("|")) s = s.slice(0, -1);
-    return s.split("|").map(c => c.trim());
+    let s = line.trim(); if (s.startsWith("|")) s = s.slice(1); if (s.endsWith("|") && !s.endsWith("\\|")) s = s.slice(0, -1);
+    const out = []; let cur = "";
+    for (let k = 0; k < s.length; k++) {
+      if (s[k] === "\\" && s[k + 1] === "|") { cur += "|"; k++; }
+      else if (s[k] === "|") { out.push(cur.trim()); cur = ""; }
+      else cur += s[k];
+    }
+    out.push(cur.trim());
+    return out;
   }
+  // Every pattern here is linear on any input. Adjacent quantifiers that can
+  // both match the same characters (\s* then \s*, \s+ then .* where . stops
+  // short) went quadratic on long runs of spaces: 7 seconds for 50k (found
+  // in review, 11 October 2026). The s flag lets . reach the end of the line.
+  const SEP = /^\|?\s*:?-{2,}:?\s*(?:\|\s*:?-{2,}:?\s*)*\|?$/;
+  const HEAD = /^#{1,6}\s+(.*)$/s, RULE = /^(?:-{3,}|\*{3,}|_{3,})$/, QUOTE = /^>\s?(.*)$/s;
+  const ITEM = /^([ \t]*)(?:[-*•]|(\d{1,9})[.)])\s+(.*)$/s;
+  const LONG_LINE = 4000, MAX_COLS = 50, LABEL = 40;
   function layOut(box, text) {
     const lines = String(text || "").replace(/\r\n?/g, "\n").split("\n");
     const make = (tag, cls) => { const e = document.createElement(tag); if (cls) e.className = cls; box.appendChild(e); return e; };
-    let para = null, list = null;
-    const close = () => { para = null; list = null; };
+    let para = null, lists = [];
+    const close = () => { para = null; lists = []; };
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i], bare = line.trim();
       if (!bare) { close(); continue; }
-      if (bare.startsWith("```")) {
+      if (line.length > LONG_LINE) {               // too long to be structure: text
+        close(); inline(make("p"), line.trimEnd()); continue;
+      }
+      const fence = bare.startsWith("```") ? "```" : bare.startsWith("~~~") ? "~~~" : null;
+      if (fence) {
         close(); const code = []; i++;
-        while (i < lines.length && !lines[i].trim().startsWith("```")) code.push(lines[i++]);
+        while (i < lines.length && !lines[i].trim().startsWith(fence)) code.push(lines[i++]);
         make("pre").appendChild(document.createElement("code")).textContent = code.join("\n");
         continue;
       }
-      if (bare.startsWith("|") && i + 1 < lines.length && /^\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$/.test(lines[i + 1].trim())) {
+      if (bare.startsWith("|") && i + 1 < lines.length && lines[i + 1].length <= LONG_LINE && SEP.test(lines[i + 1].trim())) {
         close();
-        const head = cells(line); i += 2;
+        const head = cells(line).slice(0, MAX_COLS); i += 2;
         const wrap = make("div", "tbl"), table = document.createElement("table"); wrap.appendChild(table);
         box.classList.add("wide");
-        const tr = table.createTHead().insertRow();
-        for (const h of head) inline(tr.appendChild(document.createElement("th")), h);
+        const hr = table.createTHead().appendChild(document.createElement("tr"));
+        for (const h of head) inline(hr.appendChild(document.createElement("th")), h);
         const body = table.createTBody();
-        while (i < lines.length && lines[i].trim().startsWith("|")) {
-          const row = body.insertRow(), vals = cells(lines[i++]);
-          vals.forEach((v, k) => { const td = row.insertCell(); if (head[k]) td.setAttribute("data-label", head[k].replace(/[*`]/g, "")); inline(td, v); });
+        const labels = head.map(h => { const l = h.replace(/[*`]/g, "").trim(); return l.length > LABEL ? l.slice(0, LABEL - 1) + "…" : l; });
+        while (i < lines.length && lines[i].trim().startsWith("|") && lines[i].length <= LONG_LINE) {
+          const row = body.appendChild(document.createElement("tr"));
+          let vals = cells(lines[i++]);
+          if (vals.length > MAX_COLS) vals = vals.slice(0, MAX_COLS - 1).concat([vals.slice(MAX_COLS - 1).join(" | ")]);
+          vals.forEach((v, k) => {
+            const td = row.appendChild(document.createElement("td"));
+            if (labels[k]) td.setAttribute("data-label", labels[k]);
+            inline(td.appendChild(document.createElement("span")), v);
+          });
         }
         i--; continue;
       }
       let m;
-      if ((m = bare.match(/^#{1,6}\s+(.*)$/))) { close(); inline(make("div", "h"), m[1].replace(/^\*\*(.*)\*\*$/, "$1")); continue; }
-      if (/^(-{3,}|\*{3,}|_{3,})$/.test(bare)) { close(); make("hr"); continue; }
-      if ((m = bare.match(/^>\s?(.*)$/))) { close(); inline(make("blockquote"), m[1]); continue; }
-      if ((m = line.match(/^\s*(?:[-*•]|(\d+)[.)])\s+(.*)$/))) {
-        const want = m[1] ? "OL" : "UL";
-        if (!list || list.tagName !== want) { para = null; list = make(want.toLowerCase()); if (m[1] && m[1] !== "1") list.start = parseInt(m[1], 10); }
-        inline(list.appendChild(document.createElement("li")), m[2]); continue;
+      if ((m = bare.match(HEAD))) { close(); inline(make("div", "h"), m[1].replace(/^\*\*(.*)\*\*$/s, "$1")); continue; }
+      if (RULE.test(bare)) { close(); make("hr"); continue; }
+      if ((m = bare.match(QUOTE))) { close(); inline(make("blockquote"), m[1]); continue; }
+      if ((m = line.match(ITEM))) {
+        // Nesting follows indentation, three levels deep at most.
+        para = null;
+        const indent = m[1].replace(/\t/g, "    ").length, want = m[2] ? "OL" : "UL";
+        while (lists.length && (indent < lists[lists.length - 1].indent ||
+               (indent === lists[lists.length - 1].indent && lists[lists.length - 1].el.tagName !== want))) lists.pop();
+        let top = lists[lists.length - 1];
+        if (!top || (indent > top.indent && lists.length < 3)) {
+          const el = document.createElement(want.toLowerCase());
+          const n = m[2] ? parseInt(m[2], 10) : 1;
+          if (n > 1 && n <= 9999) el.start = n;   // the number shown is the number written
+          (top ? (top.el.lastElementChild || top.el) : box).appendChild(el);
+          top = { el, indent }; lists.push(top);
+        }
+        inline(top.el.appendChild(document.createElement("li")), m[3]);
+        continue;
       }
-      list = null;
+      lists = [];
       if (para) para.appendChild(document.createElement("br")); else para = make("p");
-      inline(para, line.replace(/\s+$/, ""));
+      inline(para, line.trimEnd());
     }
   }
   // The option window (Paul, 27 September). Vigil offers two to four
@@ -845,7 +942,7 @@
     $("sendBtn").disabled = false;
   };
   $("chatInput").addEventListener("keydown", e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendChat(); } });
-  $("chatInput").addEventListener("input", e => { e.target.style.height = "auto"; e.target.style.height = Math.min(e.target.scrollHeight, 120) + "px"; });
+  $("chatInput").addEventListener("input", e => { const pin = atBottom(); e.target.style.height = "auto"; e.target.style.height = Math.min(e.target.scrollHeight, 120) + "px"; fitComposer(pin); });
 
   // ---- agent panel ----
   function fmtTime(ts) { if (!ts) return ""; const d = new Date(ts * 1000); return d.toLocaleTimeString(); }
