@@ -255,6 +255,16 @@ class TestTheRoleCanActuallyDoIt(unittest.TestCase):
         self.assertIn("bedrock:InvokeModel", scout_role)
         self.assertIn(model, scout_role)
 
+    def test_the_scout_role_may_read_its_pending_proposals(self):
+        # proposals.pending() scans the table for the duplicate guard. The
+        # role lacked Scan from 25 Sep to 14 Oct, so the guard only ever saw
+        # its own run. Read-only, own table, and still no delete or update.
+        scout_role = self.template.split("ScoutRole:")[1].split("ApproveFunction:")[0]
+        for action in ("dynamodb:Scan", "dynamodb:PutItem", "dynamodb:Query"):
+            self.assertIn(action, scout_role)
+        for action in ("dynamodb:DeleteItem", "dynamodb:UpdateItem"):
+            self.assertNotIn("- " + action, scout_role)
+
 
 if __name__ == "__main__":
     unittest.main()

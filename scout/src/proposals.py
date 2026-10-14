@@ -196,6 +196,32 @@ class Proposal:
         return asdict(self)
 
 
+def _to_dynamo(v):
+    """DynamoDB takes no floats. A proposal carries its item's score (8.5),
+    and on 14 October 2026 the first draft good enough to file crashed the
+    run on it, before the digest went out. Same encoding as the hit store."""
+    from decimal import Decimal
+    if isinstance(v, float):
+        return Decimal(str(round(v, 4)))
+    if isinstance(v, dict):
+        return {k: _to_dynamo(x) for k, x in v.items()}
+    if isinstance(v, list):
+        return [_to_dynamo(x) for x in v]
+    return v
+
+
+def _from_dynamo(v):
+    """And back: whole numbers to int, the rest to float."""
+    from decimal import Decimal
+    if isinstance(v, Decimal):
+        return int(v) if v == v.to_integral_value() else float(v)
+    if isinstance(v, dict):
+        return {k: _from_dynamo(x) for k, x in v.items()}
+    if isinstance(v, list):
+        return [_from_dynamo(x) for x in v]
+    return v
+
+
 class ProposalStore:
     """DynamoDB-backed, with the decision guarded by a conditional write."""
 
@@ -206,7 +232,7 @@ class ProposalStore:
 
     def put(self, p: Proposal) -> None:
         self.table.put_item(
-            Item={"pk": p.key, "sk": "PROPOSAL", **p.as_dict()},
+            Item=_to_dynamo({"pk": p.key, "sk": "PROPOSAL", **p.as_dict()}),
             ConditionExpression="attribute_not_exists(pk)")
 
     def get(self, proposal_id: str) -> Proposal | None:
@@ -216,7 +242,7 @@ class ProposalStore:
         if not it:
             return None
         fields = {k: v for k, v in it.items() if k not in ("pk", "sk")}
-        return Proposal(**fields)
+        return Proposal(**_from_dynamo(fields))
 
     def decide(self, proposal_id: str, action: str, *, who: str,
                now: datetime | None = None) -> Proposal:
@@ -245,7 +271,7 @@ class ProposalStore:
                 raise AlreadyDecided(existing)
             raise
         fields = {k: v for k, v in r["Attributes"].items() if k not in ("pk", "sk")}
-        return Proposal(**fields)
+        return Proposal(**_from_dynamo(fields))
 
     def pending(self, limit: int = 50, tenant: str | None = None) -> list[Proposal]:
         """Pending proposals, for one tenant or for all of them.
@@ -264,7 +290,7 @@ class ProposalStore:
             r = self.table.scan(**kwargs)
             for it in r.get("Items", []):
                 fields = {k: v for k, v in it.items() if k not in ("pk", "sk")}
-                out.append(Proposal(**fields))
+                out.append(Proposal(**_from_dynamo(fields)))
             if "LastEvaluatedKey" not in r:
                 break
             kwargs["ExclusiveStartKey"] = r["LastEvaluatedKey"]

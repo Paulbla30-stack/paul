@@ -225,7 +225,14 @@ def propose(cfg: dict, records: list[dict], *, drafter, store,
                          ("source", "external_id", "url", "score", "chain_seq")},
             now=now, purpose=purpose)
         if not dry_run:
-            store.put(proposal)
+            try:
+                store.put(proposal)
+            except Exception as exc:              # noqa: BLE001 - never the digest's problem
+                log.error("proposal for %s could not be stored, not filed: %s: %s",
+                          str(rec.get("title"))[:60], type(exc).__name__, exc)
+                stats["declined"].append({"title": str(rec.get("title"))[:120],
+                                          "reason": f"not stored: {type(exc).__name__}: {exc}"[:200]})
+                continue
         stats["proposed"] += 1
         stats["ids"].append(proposal.id)
         log.info("proposal %s filed for %s (%s, expires %s)", proposal.id,
@@ -315,8 +322,17 @@ def run(cfg: dict, *, hit_store, chain_store, mailer, now: datetime | None = Non
     # Drafting runs on what is new this run, not on the digest's selection:
     # the digest is capped for readability and this is capped for cost, and
     # conflating them would let a long digest decide how much gets written.
-    stats_propose = propose(cfg, new_records, drafter=drafter,
-                            store=proposal_store, now=now, dry_run=dry_run)
+    # Proposing is optional and the digest is not. The hits are already
+    # stored as seen, so a crash here loses the day's email for good: the
+    # retry finds nothing new (14 October 2026).
+    try:
+        stats_propose = propose(cfg, new_records, drafter=drafter,
+                                store=proposal_store, now=now, dry_run=dry_run)
+    except Exception as exc:                      # noqa: BLE001
+        log.error("proposing failed; the digest still goes: %s: %s",
+                  type(exc).__name__, exc)
+        stats_propose = {"proposed": 0, "drafted": 0,
+                         "declined": [{"title": "", "reason": f"{type(exc).__name__}: {exc}"[:200]}]}
 
     stats = {
         "first_run": first_run,

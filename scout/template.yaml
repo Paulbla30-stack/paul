@@ -133,8 +133,13 @@ Resources:
                   - dynamodb:GetItem
                   - dynamodb:PutItem
                   - dynamodb:Query
+                  - dynamodb:Scan
                   - dynamodb:TransactWriteItems
                 Resource: !GetAtt ScoutTable.Arn
+              # Scan reads pending proposals so the same paper is not proposed
+              # twice (proposals.py pending()). Without it every run since
+              # 25 Sep logged AccessDenied and guarded only within itself.
+              # Read-only, and on this table only.
               # Deliberately absent: DeleteItem and UpdateItem. The scout
               # appends; it has no reason to be able to rewrite or remove a
               # chain entry, so it is not given the ability.
