@@ -1,0 +1,128 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  Vigil connections, stage 1: the connect-broker Lambda and its table.
+  Keyless, public, read-only connections (weather, UK bank holidays,
+  Paul's own Zenodo records). Runs off Vigil's box so that later stages
+  can hold Paul's keys somewhere Vigil cannot read.
+
+  Personal to Vigil. Strictly firewalled from Arkin: the validator refuses
+  thearkinsystem.co.uk outright. Nothing here is billed by the hour.
+
+  NOT YET LINKED: no role outside this stack may invoke the function, and
+  no connection is enabled until EnabledConnections is set.
+
+Parameters:
+  EnabledConnections:
+    Type: String
+    Default: ''
+    Description: >
+      Comma-separated catalogue ids Paul has switched on, for example
+      "open_meteo,uk_bank_holidays,zenodo". Empty means every connection is
+      off. Vigil can switch a connection off; only this can switch one on.
+  ScoutTableName:
+    Type: String
+    Default: jarvis-scout
+    Description: The scout's table, read (Scan) by the "scout" connection. Never written.
+  LogRetentionDays:
+    Type: Number
+    Default: 30
+    AllowedValues: [7, 14, 30, 60, 90]
+    Description: How long the broker's own logs are kept.
+
+Globals:
+  Function:
+    Runtime: python3.12
+    Architectures: [arm64]
+    MemorySize: 256
+    Timeout: 15                    # the plan's ceiling: one bounded fetch, no retries
+
+Resources:
+
+  # One table: per-connection state (disabled, last result) and the hourly
+  # counters. On-demand billing; counters expire on their own via TTL.
+  ConnectionsTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: vigil-connections
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - {AttributeName: pk, AttributeType: S}
+        - {AttributeName: sk, AttributeType: S}
+      KeySchema:
+        - {AttributeName: pk, KeyType: HASH}
+        - {AttributeName: sk, KeyType: RANGE}
+      TimeToLiveSpecification:
+        AttributeName: expires
+        Enabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+      Tags:
+        - {Key: project, Value: vigil-connect}
+        - {Key: owner, Value: vigil}
+
+  BrokerLogs:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /aws/lambda/vigil-connect-broker
+      RetentionInDays: !Ref LogRetentionDays
+
+  BrokerFunction:
+    Type: AWS::Serverless::Function
+    DependsOn: BrokerLogs
+    Properties:
+      FunctionName: vigil-connect-broker
+      CodeUri: src/
+      Handler: app.handler
+      Description: Stage 1 keyless connections. Read-only. Holds no secrets.
+      Role: !GetAtt BrokerRole.Arn
+      Environment:
+        Variables:
+          CONNECT_TABLE: !Ref ConnectionsTable
+          ENABLED_CONNECTIONS: !Ref EnabledConnections
+      Tags:
+        project: vigil-connect
+        owner: vigil
+
+  # Least privilege. Its own table, a read-only Scan of the scout's table,
+  # and its own log group. No Secrets Manager, no model service, no role
+  # assumption. Stage 1 holds nothing worth stealing; this keeps it that way.
+  BrokerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: vigil-connect-broker-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: {Service: lambda.amazonaws.com}
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: own-table-scout-read-and-logs
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: [dynamodb:GetItem, dynamodb:PutItem, dynamodb:UpdateItem]
+                Resource: !GetAtt ConnectionsTable.Arn
+              # The scout's finds, read-only. No PutItem, UpdateItem or
+              # DeleteItem: the scout's chain is its own record.
+              - Effect: Allow
+                Action: [dynamodb:Scan]
+                Resource: !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ScoutTableName}'
+              - Effect: Allow
+                Action: [logs:CreateLogStream, logs:PutLogEvents]
+                Resource: !Sub '${BrokerLogs.Arn}:*'
+      Tags:
+        - {Key: project, Value: vigil-connect}
+
+Outputs:
+  BrokerFunctionArn:
+    Value: !GetAtt BrokerFunction.Arn
+    Description: Not granted to Vigil's instance role yet; linking is a later step.
+  ConnectionsTableName:
+    Value: !Ref ConnectionsTable

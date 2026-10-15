@@ -1,0 +1,54 @@
+#!/bin/sh
+# Vigil Agent Launcher
+# =======================
+# Wrapper script that launches the Vigil Python agent
+# with proper environment setup.
+
+set -e
+
+VIGIL_DIR="/usr/lib/vigil"
+CONFIG="/etc/vigil/config.yaml"
+LOG="/var/log/vigil.log"
+
+export PYTHONPATH="$VIGIL_DIR"
+
+# Detect environment
+if [ -n "$VIGIL_DEBUG" ] && [ "$VIGIL_DEBUG" = "1" ]; then
+    DEBUG_FLAG="--debug"
+else
+    DEBUG_FLAG=""
+fi
+
+if [ -n "$VIGIL_SCANONLY" ] && [ "$VIGIL_SCANONLY" = "1" ]; then
+    SCAN_FLAG="--scan-only"
+else
+    SCAN_FLAG=""
+fi
+
+# Check for Python (VIGIL_PYTHON wins; the AMI sets it in /etc/default/vigil)
+if [ -z "$VIGIL_PYTHON" ] && [ -r /etc/default/vigil ]; then
+    . /etc/default/vigil
+fi
+if [ -n "$VIGIL_PYTHON" ] && [ -x "$VIGIL_PYTHON" ]; then
+    PYTHON="$VIGIL_PYTHON"
+elif command -v python3 >/dev/null 2>&1; then
+    PYTHON=python3
+elif command -v python >/dev/null 2>&1; then
+    PYTHON=python
+else
+    echo "[!] ERROR: Python not found. Cannot start Vigil agent."
+    exit 1
+fi
+
+echo "[*] Starting Vigil Agent..."
+echo "[*] Python: $($PYTHON --version 2>&1)"
+echo "[*] Config: $CONFIG"
+echo ""
+
+# Under systemd stdout already goes to the journal (and the serial console
+# on the AMI), so skip the tee; on the ISO keep a file copy of the output.
+if [ -n "$JOURNAL_STREAM" ] || [ "$VIGIL_NO_TEE" = "1" ]; then
+    exec $PYTHON -m vigil.main --config "$CONFIG" $DEBUG_FLAG $SCAN_FLAG "$@"
+fi
+
+exec $PYTHON -m vigil.main --config "$CONFIG" $DEBUG_FLAG $SCAN_FLAG "$@" 2>&1 | tee -a "$LOG"

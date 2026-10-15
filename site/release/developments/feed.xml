@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
+<channel>
+  <title>The Heartbeat Framework — Developments</title>
+  <link>https://heartbeat-framework.org/developments/</link>
+  <atom:link href="https://heartbeat-framework.org/developments/feed.xml" rel="self" type="application/rss+xml"/>
+  <description>A dated, permanent record of developments on the estate: publications, external events the framework interlocks with, and releases.</description>
+  <language>en-gb</language>
+  <lastBuildDate>Tue, 15 Sep 2026 14:00:00 +0000</lastBuildDate>
+  <item>
+    <title>What the Signature Certifies: the consultation paper is published as record twenty.</title>
+    <link>https://heartbeat-framework.org/developments/what-the-signature-certifies-published/</link>
+    <guid isPermaLink="true">https://heartbeat-framework.org/developments/what-the-signature-certifies-published/</guid>
+    <pubDate>Tue, 15 Sep 2026 14:00:00 +0000</pubDate>
+    <category>Publication</category>
+    <description>NHS England is revising DCB0129 and DCB0160. The companion paper to the author’s consultation response is now open access: four asks, with the requirement-level drafting to implement them.</description>
+  </item>
+  <item>
+    <title>DSIT publishes an AI Risk Management Toolkit. It measures the machine, not the room.</title>
+    <link>https://heartbeat-framework.org/developments/dsit-ai-risk-management-toolkit/</link>
+    <guid isPermaLink="true">https://heartbeat-framework.org/developments/dsit-ai-risk-management-toolkit/</guid>
+    <pubDate>Sat, 12 Sep 2026 09:00:00 +0000</pubDate>
+    <category>External</category>
+    <description>The Department for Science, Innovation and Technology has released a risk toolkit for public-sector AI. Nine categories, all capability-side. Where the estate supplies the missing culture term.</description>
+  </item>
+  <item>
+    <title>The National Commission reports. Where the estate meets it.</title>
+    <link>https://heartbeat-framework.org/developments/mhra-national-commission-report/</link>
+    <guid isPermaLink="true">https://heartbeat-framework.org/developments/mhra-national-commission-report/</guid>
+    <pubDate>Thu, 10 Sep 2026 09:00:00 +0000</pubDate>
+    <category>External</category>
+    <description>The MHRA-hosted National Commission into the Regulation of AI in Healthcare has published its recommendations. Six of them describe gaps this estate already carries instruments for.</description>
+  </item>
+  <item>
+    <title>The Tenant’s Record published as record nineteen.</title>
+    <link>https://heartbeat-framework.org/developments/the-tenants-record-published/</link>
+    <guid isPermaLink="true">https://heartbeat-framework.org/developments/the-tenants-record-published/</guid>
+    <pubDate>Sat, 29 Aug 2026 09:00:00 +0000</pubDate>
+    <category>Publication</category>
+    <description>A working paper on tenancy and ownership: who the system serves when the system is not yours. Published open access, with a new Sovereignty page on the estate to carry the doctrine.</description>
+  </item>
+  <item>
+    <title>The Instrument Deck: all eight instruments in deployment order.</title>
+    <link>https://heartbeat-framework.org/developments/instrument-deck-published/</link>
+    <guid isPermaLink="true">https://heartbeat-framework.org/developments/instrument-deck-published/</guid>
+    <pubDate>Fri, 21 Aug 2026 09:00:00 +0000</pubDate>
+    <category>Publication</category>
+    <description>A single 38-page deck consolidating the estate’s eight instruments — Gate, Screen, Specify, Oversee, Trial, Audit, Measure, Record — in the sequence they are meant to be run.</description>
+  </item>
+</channel>
+</rss>
